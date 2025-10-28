@@ -4,41 +4,60 @@
 
 int main() {
 
-    // simualtion condig
-    double sampleTime = 0.01;
-    double finalTime  = 1.0;
-    double time       = 0.0;
+    /**
+     *  simualtion condig
+     */
+    double dt   = 0.01;  ///> sample time
+    double T    = 1.0;   ///> final simulation time
+    double time = 0.0;   ///> time of simulation
 
-    // set model
-    modelInstance* model = mallocModel();
-    model->sampleTime            = sampleTime;
-    model->parameter->k          = 1.0;        
-    model->parameter->tau        = 0.15;
-    model->states->x1            = 0.0;
-    model->stateDerivatives->dx1 = 0.0;
-    model->inputs->u             = 0.0;
+    /**
+     * system dimensions
+     */
+    size_t nx = 1;       ///> number of states
+    size_t nu = 1;       ///> number of inputs
 
-    // set model equation
+    /**
+     * initialize model
+     */
+    modelInstance* model  = newModel(dt, nx, nu);
+    model->parameter->k   = 1.0;   ///> PT1 gain
+    model->parameter->tau = 0.15;  ///> PT1 time constant
+
+    /**
+     * set initial condition
+     */
+    model->states[0] = 0.0;
+
+    /**
+     * set model equation
+     */
     model->getStateDerivatives = firstOrderSystem;
 
-    // set integrator
+    /**
+     * set integrator
+     */
     model->integrate = eulerForward;
 
-    // simulation
-    int numberOfSteps = (int) finalTime/sampleTime;
-    for (int k=0; k<numberOfSteps; k++) {
+    /**
+     * run simulationxs
+     */
+    int N = (int) T/dt;
+    for (int k=0; k<N; k++) {
         // log current state
-        printf("t = %.2f, x = %.2f\n", time, model->states->x1);
+        printf("t = %.2f, x = %.2f\n", time, model->states[0]);
 
         // set model inputs
-        model->inputs->u = 1.0;
+        model->inputs[0] = 1.0;
 
         // integrate
         model->integrate(model);
-        time += sampleTime;
+        time += dt;
     }
 
-    // end
+    /**
+     * free model memory
+     */
     freeModel(model);
 
     return 0;

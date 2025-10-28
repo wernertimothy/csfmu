@@ -3,34 +3,43 @@
 #include "model.h"
 
 
-modelInstance* mallocModel(void) {
+modelInstance* newModel(double dt, size_t nx, size_t nu) {
     modelInstance* model = malloc(sizeof(modelInstance));
     if (!model) return NULL;
+    
+    model->info = malloc(sizeof(modelInfo));
+    if (!model->info) {
+        free(model);
+        return NULL;
+    }
+    model->info->sampleTime = dt;
+    model->info->numberOfStates = nx;
+    model->info->numberOfInputs = nu;
 
     model->parameter = malloc(sizeof(modelParameter));
     if (!model->parameter) {
         freeModel(model);
         return NULL;
     }
-
-    model->states = malloc(sizeof(modelStates));
+    
+    model->states = calloc(model->info->numberOfStates, sizeof(double));
     if (!model->states) {
         freeModel(model);
         return NULL;
     }
-
-    model->stateDerivatives = malloc(sizeof(modelStateDerivatives));
+    
+    model->stateDerivatives = calloc(model->info->numberOfStates, sizeof(double));
     if (!model->stateDerivatives) {
         freeModel(model);
         return NULL;
     }
-
-    model->inputs = malloc(sizeof(modelInputs));
+    
+    model->inputs = calloc(model->info->numberOfInputs, sizeof(double));
     if (!model->inputs) {
-        free(model);
+        freeModel(model);
         return NULL;
     }
-
+    
     model->getStateDerivatives = NULL;
     model->integrate = NULL;
 
@@ -39,39 +48,30 @@ modelInstance* mallocModel(void) {
 
 void freeModel(modelInstance* model) {
     if (model) {
-        if (model->parameter) {
-            free(model->parameter);
-        }
-        if (model->states) {
-            free(model->states);
-        }
-        if (model->stateDerivatives) {
-            free(model->stateDerivatives);
-        }
-        if (model->inputs) {
-            free(model->inputs);
-        }
+        if (model->parameter) free(model->parameter);
+        if (model->info) free(model->info);
+        if (model->states) free(model->states);
+        if (model->stateDerivatives) free(model->stateDerivatives);
+        if (model->inputs) free(model->inputs);
         free(model);
     }
-}
-
-void integrateModel(modelInstance* model, modelInputs* inputs) {
-    double dx_dt = (-model->states->x1 + model->parameter->k * inputs->u)/model->parameter->tau;
-    model->states->x1 += dx_dt * model->sampleTime;
 }
 
 void eulerForward(modelInstance* model) {
     // calculate time derivative dx/dt
     model->getStateDerivatives(model);
     // integrate using simple euler forward
-    model->states->x1 += model->stateDerivatives->dx1 * model->sampleTime;
+    double dt = model->info->sampleTime;
+    for (int k=0; k<model->info->numberOfStates; k++) {
+        model->states[k] += model->stateDerivatives[k] * dt;
+    }
 }
 
 void firstOrderSystem(modelInstance* model) {
-    double x1 = model->states->x1;
-    double u = model->inputs->u;
+    double x1 = model->states[0];
+    double u = model->inputs[0];
     double tau = model->parameter->tau;
     double k = model->parameter->k;
     double dx1 = (-x1+k*u)/tau;
-    model->stateDerivatives->dx1 = dx1;
+    model->stateDerivatives[0] = dx1;
 }
