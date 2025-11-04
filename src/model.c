@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include "model.h"
 
-
+/**
+ * Create a new instance of a model
+ */
 modelInstance* newModel(double dt, size_t nx, size_t nu) {
     modelInstance* model = malloc(sizeof(modelInstance));
     if (!model) return NULL;

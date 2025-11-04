@@ -70,3 +70,31 @@ install(TARGETS ${LIB_NAME}
     LIBRARY DESTINATION binaries/${FMI_PLATFORM}
     RUNTIME DESTINATION binaries/${FMI_PLATFORM}
 )
+
+# FMU Packaging
+# Check for virtual environment Python first
+if(WIN32)
+    set(VENV_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe")
+else()
+    set(VENV_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python3")
+endif()
+
+if(EXISTS ${VENV_PYTHON})
+    set(Python3_EXECUTABLE ${VENV_PYTHON})
+    message(STATUS "Using virtual environment Python: ${VENV_PYTHON}")
+else()
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    message(STATUS "Using system Python: ${Python3_EXECUTABLE}")
+endif()
+
+add_custom_command(
+    TARGET ${LIB_NAME} POST_BUILD
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package_fmu.py
+        $<TARGET_FILE:${LIB_NAME}>
+        ${CMAKE_CURRENT_SOURCE_DIR}/config/modelDescription.xml
+        ${CMAKE_BINARY_DIR}
+        ${LIB_NAME}
+    COMMENT "Packaging FMU..."
+    VERBATIM
+)

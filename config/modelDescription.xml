@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fmiModelDescription
+    fmiVersion="2.0"
+    modelName="fmuTemplate"
+    guid="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}">
+
+    <CoSimulation
+        modelIdentifier="fmuTemplate"
+        canHandleVariableCommunicationStepSize="true">
+    </CoSimulation>
+
+    <ModelVariables>
+        
+        <!-- Parameter: Time constant -->
+        <ScalarVariable
+            name="tau"
+            valueReference="0"
+            causality="parameter"
+            variability="fixed">
+            <Real start="1.0"/>
+        </ScalarVariable>
+
+        <!-- Parameter: Gain -->
+        <ScalarVariable
+            name="k"
+            valueReference="1"
+            causality="parameter"
+            variability="fixed">
+            <Real start="1.0"/>
+        </ScalarVariable>
+
+        <!-- Input -->
+        <ScalarVariable
+            name="u"
+            valueReference="2"
+            causality="input">
+            <Real start="0.0"/>
+        </ScalarVariable>
+
+        <!-- Output -->
+        <ScalarVariable
+            name="y"
+            valueReference="3"
+            causality="output">
+            <Real />
+        </ScalarVariable>
+
+    </ModelVariables>
+
+    <ModelStructure>
+        <Outputs>
+            <Unknown index="4"/>
+        </Outputs>
+    </ModelStructure>
+
+</fmiModelDescription>

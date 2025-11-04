@@ -1,5 +1,5 @@
 #ifndef FMI2ADAPTER_H
-#define FMI2ADAPTER_h
+#define FMI2ADAPTER_H
 
 #include "fmi2Functions.h"
 #include "model.h"
