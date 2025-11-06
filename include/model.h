@@ -18,16 +18,14 @@ typedef struct {
     // size and dimension
     size_t numberOfStates; ///> state dimension
     size_t numberOfInputs; ///> input dimension
-    // discretization
-    double sampleTime;
 } modelInfo;
 
 
 typedef void (*getStateDerivatives)(modelInstance*);
-typedef void (*integrate)(modelInstance*);
+typedef void (*integrate)(modelInstance*, double);
 
 // === memory management ===
-modelInstance* newModel(double dt, size_t nx, size_t nu);
+modelInstance* newModel(size_t nx, size_t nu);
 void freeModel(modelInstance* model);
 
 /**
@@ -49,7 +47,7 @@ struct modelInstance {
 /**
  * Euler Forward x+ = x + dt*dt
  */
-void eulerForward(modelInstance* model);
+void eulerForward(modelInstance* model, double stepSize);
 
 // === model implementations ===
 

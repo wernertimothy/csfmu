@@ -5,7 +5,7 @@
 /**
  * Create a new instance of a model
  */
-modelInstance* newModel(double dt, size_t nx, size_t nu) {
+modelInstance* newModel(size_t nx, size_t nu) {
     modelInstance* model = malloc(sizeof(modelInstance));
     if (!model) return NULL;
     
@@ -14,7 +14,6 @@ modelInstance* newModel(double dt, size_t nx, size_t nu) {
         free(model);
         return NULL;
     }
-    model->info->sampleTime = dt;
     model->info->numberOfStates = nx;
     model->info->numberOfInputs = nu;
 
@@ -59,21 +58,20 @@ void freeModel(modelInstance* model) {
     }
 }
 
-void eulerForward(modelInstance* model) {
+void eulerForward(modelInstance* model, double stepSize) {
     // calculate time derivative dx/dt
     model->getStateDerivatives(model);
     // integrate using simple euler forward
-    double dt = model->info->sampleTime;
     for (int k=0; k<model->info->numberOfStates; k++) {
-        model->states[k] += model->stateDerivatives[k] * dt;
+        model->states[k] += model->stateDerivatives[k] * stepSize;
     }
 }
 
 void firstOrderSystem(modelInstance* model) {
-    double x1 = model->states[0];
-    double u = model->inputs[0];
+    double x1  = model->states[0];
+    double u   = model->inputs[0];
     double tau = model->parameter->tau;
-    double k = model->parameter->k;
+    double k   = model->parameter->k;
     double dx1 = (-x1+k*u)/tau;
     model->stateDerivatives[0] = dx1;
 }

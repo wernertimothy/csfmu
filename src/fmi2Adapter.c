@@ -43,11 +43,14 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
         return NULL;
     }
 
-    myfmu2->model = newModel(FIXED_STEP_SIZE, NUMBER_OF_STATES, NUMBER_OF_INPUTS);
+    myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS);
     if (!myfmu2->model) {
         free(myfmu2); //TODO: use fmi2FreeInstance()
         return NULL;
     }
+
+    myfmu2->instanceName = instanceName; // TODO: Maybe us strcpy ?
+    myfmu2->fmuType      = fmuType;
 
     return (fmi2Component)myfmu2;
 }
@@ -62,3 +65,4 @@ void fmi2FreeInstance(fmi2Component c) {
         free(myfmu2);
     }
 }
+

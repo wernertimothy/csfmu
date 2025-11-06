@@ -8,6 +8,9 @@
  * An instance of the FMU2
  */
 typedef struct {
+    // TODO : sort by size to minimize padding
+    fmi2String instanceName; ///> Name of the FMU
+    fmi2Type fmuType; ///> CS of ME
 
     modelInstance* model; ///> Instance of the model
 } myFMU2;

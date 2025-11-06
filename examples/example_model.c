@@ -20,7 +20,7 @@ int main() {
     /**
      * initialize model
      */
-    modelInstance* model  = newModel(dt, nx, nu);
+    modelInstance* model  = newModel(nx, nu);
     model->parameter->k   = 1.0;   ///> PT1 gain
     model->parameter->tau = 0.15;  ///> PT1 time constant
 
@@ -51,7 +51,7 @@ int main() {
         model->inputs[0] = 1.0;
 
         // integrate
-        model->integrate(model);
+        model->integrate(model, dt);
         time += dt;
     }
 
