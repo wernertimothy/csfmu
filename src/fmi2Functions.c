@@ -1,7 +1,19 @@
 
-#include "fmi2Adapter.h"
+#include <string.h>
+#include "fmi2Functions.h"
 #include "modelConfig.h"
 #include "model.h"
+
+/**
+ * An instance of the FMU2
+ */
+typedef struct {
+    // TODO : sort by size to minimize padding
+    fmi2String instanceName; ///> Name of the FMU
+    fmi2Type fmuType;        ///> CS of ME
+
+    modelInstance* model;    ///> Instance of the model
+} myFMU2;
 
 /**
  * Identify fmi2TypesPlatform.h
@@ -38,20 +50,24 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
                               const fmi2CallbackFunctions* functions,
                               fmi2Boolean visible,
                               fmi2Boolean loggingOn) {
+    /* compare model guid against modelDescription guid */
+    if (strcmp(fmuGUID, GUID) != 0) {
+        return NULL;
+    }
+    /* create an FMU2 instance */
     myFMU2* myfmu2 = malloc(sizeof(myFMU2));
     if (!myfmu2) {
         return NULL;
     }
-
+    /* create a model instance */
     myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS);
     if (!myfmu2->model) {
         free(myfmu2); //TODO: use fmi2FreeInstance()
         return NULL;
     }
-
+    /* fill the fmu with data */
     myfmu2->instanceName = instanceName; // TODO: Maybe us strcpy ?
     myfmu2->fmuType      = fmuType;
-
     return (fmi2Component)myfmu2;
 }
 

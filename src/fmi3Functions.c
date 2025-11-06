@@ -1,6 +1,21 @@
 
-#include "fmi3Adapter.h"
+#include "fmi3Functions.h"
 #include "modelConfig.h"
+#include "model.h"
+
+/**
+ * An instance of the FMU3
+ */
+typedef struct {
+    fmi3String instanceName;                      ///> Name of the FMU
+    fmi3String instantiationToken;                ///> ID to match the modelDescription.xml
+    
+    fmi3LogMessageCallback logMessage;            ///> logging function
+    fmi3InstanceEnvironment instanceEnvironment;  ///> ?
+    
+    modelInstance* model;                         ///> Instance of the model
+    
+} myFMU3;
 
 /**
  * Get FMI Version
@@ -50,7 +65,7 @@ fmi3Instance fmi3InstantiateCoSimulation(
     myfmu3->instanceEnvironment = instanceEnvironment;
     
     // Create a model instance
-    myfmu3->model = newModel(FIXED_STEP_SIZE, NUMBER_OF_STATES, NUMBER_OF_INPUTS);
+    myfmu3->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS);
     if (!myfmu3->model) {
         freeModel(myfmu3->model);
         fmi3FreeInstance(myfmu3);
