@@ -1,7 +1,7 @@
 
 #include <string.h>
 #include "fmi2Functions.h"
-#include "modelConfig.h"
+#include "config.h"
 #include "model.h"
 
 /**

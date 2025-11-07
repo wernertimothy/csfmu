@@ -1,6 +1,6 @@
 
 #include "fmi3Functions.h"
-#include "modelConfig.h"
+#include "config.h"
 #include "model.h"
 
 /**
