@@ -17,9 +17,11 @@ If not, go here to read more about [Co-Sim FMUs][].
 
 This is the best place for [getting started][].
 
+## API Reference
+
+To get an overview over the implemented fmi functions, take a look at the reference for [fmi2][] or [fmi3][]
+
 ## Usage
-
-
 
 ## key ideas
 * every model has inputs, outputs, states and parameter
@@ -28,3 +30,5 @@ This is the best place for [getting started][].
 
 [getting started]: docs/fmuTemplate_gettingStarted.md
 [Co-Sim FMUs]: docs/fmuTemplate_coSimFMUs.md
+[fmi2]: docs/fmuTemplate_fmi2Reference.md
+[fmi3]: docs/fmuTemplate_fmi3Reference.md
