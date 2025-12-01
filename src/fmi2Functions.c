@@ -15,14 +15,18 @@ typedef struct {
 
     /* experiment */
     fmi2Real startTime; ///> start time of experiment
-    fmi2Real stopTime; ///> stop time of experiment
-    fmi2Real time; ///> internal clock
+    fmi2Real stopTime;  ///> stop time of experiment
+    fmi2Real time;      ///> internal clock
 
     /* functions */
-    fmi2CallbackLogger logger;
+    fmi2CallbackLogger         logger;               ///> Logger callback
+    fmi2CallbackAllocateMemory allocateMemory;       ///> allocate memory callback
+    fmi2CallbackFreeMemory     freeMemory;           ///> free memory callback
+    fmi2StepFinished           stepFinished;         ///> asynchronous co-simualtion
+    fmi2ComponentEnvironment   componentEnvironment; ///> integration tool context
 
     /* model */
-    modelInstance* model;    ///> Instance of the model
+    modelInstance* model; ///> Instance of the model
 } myFMU2;
 
 /**
@@ -68,19 +72,17 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
     if (!functions->logger) {
         return NULL;
     }
-    /* is componentEnvironment implemented ? */
-    if (!functions->componentEnvironment) {
-        return NULL;
-    }
     /* is allocateMemory implemented ? */
     if (!functions->allocateMemory) {
         fmi2String message = "allocateMemory not implemented.";
         functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, message);
+        return NULL;
     }
     /* is freeMemory implemented ? */
     if (!functions->freeMemory) {
         fmi2String message = "freeMemory not implemented.";
         functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, message);
+        return NULL;
     }
     /* compare model guid against modelDescription guid */
     if (strcmp(fmuGUID, GUID) != 0) {
@@ -89,25 +91,36 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
         return NULL;
     }
     /* create an FMU2 instance */
-    myFMU2* myfmu2 = malloc(sizeof(myFMU2));
+    myFMU2* myfmu2 = functions->allocateMemory(1,sizeof(myFMU2));
     if (!myfmu2) {
-        fmi2String messag = "Unable to allocate FMU2 instance.";
-        functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, messag);
+        fmi2String message = "Unable to allocate memory for FMU2 instance.";
+        functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, message);
         return NULL;
     }
+    memset(myfmu2, 0, sizeof(myFMU2)); ///> initialize all fields to zero to avoid garbage values
+    /* set fmu2 callbacks */
+    myfmu2->logger               = functions->logger;
+    myfmu2->allocateMemory       = functions->allocateMemory;
+    myfmu2->freeMemory           = functions->freeMemory;
+    myfmu2->stepFinished         = NULL;                            ///> only synchronous co-simulation support
+    myfmu2->componentEnvironment = functions->componentEnvironment; ///> No check needed, can be NULL
     /* create a model instance */
     myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS);
     if (!myfmu2->model) {
-        fmi2String message = "Unable to allocate model instance.";
+        fmi2String message = "Unable to allocate memory for model instance.";
         functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, message);
         fmi2FreeInstance((fmi2Component)myfmu2);
         return NULL;
     }
     /* fill the fmu with data */
-    myfmu2->instanceName = instanceName; // TODO: Maybe us strcpy ?
-    myfmu2->fmuType      = fmuType;
-
-    myfmu2->logger       = functions->logger;
+    myfmu2->instanceName   = strdup(instanceName);
+    if (!myfmu2->instanceName) {
+        fmi2String message = "Unable to allocate memory for instance name.";
+        functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, message);
+        fmi2FreeInstance((fmi2Component)myfmu2);
+        return NULL;
+    }
+    myfmu2->fmuType = fmuType;
     return (fmi2Component)myfmu2;
 }
 
@@ -117,8 +130,9 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
 void fmi2FreeInstance(fmi2Component c) {
     if (c) {
         myFMU2* myfmu2 = (myFMU2*)c;
+        if (myfmu2->instanceName) myfmu2->freeMemory((void*)myfmu2->instanceName);
         freeModel(myfmu2->model);
-        free(myfmu2);
+        myfmu2->freeMemory((void*)myfmu2);
     }
 }
 
@@ -131,11 +145,32 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
                                fmi2Real startTime,
                                fmi2Boolean stopTimeDefined,
                                fmi2Real stopTime) {
-    myFMU2* myfmu2    = (myFMU2*)c;
-    myfmu2->startTime = startTime;
-    myfmu2->stopTime  = stopTime;
-    myfmu2->time      = startTime;
+    if (!c) {
+        return fmi2Error;
+    }
+    /* unused parameter */
+    (void)toleranceDefined;
+    (void)tolerance;        // integration error tollerace. Irrelevant in co-simulation
 
+    myFMU2* myfmu2 = (myFMU2*)c;
+    
+    if (stopTimeDefined) {
+        if (stopTime > startTime) {
+            myfmu2->stopTime  = stopTime;
+        } else {
+            fmi2String message = "stopTime must be greater than startTime.";
+            myfmu2->logger(
+                myfmu2->componentEnvironment,
+                myfmu2->instanceName,
+                fmi2Error,
+                LOG_ERROR,
+                message
+            );
+            return fmi2Error;
+        }
+    }
+    myfmu2->startTime = startTime;
+    myfmu2->time      = startTime;
     return fmi2OK;
 }
 
