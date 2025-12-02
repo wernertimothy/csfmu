@@ -18,6 +18,9 @@ typedef struct {
     fmi2Real stopTime;  ///> stop time of experiment
     fmi2Real time;      ///> internal clock
 
+    /* logging */
+    unsigned int logLevel; ///> bitmask of current log level
+
     /* functions */
     fmi2CallbackLogger         logger;               ///> Logger callback
     fmi2CallbackAllocateMemory allocateMemory;       ///> allocate memory callback
@@ -28,6 +31,30 @@ typedef struct {
     /* model */
     modelInstance* model; ///> Instance of the model
 } myFMU2;
+
+/**
+ * logCategories enum
+ */
+typedef enum {
+    logNone                  = 0,
+    logEvents                = 1 << 0,
+    logSingularLinearSystems = 1 << 1,
+    logNonlinearSystems      = 1 << 2,
+    logDynamicStateSelection = 1 << 3,
+    logStatusWarning         = 1 << 4,
+    logStatusDiscard         = 1 << 5,
+    logStatusError           = 1 << 6,
+    logStatusFatal           = 1 << 7,
+    logStatusPending         = 1 << 8,
+    logAll                   = (1 << 9) - 1 
+} logCategory;
+
+/**
+ * helper function to check log category
+ */
+static inline fmi2Boolean logCategoryActive(myFMU2* fmu, logCategory category) {
+    return (fmu->logLevel & category);
+}
 
 /**
  * Identify fmi2TypesPlatform.h
@@ -44,13 +71,69 @@ const char* fmi2GetVersion(void) {
 }
 
 /**
- * TODO
+ * Control which categories will be logged
+ * The following categories are defined (see fmi2 2.2.4)
+ * - logEvents    
+ * - logSingularLinearSystems    // not supported
+ * - logNonlinearSystems         // not supported
+ * - logDynamicStateSelection    // not supported 
+ * - logStatusWarning            
+ * - logStatusDiscard            // not supported 
+ * - logStatusError              // always
+ * - logStatusFatal              // not supported 
+ * - logStatusPending            // not supported 
+ * - logAll 
  */
 fmi2Status fmi2SetDebugLogging(fmi2Component c,
                                fmi2Boolean loggingOn,
                                size_t nCategories,
                                const fmi2String categories[]) {
-    // TODO
+    /* validate fmi2Component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    /* validate categories */
+    if (nCategories > 0 && categories == NULL) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* set log categories */
+    myfmu2->logLevel = logNone; // disable all categories
+
+    if (loggingOn) {
+        if (nCategories==0) {
+            /* set all categrories */
+            myfmu2->logLevel = logAll;
+        } else {
+            /* set all specified categories */
+            for(size_t i=0; i<nCategories; i++) {
+                if (strcmp(categories[i],        "logEvents")                == 0) {
+                    myfmu2->logLevel |= logEvents;
+                } else if (strcmp(categories[i], "logSingularLinearSystems") == 0) {
+                    myfmu2->logLevel |= logSingularLinearSystems;
+                } else if (strcmp(categories[i], "logNonlinearSystems")      == 0) {
+                    myfmu2->logLevel |= logNonlinearSystems;
+                } else if (strcmp(categories[i], "logDynamicStateSelection") == 0) {
+                    myfmu2->logLevel |= logDynamicStateSelection;
+                } else if (strcmp(categories[i], "logStatusWarning")         == 0) {
+                    myfmu2->logLevel |= logStatusWarning;
+                } else if (strcmp(categories[i], "logStatusDiscard")         == 0) {
+                    myfmu2->logLevel |= logStatusDiscard;
+                } else if (strcmp(categories[i], "logStatusError")           == 0) {
+                    myfmu2->logLevel |= logStatusError;
+                } else if (strcmp(categories[i], "logStatusFatal")           == 0) {
+                    myfmu2->logLevel |= logStatusFatal;
+                } else if (strcmp(categories[i], "logStatusPending")         == 0) {
+                    myfmu2->logLevel |= logStatusPending;
+                } else if (strcmp(categories[i], "logAll")                   == 0) {
+                    myfmu2->logLevel |= logAll;
+                }
+            }
+        }
+    }
     return fmi2OK;
 }
 
@@ -121,6 +204,7 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
         return NULL;
     }
     myfmu2->fmuType = fmuType;
+    myfmu2->logLevel = logStatusError; // set logStatusError 
     return (fmi2Component)myfmu2;
 }
 
@@ -158,14 +242,16 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
         if (stopTime > startTime) {
             myfmu2->stopTime  = stopTime;
         } else {
-            fmi2String message = "stopTime must be greater than startTime.";
-            myfmu2->logger(
-                myfmu2->componentEnvironment,
-                myfmu2->instanceName,
-                fmi2Error,
-                LOG_ERROR,
-                message
-            );
+            if (logCategoryActive(myfmu2, logStatusError)) {
+                fmi2String message = "stopTime must be greater than startTime.";
+                myfmu2->logger(
+                    myfmu2->componentEnvironment,
+                    myfmu2->instanceName,
+                    fmi2Error,
+                    LOG_ERROR,
+                    message
+                );
+            }
             return fmi2Error;
         }
     }

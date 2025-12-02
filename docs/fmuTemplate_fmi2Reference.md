@@ -11,6 +11,7 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
   - [fmi2Instantiate](#fmi2instantiate)
   - [fmi2FreeInstance](#fmi2freeinstance)
   - [fmi2SetupExperiment](#fmi2setupexperiment)
+  - [fmi2SetDebugLogging](#fmi2setdebuglogging)
 
 ---
 
@@ -304,7 +305,115 @@ if (status != fmi2OK) {
 - Must be called before `fmi2EnterInitializationMode`
 - `tolerance` is typically undefined for co-simulation (solver-specific)
 - Internally stores `startTime`, `stopTime`, and initializes internal time clock to `startTime`
-- Currently does **not validate** that `startTime < stopTime` (potential improvement)
+- Currently validates that `startTime < stopTime` and returns error if violated
 - The time values are in seconds (SI units as per FMI standard)
+
+---
+
+### fmi2SetDebugLogging
+
+Controls which log categories are active during simulation.
+
+#### Signature
+```c
+fmi2Status fmi2SetDebugLogging(fmi2Component c,
+                               fmi2Boolean loggingOn,
+                               size_t nCategories,
+                               const fmi2String categories[]);
+```
+
+#### Description
+Enables or disables logging and controls which message categories are logged. The integration tool calls this to adjust logging verbosity dynamically during simulation - for example, enabling detailed logging only when debugging specific issues, or disabling all logging for performance in production.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `loggingOn` | `fmi2Boolean` | `fmi2True` to enable logging, `fmi2False` to disable all logging |
+| `nCategories` | `size_t` | Number of category strings in the `categories` array |
+| `categories` | `const fmi2String[]` | Array of category names to enable (can be `NULL` if `nCategories == 0`) |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Logging configuration updated successfully |
+| `fmi2Error` | Invalid parameters (NULL component or NULL categories with nCategories > 0) |
+
+#### FMI State Requirements
+**Can be called in**: Any state after instantiation (very flexible)
+**State transitions**: None (configuration function only)
+
+#### Behavior
+
+The function has three distinct behaviors based on parameters:
+
+1. **Disable all logging** (`loggingOn == fmi2False`):
+   - Ignores `nCategories` and `categories`
+   - No log messages will be produced
+
+2. **Enable all categories** (`loggingOn == fmi2True` and `nCategories == 0`):
+   - `categories` can be `NULL`
+   - All log categories become active
+
+3. **Enable specific categories** (`loggingOn == fmi2True` and `nCategories > 0`):
+   - Only the specified categories become active
+   - Unknown category names are silently ignored (best effort)
+
+#### Log Categories
+
+This FMU supports the following standard FMI 2.0 categories (from spec section 2.2.4):
+
+**Supported:**
+- `logAll` - Enable all categories
+- `logEvents` - Event detection and handling
+- `logStatusWarning` - Warning messages
+- `logStatusError` - Error messages (always enabled by default)
+
+**Defined but not supported** (silently ignored):
+- `logSingularLinearSystems`
+- `logNonlinearSystems`
+- `logDynamicStateSelection`
+- `logStatusDiscard`
+- `logStatusFatal`
+- `logStatusPending`
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+
+// Example 1: Enable only error logging (default)
+fmi2String errorOnly[] = {"logStatusError"};
+fmi2SetDebugLogging(fmu, fmi2True, 1, errorOnly);
+
+// Example 2: Enable all logging for debugging
+fmi2SetDebugLogging(fmu, fmi2True, 0, NULL);  // nCategories=0 means all
+
+// Example 3: Enable specific categories
+fmi2String categories[] = {"logStatusError", "logEvents"};
+fmi2SetDebugLogging(fmu, fmi2True, 2, categories);
+
+// Example 4: Disable all logging for performance
+fmi2SetDebugLogging(fmu, fmi2False, 0, NULL);
+
+// Example 5: Change logging during simulation
+fmi2DoStep(fmu, 0.0, 0.1, fmi2True);
+// ... enable verbose logging for next step
+fmi2String verbose[] = {"logAll"};
+fmi2SetDebugLogging(fmu, fmi2True, 1, verbose);
+fmi2DoStep(fmu, 0.1, 0.1, fmi2True);
+```
+
+#### Related Functions
+- [`fmi2Instantiate`](#fmi2instantiate) - Logger callback is set during instantiation
+- All functions that log messages use the active categories to filter output
+
+#### Notes
+- **Implementation uses bitmask**: Categories are stored as bit flags for efficient checking (`unsigned int logLevel`)
+- **Helper function available**: Internal `logCategoryActive(fmu, category)` checks if a category is enabled
+- **Thread-safe**: Can be called from any thread (though the logger callback itself must be thread-safe)
+- **Dynamic control**: Integration tools can enable verbose logging only during problematic simulation periods
+- **Categories parameter can be NULL**: When `nCategories == 0`, NULL is valid and means "enable all"
+- **Unknown categories ignored**: Per FMI spec, best effort - unrecognized category names don't cause errors
+- **Default logging**: Errors are logged by default even if no categories explicitly enabled
 
 ---
