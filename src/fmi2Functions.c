@@ -69,6 +69,21 @@ static inline fmi2Boolean logCategoryActive(myFMU2* fmu, logCategory category) {
 }
 
 /**
+ * helper function to log an error
+ */
+static inline void logErrorMessage(myFMU2* fmu, fmi2String message) {
+    if (logCategoryActive(fmu, logStatusError)) {
+        fmu->logger(
+            fmu->componentEnvironment,
+            fmu->instanceName,
+            fmi2Error,
+            LOG_ERROR,
+            message
+        );
+    }
+}
+
+/**
  * Identify fmi2TypesPlatform.h
  */
 const char* fmi2GetTypesPlatform(void) {
@@ -257,31 +272,15 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
 
     /* fmu needs to be fully instantiated (fmi2 2.1.6) */
     if (!(myfmu2->state & stateInstantiated)) {
-        if (logCategoryActive(myfmu2, logStatusError)) {
-            fmi2String message = "FMU needs to be instantiated before calling fmi2SetupExperiment.";
-            myfmu2->logger(
-                myfmu2->componentEnvironment,
-                myfmu2->instanceName,
-                fmi2Error,
-                LOG_ERROR,
-                message
-            );
-        }
+        fmi2String message = "FMU needs to be instantiated before calling fmi2SetupExperiment.";
+        logErrorMessage(myfmu2, message);
         return fmi2Error;
     }
 
     /* fmu must not be in initialization (fmi2 2.1.6) */
     if (myfmu2->state & stateInitializationMode) {
-        if (logCategoryActive(myfmu2, logStatusError)) {
-            fmi2String message = "fmi2SetupExperiment must be called before fmu is initialized.";
-            myfmu2->logger(
-                myfmu2->componentEnvironment,
-                myfmu2->instanceName,
-                fmi2Error,
-                LOG_ERROR,
-                message
-            );
-        }
+        fmi2String message = "fmi2SetupExperiment must be called before fmu is initialized.";
+        logErrorMessage(myfmu2, message);
         return fmi2Error;
     }
     
@@ -289,16 +288,8 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
         if (stopTime > startTime) {
             myfmu2->stopTime  = stopTime;
         } else {
-            if (logCategoryActive(myfmu2, logStatusError)) {
-                fmi2String message = "stopTime must be greater than startTime.";
-                myfmu2->logger(
-                    myfmu2->componentEnvironment,
-                    myfmu2->instanceName,
-                    fmi2Error,
-                    LOG_ERROR,
-                    message
-                );
-            }
+            fmi2String message = "stopTime must be greater than startTime.";
+            logErrorMessage(myfmu2, message);
             return fmi2Error;
         }
     }
@@ -321,16 +312,8 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
 
     /* fmu needs to be fully instantiated (fmi2 2.1.6) */
     if (!(myfmu2->state & stateInstantiated)) {
-        if (logCategoryActive(myfmu2, logStatusError)) {
-            fmi2String message = "FMU needs to be instantiated before calling fmi2EnterInitializationMode.";
-            myfmu2->logger(
-                myfmu2->componentEnvironment,
-                myfmu2->instanceName,
-                fmi2Error,
-                LOG_ERROR,
-                message
-            );
-        }
+        fmi2String message = "FMU needs to be instantiated before calling fmi2EnterInitializationMode.";
+        logErrorMessage(myfmu2, message);
         return fmi2Error;
     }
 
@@ -364,16 +347,8 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
     myFMU2* myfmu2 = (myFMU2*)c;
 
     if (!(myfmu2->state & stateInitializationMode)) {
-        if (logCategoryActive(myfmu2, logStatusError)) {
-            fmi2String message = "Need to call fmi2EnterInitializationMode before calling fmi2ExitInitializationMode.";
-            myfmu2->logger(
-                myfmu2->componentEnvironment,
-                myfmu2->instanceName,
-                fmi2Error,
-                LOG_ERROR,
-                message
-            );
-        }
+        fmi2String message = "Need to call fmi2EnterInitializationMode before calling fmi2ExitInitializationMode.";
+        logErrorMessage(myfmu2, message);
         return fmi2Error;
     }
 
