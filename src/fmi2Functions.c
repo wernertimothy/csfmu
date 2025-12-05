@@ -11,7 +11,7 @@ typedef struct {
     // TODO : sort by size to minimize padding
     /* meta data */
     fmi2String instanceName; ///> Name of the FMU
-    fmi2Type fmuType;        ///> CS of ME
+    fmi2Type fmuType;        ///> CS or ME
 
     /* experiment */
     fmi2Real startTime; ///> start time of experiment
@@ -20,6 +20,9 @@ typedef struct {
 
     /* logging */
     unsigned int logLevel; ///> bitmask of current log level
+
+    /* fmu state */
+    unsigned int state; ///> tracks the current state of the fmu
 
     /* functions */
     fmi2CallbackLogger         logger;               ///> Logger callback
@@ -48,6 +51,15 @@ typedef enum {
     logStatusPending         = 1 << 8,
     logAll                   = (1 << 9) - 1 
 } logCategory;
+
+/**
+ * fmu state enum
+ */
+typedef enum {
+    stateInstantiated       = 1 << 0, // set by fmi2Instantiate
+    stateInitializationMode = 1 << 1, // set by fmi2EnterInitializationMode
+    stateInitialized        = 1 << 2, // set by fmi2ExitInitializationMode
+} stateCategory;
 
 /**
  * helper function to check log category
@@ -79,7 +91,7 @@ const char* fmi2GetVersion(void) {
  * - logDynamicStateSelection    // not supported 
  * - logStatusWarning            
  * - logStatusDiscard            // not supported 
- * - logStatusError              // always
+ * - logStatusError              
  * - logStatusFatal              // not supported 
  * - logStatusPending            // not supported 
  * - logAll 
@@ -131,6 +143,7 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
                 } else if (strcmp(categories[i], "logAll")                   == 0) {
                     myfmu2->logLevel |= logAll;
                 }
+                /* silently ignore unknown log categories */
             }
         }
     }
@@ -188,7 +201,7 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
     myfmu2->stepFinished         = NULL;                            ///> only synchronous co-simulation support
     myfmu2->componentEnvironment = functions->componentEnvironment; ///> No check needed, can be NULL
     /* create a model instance */
-    myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS);
+    myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS, NUMBER_OF_PARAMS);
     if (!myfmu2->model) {
         fmi2String message = "Unable to allocate memory for model instance.";
         functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, message);
@@ -203,8 +216,12 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
         fmi2FreeInstance((fmi2Component)myfmu2);
         return NULL;
     }
-    myfmu2->fmuType = fmuType;
-    myfmu2->logLevel = logStatusError; // set logStatusError 
+    myfmu2->fmuType   = fmuType;
+    myfmu2->logLevel  = logStatusError; // set logStatusError per default
+    myfmu2->time      = 0.0;
+
+    /* fmu succsessfully instantiated */
+    myfmu2->state = stateInstantiated;
     return (fmi2Component)myfmu2;
 }
 
@@ -237,6 +254,36 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
     (void)tolerance;        // integration error tollerace. Irrelevant in co-simulation
 
     myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* fmu needs to be fully instantiated (fmi2 2.1.6) */
+    if (!(myfmu2->state & stateInstantiated)) {
+        if (logCategoryActive(myfmu2, logStatusError)) {
+            fmi2String message = "FMU needs to be instantiated before calling fmi2SetupExperiment.";
+            myfmu2->logger(
+                myfmu2->componentEnvironment,
+                myfmu2->instanceName,
+                fmi2Error,
+                LOG_ERROR,
+                message
+            );
+        }
+        return fmi2Error;
+    }
+
+    /* fmu must not be in initialization (fmi2 2.1.6) */
+    if (myfmu2->state & stateInitializationMode) {
+        if (logCategoryActive(myfmu2, logStatusError)) {
+            fmi2String message = "fmi2SetupExperiment must be called before fmu is initialized.";
+            myfmu2->logger(
+                myfmu2->componentEnvironment,
+                myfmu2->instanceName,
+                fmi2Error,
+                LOG_ERROR,
+                message
+            );
+        }
+        return fmi2Error;
+    }
     
     if (stopTimeDefined) {
         if (stopTime > startTime) {
@@ -264,7 +311,44 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
  * Enter initialization mode
  */
 fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
-    // TODO
+
+    /* validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+    
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* fmu needs to be fully instantiated (fmi2 2.1.6) */
+    if (!(myfmu2->state & stateInstantiated)) {
+        if (logCategoryActive(myfmu2, logStatusError)) {
+            fmi2String message = "FMU needs to be instantiated before calling fmi2EnterInitializationMode.";
+            myfmu2->logger(
+                myfmu2->componentEnvironment,
+                myfmu2->instanceName,
+                fmi2Error,
+                LOG_ERROR,
+                message
+            );
+        }
+        return fmi2Error;
+    }
+
+    /* set initialization mode */
+    myfmu2->state |= stateInitializationMode;
+
+    /* initialize states */
+    memcpy(myfmu2->model->states, INITIAL_STATE, NUMBER_OF_STATES*sizeof(double));
+
+    /* initialize parameters */
+    memcpy(myfmu2->model->parameter, INITIAL_PARAMS, NUMBER_OF_PARAMS*sizeof(double));
+
+    /* state equation */
+    myfmu2->model->getStateDerivatives = MODEL_STATE_EQUATION;
+
+    /* integrator */
+    myfmu2->model->integrate = INTEGRATOR_METHOD;
+
     return fmi2OK;
 }
 

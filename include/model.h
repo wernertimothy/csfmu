@@ -16,8 +16,9 @@ typedef struct modelParameter modelParameter;
  */
 typedef struct {
     // size and dimension
-    size_t numberOfStates; ///> state dimension
-    size_t numberOfInputs; ///> input dimension
+    size_t numberOfStates;    ///> state dimension
+    size_t numberOfInputs;    ///> input dimension
+    size_t numberOfParameter; ///> parameter dimension
 } modelInfo;
 
 
@@ -25,7 +26,7 @@ typedef void (*getStateDerivatives)(modelInstance*);
 typedef void (*integrate)(modelInstance*, double);
 
 // === memory management ===
-modelInstance* newModel(size_t nx, size_t nu);
+modelInstance* newModel(size_t nx, size_t nu, size_t np);
 void freeModel(modelInstance* model);
 
 /**
@@ -33,7 +34,7 @@ void freeModel(modelInstance* model);
  */
 struct modelInstance {
     modelInfo* info;                          ///< Discrete integration time step [s]
-    modelParameter* parameter;                ///< Pointer to model parameters
+    double* parameter;                        ///< Pointer to model parameters
     double* states;                           ///< Pointer to current state values
     double* stateDerivatives;                 ///< Pointer to computed derivatives
     double* inputs;                           ///< Pointer to input signals
@@ -55,13 +56,5 @@ void eulerForward(modelInstance* model, double stepSize);
  * First order system
  */
 void firstOrderSystem(modelInstance* model);
-
-/**
- * Parameter struct for first order system
- */
-struct modelParameter {
-    double tau; ///< Time constant [s]
-    double k;   ///< System gain [-]
-};
 
 #endif

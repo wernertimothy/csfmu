@@ -12,20 +12,17 @@ int main() {
     /* system dimensions */
     size_t nx = 1;       ///> number of states
     size_t nu = 1;       ///> number of inputs
+    size_t np = 2;       ///> number of parameter
 
-    /* initialize model */
-    modelInstance* model  = newModel(nx, nu);
-    model->parameter->k   = 1.0;   ///> PT1 gain
-    model->parameter->tau = 0.15;  ///> PT1 time constant
+    /* instantiate model */
+    modelInstance* model  = newModel(nx, nu, np);
 
-    /* set initial condition */
-    model->states[0] = 0.0;
-
-    /* set model equation */
-    model->getStateDerivatives = firstOrderSystem;
-
-    /* set integrator */
-    model->integrate = eulerForward;
+    /* initialize model*/
+    model->parameter[0]        = 0.15;              ///> PT1 time constant
+    model->parameter[1]        = 1.0;               ///> PT1 gain
+    model->states[0]           = 0.0;               ///> initial condition
+    model->getStateDerivatives = firstOrderSystem;  ///> system equations
+    model->integrate           = eulerForward;      ///> numeric integrator
 
     /* run simulation */
     int N = (int) T/dt;

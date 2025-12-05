@@ -12,6 +12,8 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
   - [fmi2FreeInstance](#fmi2freeinstance)
   - [fmi2SetupExperiment](#fmi2setupexperiment)
   - [fmi2SetDebugLogging](#fmi2setdebuglogging)
+- [Initialization](#initialization)
+  - [fmi2EnterInitializationMode](#fmi2enterinitializationmode)
 
 ---
 
@@ -415,5 +417,93 @@ fmi2DoStep(fmu, 0.1, 0.1, fmi2True);
 - **Categories parameter can be NULL**: When `nCategories == 0`, NULL is valid and means "enable all"
 - **Unknown categories ignored**: Per FMI spec, best effort - unrecognized category names don't cause errors
 - **Default logging**: Errors are logged by default even if no categories explicitly enabled
+
+---
+
+## Initialization
+
+Functions for initializing the FMU with initial conditions before simulation begins.
+
+### fmi2EnterInitializationMode
+
+Transitions the FMU into initialization mode where initial values can be set.
+
+#### Signature
+```c
+fmi2Status fmi2EnterInitializationMode(fmi2Component c);
+```
+
+#### Description
+Moves the FMU from the instantiated state into initialization mode. This function sets default initial values for states and parameters from the configuration, and assigns the state equation and integrator function pointers. After calling this function, the integration tool can override default values by calling `fmi2SetReal`, `fmi2SetInteger`, etc. before calling `fmi2ExitInitializationMode` to finalize initialization.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Successfully entered initialization mode |
+| `fmi2Error` | NULL component or FMU not in instantiated state |
+
+#### FMI State Requirements
+**Can be called in**: **Instantiated** state (after `fmi2SetupExperiment`, before first `fmi2ExitInitializationMode`)
+**State transitions**: Adds **Initialization Mode** state flag (FMU remains instantiated)
+
+#### Internal Initialization
+
+When this function is called, the following initializations occur:
+
+1. **States**: Initialized to `INITIAL_STATE` from `config.h` (default: `{0.0}`)
+2. **Parameters**: Initialized to `INITIAL_PARAMS` from `config.h` (default: `{0.15, 1.0}` for tau and k)
+3. **State equation**: Function pointer set to `MODEL_STATE_EQUATION` (default: `firstOrderSystem`)
+4. **Integrator**: Function pointer set to `INTEGRATOR_METHOD` (default: `eulerForward`)
+5. **Inputs**: Already zero-initialized by `calloc` in model creation
+6. **State derivatives**: Already zero-initialized, will be computed on first `fmi2DoStep`
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+
+// Setup the experiment
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
+
+// Enter initialization mode (sets defaults)
+fmi2Status status = fmi2EnterInitializationMode(fmu);
+if (status != fmi2OK) {
+    fprintf(stderr, "Failed to enter initialization mode\n");
+    return -1;
+}
+
+// Override default initial state (optional)
+fmi2Real initialState = 5.0;
+fmi2ValueReference stateRef = 0;
+fmi2SetReal(fmu, &stateRef, 1, &initialState);
+
+// Override default parameters (optional)
+fmi2Real tau = 0.2, k = 2.0;
+fmi2ValueReference paramRefs[] = {100, 101};  // Value references for parameters
+fmi2Real paramValues[] = {tau, k};
+fmi2SetReal(fmu, paramRefs, 2, paramValues);
+
+// Finalize initialization
+fmi2ExitInitializationMode(fmu);
+```
+
+#### Related Functions
+- [`fmi2SetupExperiment`](#fmi2setupexperiment) - Must be called before this
+- [`fmi2ExitInitializationMode`](#fmi2exitinitializationmode) - Finalizes initialization
+- [`fmi2SetReal`](#fmi2setreal) - Can be called during initialization to override defaults
+- [`fmi2GetReal`](#fmi2getreal) - Can be called during initialization to read current values
+
+#### Notes
+- **Two-phase initialization**: This function sets defaults, integration tool can override them, then `fmi2ExitInitializationMode` finalizes
+- **State machine uses bitmasks**: The FMU remains in instantiated state while also being in initialization mode - flags are additive
+- **Defaults from config**: Initial states come from `INITIAL_STATE[]` array in `config.h`, parameters from `INITIAL_PARAMS[]`
+- **Function pointers enable flexibility**: Different models can use different integrators and state equations via configuration macros
+- **Arrays pre-zeroed**: Inputs and state derivatives were already zero-initialized by `calloc` in `newModel()` - no action needed here
+- **Must be instantiated first**: Returns `fmi2Error` if called before `fmi2Instantiate` or `fmi2SetupExperiment`
+- **Parameter structure**: Uses flexible `double* parameter` array rather than fixed struct - allows arbitrary parameter dimensions
 
 ---
