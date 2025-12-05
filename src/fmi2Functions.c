@@ -356,7 +356,30 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
  * Exit initialization mode
  */
 fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
-    // TODO
+    /* validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    if (!(myfmu2->state & stateInitializationMode)) {
+        if (logCategoryActive(myfmu2, logStatusError)) {
+            fmi2String message = "Need to call fmi2EnterInitializationMode before calling fmi2ExitInitializationMode.";
+            myfmu2->logger(
+                myfmu2->componentEnvironment,
+                myfmu2->instanceName,
+                fmi2Error,
+                LOG_ERROR,
+                message
+            );
+        }
+        return fmi2Error;
+    }
+
+    /* set initilized */
+    myfmu2->state &= ~stateInitializationMode;
+    myfmu2->state |= stateInitialized;
     return fmi2OK;
 }
 

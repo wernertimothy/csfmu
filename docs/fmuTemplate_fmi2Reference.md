@@ -14,6 +14,7 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
   - [fmi2SetDebugLogging](#fmi2setdebuglogging)
 - [Initialization](#initialization)
   - [fmi2EnterInitializationMode](#fmi2enterinitializationmode)
+  - [fmi2ExitInitializationMode](#fmi2exitinitializationmode)
 
 ---
 
@@ -505,5 +506,88 @@ fmi2ExitInitializationMode(fmu);
 - **Arrays pre-zeroed**: Inputs and state derivatives were already zero-initialized by `calloc` in `newModel()` - no action needed here
 - **Must be instantiated first**: Returns `fmi2Error` if called before `fmi2Instantiate` or `fmi2SetupExperiment`
 - **Parameter structure**: Uses flexible `double* parameter` array rather than fixed struct - allows arbitrary parameter dimensions
+
+---
+
+### fmi2ExitInitializationMode
+
+Finalizes initialization and transitions to step mode, ready for simulation.
+
+#### Signature
+```c
+fmi2Status fmi2ExitInitializationMode(fmi2Component c);
+```
+
+#### Description
+Completes the initialization phase and transitions the FMU from initialization mode to initialized/step mode. After this function returns successfully, the FMU is ready to execute simulation steps via `fmi2DoStep`. This is the final step before beginning the simulation loop. No more initialization-time variable setting is allowed after this call.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Successfully exited initialization mode and ready for stepping |
+| `fmi2Error` | NULL component or FMU not in initialization mode |
+
+#### FMI State Requirements
+**Can be called in**: **Initialization Mode** (after `fmi2EnterInitializationMode`)
+**State transitions**: Removes **Initialization Mode** flag, adds **Initialized** state flag
+
+#### State Transition Details
+
+The function performs a two-step state transition:
+
+1. **Remove initialization mode**: `state &= ~stateInitializationMode` clears the initialization flag
+2. **Add initialized state**: `state |= stateInitialized` sets the initialized flag
+3. **Preserve instantiated state**: The FMU remains instantiated (bitmask allows multiple states)
+
+After this call, the FMU state is: `stateInstantiated | stateInitialized`
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
+
+// Enter initialization and optionally set custom values
+fmi2EnterInitializationMode(fmu);
+fmi2Real customState = 5.0;
+fmi2ValueReference stateRef = 0;
+fmi2SetReal(fmu, &stateRef, 1, &customState);
+
+// Finalize initialization
+fmi2Status status = fmi2ExitInitializationMode(fmu);
+if (status != fmi2OK) {
+    fprintf(stderr, "Failed to exit initialization mode\n");
+    return -1;
+}
+
+// FMU is now ready for simulation
+fmi2Real output;
+fmi2ValueReference outRef = 0;
+
+// Simulation loop
+for (double t = 0.0; t < 10.0; t += 0.01) {
+    fmi2DoStep(fmu, t, 0.01, fmi2True);
+    fmi2GetReal(fmu, &outRef, 1, &output);
+    printf("t=%.2f, y=%.4f\n", t, output);
+}
+```
+
+#### Related Functions
+- [`fmi2EnterInitializationMode`](#fmi2enterinitializationmode) - Must be called before this
+- [`fmi2DoStep`](#fmi2dostep) - Next step after exiting initialization
+- [`fmi2GetReal`](#fmi2getreal) - Can be called after this to read outputs
+- [`fmi2SetReal`](#fmi2setreal) - Can be called during initialization before this
+
+#### Notes
+- **Simple for co-simulation**: This function is straightforward for co-simulation FMUs - just a state transition. Model exchange FMUs would need to solve initial equations here.
+- **No parameter validation**: The FMU trusts that the integration tool has set all required values during initialization mode
+- **Finalization point**: After this call, `fmi2EnterInitializationMode` cannot be called again without calling `fmi2Reset` first
+- **Ready for stepping**: Integration tool typically reads initial outputs immediately after this call, then begins the simulation loop
+- **Bitwise state machine**: Uses `&= ~flag` to remove a flag and `|= flag` to add a flag - allows multiple states to coexist
+- **Error if wrong state**: Returns `fmi2Error` if not currently in initialization mode (catches lifecycle violations)
 
 ---
