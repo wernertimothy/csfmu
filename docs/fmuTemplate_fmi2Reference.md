@@ -15,6 +15,15 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
 - [Initialization](#initialization)
   - [fmi2EnterInitializationMode](#fmi2enterinitializationmode)
   - [fmi2ExitInitializationMode](#fmi2exitinitializationmode)
+- [Variable Access](#variable-access)
+  - [fmi2SetReal](#fmi2setreal)
+  - [fmi2GetReal](#fmi2getreal)
+  - [fmi2SetInteger](#fmi2setinteger)
+  - [fmi2GetInteger](#fmi2getinteger)
+  - [fmi2SetBoolean](#fmi2setboolean)
+  - [fmi2GetBoolean](#fmi2getboolean)
+  - [fmi2SetString](#fmi2setstring)
+  - [fmi2GetString](#fmi2getstring)
 
 ---
 
@@ -589,5 +598,340 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 - **Ready for stepping**: Integration tool typically reads initial outputs immediately after this call, then begins the simulation loop
 - **Bitwise state machine**: Uses `&= ~flag` to remove a flag and `|= flag` to add a flag - allows multiple states to coexist
 - **Error if wrong state**: Returns `fmi2Error` if not currently in initialization mode (catches lifecycle violations)
+
+---
+
+## Variable Access
+
+Functions for setting and reading variable values during initialization and simulation.
+
+### fmi2SetReal
+
+Sets real-valued variables (parameters, inputs).
+
+#### Signature
+```c
+fmi2Status fmi2SetReal(fmi2Component c,
+                       const fmi2ValueReference vr[],
+                       size_t nvr,
+                       const fmi2Real value[]);
+```
+
+#### Description
+Sets one or more real-valued variables by their value references. Parameters can only be set during initialization mode, while inputs can be set during initialization or step mode. This is the primary mechanism for the integration tool to provide input signals and configure parameters.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `vr` | `const fmi2ValueReference[]` | Array of value references identifying which variables to set |
+| `nvr` | `size_t` | Number of value references (length of `vr` and `value` arrays) |
+| `value` | `const fmi2Real[]` | Array of values to assign to the corresponding variables |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | All variables set successfully |
+| `fmi2Error` | NULL component, invalid arrays, invalid VR, or attempting to set parameter outside initialization mode |
+
+#### FMI State Requirements
+**Can be called in**: **Initialization Mode** or **Step Mode** (after initialization)
+**State transitions**: None (setter only)
+
+#### Value Reference Mapping
+
+This FMU uses sequential value reference ranges:
+
+| VR Range | Variable Type | Settable When | Notes |
+|----------|---------------|---------------|-------|
+| 0 to `NUMBER_OF_PARAMS-1` | Parameters | Initialization mode only | Returns error if set after initialization |
+| `NUMBER_OF_PARAMS` to `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS-1` | Inputs | Initialization or step mode | Can be updated before each `fmi2DoStep` |
+| `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS` onward | Outputs | **Never** (read-only) | Returns error if attempted |
+
+**Example for default template** (2 params, 1 input, 1 output):
+- VR 0: Parameter `tau` (settable during init only)
+- VR 1: Parameter `k` (settable during init only)
+- VR 2: Input `u` (settable anytime)
+- VR 3: Output `y` (read-only, use `fmi2GetReal`)
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
+fmi2EnterInitializationMode(fmu);
+
+// Set parameters during initialization
+fmi2ValueReference paramRefs[] = {0, 1};  // tau, k
+fmi2Real paramValues[] = {0.2, 2.5};
+fmi2Status status = fmi2SetReal(fmu, paramRefs, 2, paramValues);
+if (status != fmi2OK) {
+    fprintf(stderr, "Failed to set parameters\n");
+}
+
+fmi2ExitInitializationMode(fmu);
+
+// Set input during simulation
+fmi2ValueReference inputRef = 2;  // u
+fmi2Real inputValue = 1.0;
+fmi2SetReal(fmu, &inputRef, 1, &inputValue);
+
+// Attempt to set parameter after initialization (ERROR)
+fmi2Real newTau = 0.3;
+status = fmi2SetReal(fmu, &paramRefs[0], 1, &newTau);  // Returns fmi2Error
+```
+
+#### Related Functions
+- [`fmi2GetReal`](#fmi2getreal) - Read real-valued variables
+- [`fmi2EnterInitializationMode`](#fmi2enterinitializationmode) - Enables parameter setting
+- [`fmi2DoStep`](#fmi2dostep) - Use inputs set via this function
+
+#### Notes
+- **Bulk operations**: Arrays allow setting multiple variables in one call for efficiency
+- **Sequential VR mapping**: Value references directly map to array indices within each type range
+- **Parameter immutability**: Parameters become read-only after exiting initialization mode (per FMI standard)
+- **No state setting**: States are internal to the model and cannot be directly set via FMI API
+- **nvr=0 is valid**: Calling with empty arrays is a no-op, not an error
+- **Error handling**: Returns error on first invalid VR encountered (fail-fast pattern)
+
+---
+
+### fmi2GetReal
+
+Reads real-valued variables (parameters, inputs, outputs).
+
+#### Signature
+```c
+fmi2Status fmi2GetReal(fmi2Component c,
+                       const fmi2ValueReference vr[],
+                       size_t nvr,
+                       fmi2Real value[]);
+```
+
+#### Description
+Reads one or more real-valued variables by their value references. Can read parameters, inputs, and outputs. Integration tools typically use this after `fmi2DoStep` to read output values, or during initialization to verify parameter values.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `vr` | `const fmi2ValueReference[]` | Array of value references identifying which variables to read |
+| `nvr` | `size_t` | Number of value references (length of `vr` and `value` arrays) |
+| `value` | `fmi2Real[]` | **Output array** where values will be written |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | All variables read successfully |
+| `fmi2Error` | NULL component, invalid arrays, or invalid VR |
+
+#### FMI State Requirements
+**Can be called in**: **Initialization Mode** or **Step Mode** (after initialization)
+**State transitions**: None (getter only)
+
+#### Value Reference Mapping
+
+This FMU uses sequential value reference ranges:
+
+| VR Range | Variable Type | Example (Default Template) |
+|----------|---------------|----------------------------|
+| 0 to `NUMBER_OF_PARAMS-1` | Parameters | VR 0: `tau`, VR 1: `k` |
+| `NUMBER_OF_PARAMS` to `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS-1` | Inputs | VR 2: `u` |
+| `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS` to `...+NUMBER_OF_OUTPUTS-1` | Outputs | VR 3: `y` |
+
+**Output values**: Outputs are computed by the model (see `modelDoTimeStep()` in `model.c`) and stored in `model->outputs[]` array.
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
+fmi2EnterInitializationMode(fmu);
+
+// Read back parameters to verify
+fmi2ValueReference paramRefs[] = {0, 1};
+fmi2Real paramValues[2];
+fmi2GetReal(fmu, paramRefs, 2, paramValues);
+printf("tau=%.3f, k=%.3f\n", paramValues[0], paramValues[1]);
+
+fmi2ExitInitializationMode(fmu);
+
+// Simulation loop: set input, step, read output
+fmi2ValueReference inputRef = 2;
+fmi2ValueReference outputRef = 3;
+fmi2Real input = 1.0, output;
+
+for (double t = 0.0; t < 10.0; t += 0.01) {
+    fmi2SetReal(fmu, &inputRef, 1, &input);
+    fmi2DoStep(fmu, t, 0.01, fmi2True);
+    fmi2GetReal(fmu, &outputRef, 1, &output);
+    printf("t=%.2f, u=%.2f, y=%.4f\n", t, input, output);
+}
+```
+
+#### Related Functions
+- [`fmi2SetReal`](#fmi2setreal) - Set real-valued variables
+- [`fmi2DoStep`](#fmi2dostep) - Updates outputs based on inputs
+
+#### Notes
+- **Output array is written**: The `value[]` parameter is an output, caller must allocate space for `nvr` elements
+- **Outputs updated by model**: Outputs are computed during `fmi2DoStep` via `modelDoTimeStep()` function
+- **Sequential VR mapping**: Value references map to array indices within each type range
+- **Bulk operations**: Read multiple variables in one call for efficiency
+- **nvr=0 is valid**: Calling with empty arrays is a no-op
+- **All variable types readable**: Unlike `fmi2SetReal`, this can read outputs as well as parameters and inputs
+
+---
+
+### fmi2SetInteger
+
+Sets integer-valued variables (not used in this template).
+
+#### Signature
+```c
+fmi2Status fmi2SetInteger(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          const fmi2Integer value[]);
+```
+
+#### Description
+Stub implementation that immediately returns success. This FMU template contains no integer variables, so this function performs no operations. Included for FMI 2.0 standard compliance.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance (unused) |
+| `vr` | `const fmi2ValueReference[]` | Array of value references (unused) |
+| `nvr` | `size_t` | Number of value references (unused) |
+| `value` | `const fmi2Integer[]` | Array of values (unused) |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Always returns success |
+
+#### Notes
+- **Stub implementation**: No integer variables exist in this template
+- **Extension point**: Add integer handling here if your model needs it
+
+---
+
+### fmi2GetInteger
+
+Reads integer-valued variables (not used in this template).
+
+#### Signature
+```c
+fmi2Status fmi2GetInteger(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          fmi2Integer value[]);
+```
+
+#### Description
+Stub implementation that immediately returns success. This FMU template contains no integer variables.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance (unused) |
+| `vr` | `const fmi2ValueReference[]` | Array of value references (unused) |
+| `nvr` | `size_t` | Number of value references (unused) |
+| `value` | `fmi2Integer[]` | Output array (unused) |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Always returns success |
+
+#### Notes
+- **Stub implementation**: No integer variables exist in this template
+
+---
+
+### fmi2SetBoolean
+
+Sets boolean-valued variables (not used in this template).
+
+#### Signature
+```c
+fmi2Status fmi2SetBoolean(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          const fmi2Boolean value[]);
+```
+
+#### Description
+Stub implementation. No boolean variables in this template.
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Always returns success |
+
+---
+
+### fmi2GetBoolean
+
+Reads boolean-valued variables (not used in this template).
+
+#### Signature
+```c
+fmi2Status fmi2GetBoolean(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          fmi2Boolean value[]);
+```
+
+#### Description
+Stub implementation. No boolean variables in this template.
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Always returns success |
+
+---
+
+### fmi2SetString
+
+Sets string-valued variables (not used in this template).
+
+#### Signature
+```c
+fmi2Status fmi2SetString(fmi2Component c,
+                         const fmi2ValueReference vr[],
+                         size_t nvr,
+                         const fmi2String value[]);
+```
+
+#### Description
+Stub implementation. No string variables in this template.
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Always returns success |
+
+---
+
+### fmi2GetString
+
+Reads string-valued variables (not used in this template).
+
+#### Signature
+```c
+fmi2Status fmi2GetString(fmi2Component c,
+                         const fmi2ValueReference vr[],
+                         size_t nvr,
+                         fmi2String value[]);
+```
+
+#### Description
+Stub implementation. No string variables in this template.
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Always returns success |
 
 ---

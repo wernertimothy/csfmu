@@ -1,7 +1,7 @@
 
 #include <string.h>
 #include "fmi2Functions.h"
-#include "config.h"
+#include "model_config.h"
 #include "model.h"
 
 /**
@@ -116,14 +116,10 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
                                size_t nCategories,
                                const fmi2String categories[]) {
     /* validate fmi2Component */
-    if (!c) {
-        return fmi2Error;
-    }
+    if (!c) return fmi2Error;
 
     /* validate categories */
-    if (nCategories > 0 && categories == NULL) {
-        return fmi2Error;
-    }
+    if (nCategories > 0 && categories == NULL) return fmi2Error;
 
     myFMU2* myfmu2 = (myFMU2*)c;
 
@@ -176,13 +172,11 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
                               fmi2Boolean visible,
                               fmi2Boolean loggingOn) {
     /* are functions implemented ? */
-    if (!functions) {
-        return NULL;
-    }
+    if (!functions) return NULL;
+
     /* is logger implemented ? */
-    if (!functions->logger) {
-        return NULL;
-    }
+    if (!functions->logger) return NULL;
+
     /* is allocateMemory implemented ? */
     if (!functions->allocateMemory) {
         fmi2String message = "allocateMemory not implemented.";
@@ -216,7 +210,7 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
     myfmu2->stepFinished         = NULL;                            ///> only synchronous co-simulation support
     myfmu2->componentEnvironment = functions->componentEnvironment; ///> No check needed, can be NULL
     /* create a model instance */
-    myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS, NUMBER_OF_PARAMS);
+    myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS, NUMBER_OF_OUTPUTS, NUMBER_OF_PARAMS);
     if (!myfmu2->model) {
         fmi2String message = "Unable to allocate memory for model instance.";
         functions->logger(functions->componentEnvironment, instanceName, fmi2Error, LOG_ERROR, message);
@@ -261,9 +255,8 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
                                fmi2Real startTime,
                                fmi2Boolean stopTimeDefined,
                                fmi2Real stopTime) {
-    if (!c) {
-        return fmi2Error;
-    }
+    /* validate component */
+    if (!c) return fmi2Error;
     /* unused parameter */
     (void)toleranceDefined;
     (void)tolerance;        // integration error tollerace. Irrelevant in co-simulation
@@ -304,9 +297,7 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
 fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
 
     /* validate component */
-    if (!c) {
-        return fmi2Error;
-    }
+    if (!c) return fmi2Error;
     
     myFMU2* myfmu2 = (myFMU2*)c;
 
@@ -340,9 +331,7 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
  */
 fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
     /* validate component */
-    if (!c) {
-        return fmi2Error;
-    }
+    if (!c) return fmi2Error;
 
     myFMU2* myfmu2 = (myFMU2*)c;
 
@@ -371,5 +360,136 @@ fmi2Status fmi2Terminate(fmi2Component c) {
  */
 fmi2Status fmi2Reset(fmi2Component c) {
     // TODO
+    return fmi2OK;
+}
+
+/** 
+ * set a real value
+ */
+fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Real value[]) {
+    /* vallidate component */
+    if (!c) return fmi2Error;
+
+    /* validate value refrence*/
+    if (nvr > 0 && (!vr || !value)) return fmi2Error;
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* validate fmu state */
+    if (!(myfmu2->state & (stateInstantiated | stateInitializationMode ))) {
+        fmi2String message = "FMU needs to be in initialization mode to set and get values.";
+        logErrorMessage(myfmu2, message);
+        return fmi2Error;
+    }
+
+    /* find value reference in model */
+    /* valueReference is sorted parameter, inputs, outputs */
+    for (size_t k=0; k<nvr; k++) {
+        fmi2ValueReference VR = vr[k];
+        if (VR < NUMBER_OF_PARAMS) {
+            /* vr is a parameter */
+            if (myfmu2->state & stateInitializationMode) {
+                myfmu2->model->parameter[VR] = value[k];
+            } else {
+                fmi2String message = "Parameter can only be set during initialization.";
+                logErrorMessage(myfmu2, message);
+                return fmi2Error;
+            }
+        } else if (VR < (NUMBER_OF_PARAMS + NUMBER_OF_INPUTS)) {
+            /* vr is an input */
+            myfmu2->model->inputs[VR-NUMBER_OF_PARAMS] = value[k];
+        } else {
+            fmi2String message = "Value reference is out of scope. Only Parameter and Inputs can be set.";
+            logErrorMessage(myfmu2, message);
+            return fmi2Error;
+        }
+    }
+    return fmi2OK;
+}
+
+/**
+ * set an integer value
+ */
+fmi2Status fmi2SetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Integer value[]) {
+    /* no integer values to set */
+    return fmi2OK;
+}
+
+ /**
+ * set a boolean value
+ */
+fmi2Status fmi2SetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Boolean value[]) {
+    /* no boolean values to set */
+    return fmi2OK;
+}
+
+ /**
+ * set a string value
+ */
+fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2String  value[]) {
+    /* no string values to set */
+    return fmi2OK;
+}
+
+/**
+ * get a real value
+ */
+fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Real value[]) {
+    /* vallidate component */
+    if (!c) return fmi2Error;
+
+    /* validate value refrence*/
+    if (nvr > 0 && (!vr || !value)) return fmi2Error;
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* validate fmu state */
+    if (!(myfmu2->state & (stateInstantiated | stateInitializationMode))) {
+        fmi2String message = "FMU needs to be in initialization mode to set and get values.";
+        logErrorMessage(myfmu2, message);
+        return fmi2Error;
+    }
+
+    /* find value reference in model */
+    /* valueReference is sorted parameter, inputs, outputs */
+    for (size_t k=0; k<nvr; k++) {
+        fmi2ValueReference VR = vr[k];
+        if (VR < NUMBER_OF_PARAMS) {
+            /* vr is a parameter */
+            value[k] = myfmu2->model->parameter[VR];
+        } else if (VR < (NUMBER_OF_PARAMS + NUMBER_OF_INPUTS)) {
+            /* vr is an input */
+            value[k] = myfmu2->model->inputs[VR-NUMBER_OF_PARAMS];
+        } else if (VR < (NUMBER_OF_PARAMS + NUMBER_OF_INPUTS + NUMBER_OF_OUTPUTS)) {
+            /* vr is an output*/
+            value[k] = myfmu2->model->outputs[VR-(NUMBER_OF_PARAMS+NUMBER_OF_INPUTS)];
+        } else {
+            fmi2String message = "Value reference is out of scope.";
+            logErrorMessage(myfmu2, message);
+            return fmi2Error;
+        }
+    }
+    return fmi2OK;
+}
+
+/**
+ * get an integer value
+ */
+fmi2Status fmi2GetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Integer value[]) {
+    /* no integer values to get */
+    return fmi2OK;
+}
+
+/** get a boolean value  */
+fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Boolean value[]) {
+    /* no boolean values to get */
+    return fmi2OK;
+}
+
+/**
+ * get a string value
+ */
+fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2String  value[]) {
+    /* no string values to get */
     return fmi2OK;
 }
