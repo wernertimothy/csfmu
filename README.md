@@ -28,6 +28,10 @@ To get an overview over the implemented fmi functions, take a look at the refere
 * core model is fmu agnosctic
 * FMU CoSimualtion adapter connects fmu API with model
 
+## assumptions
+* synchornous
+* fixed step size
+
 [getting started]: docs/fmuTemplate_gettingStarted.md
 [Co-Sim FMUs]: docs/fmuTemplate_coSimFMUs.md
 [fmi2]: docs/fmuTemplate_fmi2Reference.md

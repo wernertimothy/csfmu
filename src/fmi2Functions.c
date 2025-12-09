@@ -4,6 +4,8 @@
 #include "model_config.h"
 #include "model.h"
 
+#define EPSILON 1e-9 // numerical significance boarder
+
 /**
  * An instance of the FMU2
  */
@@ -81,6 +83,20 @@ static inline void logErrorMessage(myFMU2* fmu, fmi2String message) {
             message
         );
     }
+}
+
+/**
+ * helper function to calculate absolute value
+ */
+static inline fmi2Real absReal(fmi2Real value) {
+    return value >= 0 ? value : -value;
+}
+
+/**
+ * helper function to calculated difference
+ */
+static inline fmi2Boolean areEqualReals(fmi2Real a, fmi2Real b) {
+    return absReal(a-b) < EPSILON;
 }
 
 /**
@@ -257,6 +273,7 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
                                fmi2Real stopTime) {
     /* validate component */
     if (!c) return fmi2Error;
+
     /* unused parameter */
     (void)toleranceDefined;
     (void)tolerance;        // integration error tollerace. Irrelevant in co-simulation
@@ -322,6 +339,9 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
 
     /* integrator */
     myfmu2->model->integrate = INTEGRATOR_METHOD;
+
+    /* output equation */
+    myfmu2->model->getOutputs = MODEL_OUTPUT_EQUATION;
 
     return fmi2OK;
 }
@@ -390,6 +410,7 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
             /* vr is a parameter */
             if (myfmu2->state & stateInitializationMode) {
                 myfmu2->model->parameter[VR] = value[k];
+                // TODO: call modelValidateParameter()
             } else {
                 fmi2String message = "Parameter can only be set during initialization.";
                 logErrorMessage(myfmu2, message);
@@ -398,6 +419,7 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
         } else if (VR < (NUMBER_OF_PARAMS + NUMBER_OF_INPUTS)) {
             /* vr is an input */
             myfmu2->model->inputs[VR-NUMBER_OF_PARAMS] = value[k];
+            // TODO: call modelValidateInput
         } else {
             fmi2String message = "Value reference is out of scope. Only Parameter and Inputs can be set.";
             logErrorMessage(myfmu2, message);
@@ -491,5 +513,64 @@ fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
  */
 fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2String  value[]) {
     /* no string values to get */
+    return fmi2OK;
+}
+
+/**
+ * Do a simulation time step x(t) -> x(t+dt)
+ * 
+ * Note: FMU expects a fixed communicationStepSize
+ */
+fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2Real communicationStepSize, fmi2Boolean noSetFMUStatePriorToCurrentPoint) {
+
+    /* unused parameter */
+    (void)noSetFMUStatePriorToCurrentPoint;
+
+    /* validate component */
+    // TODO: log error
+    if (!c) return fmi2Error;
+
+    /* validate communicationStepSize */
+    // TODO: log error
+    if (communicationStepSize <= 0.0) return fmi2Error;
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* validate state */
+    // TODO: log error
+    if (!(myfmu2->state & stateInitialized)) return fmi2Error;
+
+    /* validate time */
+    if (!(areEqualReals(myfmu2->time, currentCommunicationPoint))) {
+        // TODO: log error
+        return fmi2Error;
+    }
+
+    /* handle variable step size */
+    fmi2Integer numberOfSteps = (fmi2Integer)(communicationStepSize/MAX_SOLVER_STEPSIZE);
+    fmi2Real stepRemainder    = communicationStepSize - numberOfSteps*MAX_SOLVER_STEPSIZE;
+    fmi2Real actualStepSize   = 0.0; // actual step initialized to 0 to prevent garbage
+
+    /* do steps */
+    actualStepSize = MAX_SOLVER_STEPSIZE;
+    for (fmi2Integer k=0; k<numberOfSteps; k++) {
+        myfmu2->model->getStateDerivatives(myfmu2->model);
+        myfmu2->model->integrate(myfmu2->model, actualStepSize);
+    }
+    
+    /* handle remainder step */
+    if (stepRemainder >= EPSILON) {
+        // only step if remainder is numerically significant
+        actualStepSize = stepRemainder;
+        myfmu2->model->getStateDerivatives(myfmu2->model);
+        myfmu2->model->integrate(myfmu2->model, actualStepSize);
+    }
+    
+    /* update internal clock */
+    myfmu2->time += communicationStepSize;
+
+    /* write outpus */
+    myfmu2->model->getOutputs(myfmu2->model);
+
     return fmi2OK;
 }

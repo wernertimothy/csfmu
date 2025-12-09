@@ -14,10 +14,28 @@ modelInstance* newModel(size_t nx, size_t nu, size_t ny, size_t np) {
         free(model);
         return NULL;
     }
-    model->info->numberOfStates    = nx;
+    model->info->numberOfParameter = np;
     model->info->numberOfInputs    = nu;
     model->info->numberOfOutputs   = ny;
-    model->info->numberOfParameter = np;
+    model->info->numberOfStates    = nx;
+    /* model parameter */
+    model->parameter = calloc(model->info->numberOfParameter, sizeof(double));
+    if (!model->parameter) {
+        freeModel(model);
+        return NULL;
+    }
+    /* model inputs */
+    model->inputs = calloc(model->info->numberOfInputs, sizeof(double));
+    if (!model->inputs) {
+        freeModel(model);
+        return NULL;
+    }
+    /* model outputs */
+    model->outputs = calloc(model->info->numberOfOutputs, sizeof(double));
+    if (!model->outputs) {
+        freeModel(model);
+        return NULL;
+    }
     /* model states */
     model->states = calloc(model->info->numberOfStates, sizeof(double));
     if (!model->states) {
@@ -30,28 +48,10 @@ modelInstance* newModel(size_t nx, size_t nu, size_t ny, size_t np) {
         freeModel(model);
         return NULL;
     }
-    /* model inputs */
-    model->inputs = calloc(model->info->numberOfInputs, sizeof(double));
-    if (!model->inputs) {
-        freeModel(model);
-        return NULL;
-    }
-    /* model parameter */
-    model->parameter = calloc(model->info->numberOfParameter, sizeof(double));
-    if (!model->parameter) {
-        freeModel(model);
-        return NULL;
-    }
-    /* model parameter */
-    model->outputs = calloc(model->info->numberOfOutputs, sizeof(double));
-    if (!model->outputs) {
-        freeModel(model);
-        return NULL;
-    }
-    /* model state equation */
+    /* opaque function pointer */
     model->getStateDerivatives = NULL;
-    /* numeric integrator */
-    model->integrate = NULL;
+    model->getOutputs          = NULL;
+    model->integrate           = NULL;
     return model;
 }
 
@@ -61,11 +61,11 @@ modelInstance* newModel(size_t nx, size_t nu, size_t ny, size_t np) {
 void freeModel(modelInstance* model) {
     if (model) {
         if (model->info)             free(model->info);
-        if (model->states)           free(model->states);
-        if (model->stateDerivatives) free(model->stateDerivatives);
+        if (model->parameter)        free(model->parameter);
         if (model->inputs)           free(model->inputs);
         if (model->outputs)          free(model->outputs);
-        if (model->parameter)        free(model->parameter);
+        if (model->states)           free(model->states);
+        if (model->stateDerivatives) free(model->stateDerivatives);
         free(model);
     }
 }
@@ -86,6 +86,7 @@ void eulerForward(modelInstance* model, double stepSize) {
 
 /**
  * First Order System state equation
+ * TODO: move to specifiv model implementation
  */
 void firstOrderSystem(modelInstance* model) {
     /* map states */
@@ -101,21 +102,9 @@ void firstOrderSystem(modelInstance* model) {
 }
 
 /**
- * First Order System full time step
- * 
- * note: set inputs before calling this
- * 
- * TODO: Is it cleaner to set inputs within this and make inputs an argument to this function ?
+ * First Order System outputs
+ * TODO: move to specific model implementation
  */
-void modelDoTimeStep(modelInstance* model, double stepSize) {
-    /* set inputs ? */
-
-    /* calculate time derivative dx/dt */
-    model->getStateDerivatives(model);
-
-    /* integrate state differential */
-    model->integrate(model, stepSize);
-
-    /* write outputs  */
-    model->outputs[0] = model->states[0];
+void firstOrderOutputs(modelInstance* model) {
+    model->outputs[0] = model->states[0]; // y = x
 }

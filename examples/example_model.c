@@ -34,12 +34,13 @@ int main() {
     modelInstance* model  = newModel(nx, nu, ny, np);
 
     /* initialize model*/
+    model->getStateDerivatives = firstOrderSystem;  ///> system equations
+    model->getOutputs          = firstOrderOutputs; ///> y = x
+    model->integrate           = eulerForward;      ///> numeric integrator
     model->parameter[0]        = tau;              
     model->parameter[1]        = k;               
-    model->states[0]           = x0;               
-    model->outputs[0]          = model->states[0];  ///> y = x
-    model->getStateDerivatives = firstOrderSystem;  ///> system equations
-    model->integrate           = eulerForward;      ///> numeric integrator
+    model->states[0]           = x0;
+    model->getOutputs(model);
 
     /* run simulation */
     int N = (int) T/dt;
@@ -51,8 +52,12 @@ int main() {
         model->inputs[0] = 1.0;
 
         /* step in time */
-        modelDoTimeStep(model, dt);
+        model->getStateDerivatives(model);
+        model->integrate(model, dt);
         time += dt;
+
+        /* write outputs */
+        model->getOutputs(model);
     }
 
     /* free model memory */

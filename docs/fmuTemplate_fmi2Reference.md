@@ -24,6 +24,8 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
   - [fmi2GetBoolean](#fmi2getboolean)
   - [fmi2SetString](#fmi2setstring)
   - [fmi2GetString](#fmi2getstring)
+- [Simulation](#simulation)
+  - [fmi2DoStep](#fmi2dostep)
 
 ---
 
@@ -933,5 +935,167 @@ Stub implementation. No string variables in this template.
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Always returns success |
+
+---
+
+## Simulation
+
+Functions for executing the co-simulation and advancing time.
+
+### fmi2DoStep
+
+Advances the FMU simulation from current time to current time + step size.
+
+#### Signature
+```c
+fmi2Status fmi2DoStep(fmi2Component c,
+                      fmi2Real currentCommunicationPoint,
+                      fmi2Real communicationStepSize,
+                      fmi2Boolean noSetFMUStatePriorToCurrentPoint);
+```
+
+#### Description
+The heart of co-simulation - advances the FMU's internal state from time `t` to `t + Δt` by numerically integrating the differential equations. This function is called repeatedly in the simulation loop (potentially millions of times) and is performance-critical. Implements automatic sub-stepping to maintain numerical stability when communication steps are large.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `currentCommunicationPoint` | `fmi2Real` | The current simulation time (should match FMU's internal clock) |
+| `communicationStepSize` | `fmi2Real` | Time increment to advance (must be > 0) |
+| `noSetFMUStatePriorToCurrentPoint` | `fmi2Boolean` | Flag for FMU state management (ignored in this implementation) |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Step completed successfully |
+| `fmi2Error` | Invalid component, negative/zero step size, wrong state, or time inconsistency |
+
+#### FMI State Requirements
+**Can be called in**: **Initialized** state (after `fmi2ExitInitializationMode`, before `fmi2Terminate`)
+**State transitions**: Remains in **Initialized** state
+
+#### Algorithm: Sub-Stepping for Numerical Stability
+
+The implementation uses **adaptive sub-stepping** to maintain numerical accuracy:
+
+1. **Calculate sub-steps**:
+   ```c
+   numberOfSteps = floor(communicationStepSize / MAX_SOLVER_STEPSIZE)
+   stepRemainder = communicationStepSize - (numberOfSteps * MAX_SOLVER_STEPSIZE)
+   ```
+
+2. **Execute full steps**:
+   - Take `numberOfSteps` steps of size `MAX_SOLVER_STEPSIZE`
+   - Each step: compute derivatives → integrate states
+
+3. **Handle remainder**:
+   - If `stepRemainder >= EPSILON` (1e-9 s): take final step of size `stepRemainder`
+   - If `stepRemainder < EPSILON`: skip (numerically insignificant)
+
+4. **Update time and outputs**:
+   - Advance internal clock by `communicationStepSize`
+   - Compute outputs from final state
+
+**Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `MAX_SOLVER_STEPSIZE = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
+
+#### Time Consistency Validation
+
+Before stepping, validates that `currentCommunicationPoint` matches the FMU's internal clock (within tolerance `EPSILON = 1e-9`). This catches:
+- Integration tool errors (wrong time tracking)
+- FMU implementation bugs
+- Co-simulation orchestration issues
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
+fmi2EnterInitializationMode(fmu);
+fmi2ExitInitializationMode(fmu);
+
+// Simulation loop
+double currentTime = 0.0;
+double stopTime = 10.0;
+double stepSize = 0.01;  // 10 ms communication steps
+
+fmi2ValueReference inputRef = 2;   // Input u
+fmi2ValueReference outputRef = 3;  // Output y
+fmi2Real inputValue = 1.0;
+fmi2Real outputValue;
+
+while (currentTime < stopTime) {
+    // Set input for this step
+    fmi2SetReal(fmu, &inputRef, 1, &inputValue);
+
+    // Advance simulation
+    fmi2Status status = fmi2DoStep(fmu, currentTime, stepSize, fmi2True);
+    if (status != fmi2OK) {
+        fprintf(stderr, "DoStep failed at t=%.3f\n", currentTime);
+        break;
+    }
+
+    // Read output
+    fmi2GetReal(fmu, &outputRef, 1, &outputValue);
+    printf("t=%.3f, u=%.2f, y=%.4f\n", currentTime, inputValue, outputValue);
+
+    // Advance time
+    currentTime += stepSize;
+}
+
+fmi2Terminate(fmu);
+fmi2FreeInstance(fmu);
+```
+
+#### Sub-Stepping Example
+
+**Scenario**: Integration tool requests 0.025 s step, but `MAX_SOLVER_STEPSIZE = 0.01 s`
+
+**Execution**:
+1. Calculate: `numberOfSteps = 2`, `stepRemainder = 0.005 s`
+2. Step 1: Integrate 0.01 s (states: t → t+0.01)
+3. Step 2: Integrate 0.01 s (states: t+0.01 → t+0.02)
+4. Remainder: Integrate 0.005 s (states: t+0.02 → t+0.025)
+5. Update clock: `time += 0.025 s`
+6. Compute outputs at t+0.025
+
+**Result**: FMU advanced full 0.025 s using three stable sub-steps.
+
+#### Related Functions
+- [`fmi2ExitInitializationMode`](#fmi2exitinitializationmode) - Must be called before first DoStep
+- [`fmi2SetReal`](#fmi2setreal) - Set inputs before each DoStep
+- [`fmi2GetReal`](#fmi2getreal) - Read outputs after each DoStep
+- [`fmi2Terminate`](#fmi2terminate) - End simulation after DoStep loop
+
+#### Notes
+- **Performance critical**: Called millions of times in typical simulations - optimized for speed
+- **Sub-stepping is transparent**: Integration tool only sees communication steps, internal sub-stepping is hidden
+- **Zero-order hold assumption**: Inputs are assumed constant during each communication step (FMI standard)
+- **Outputs computed once**: After all sub-steps complete, not after each internal step
+- **MAX_SOLVER_STEPSIZE configurable**: Defined in `model_config.h` (default: 1e-3 s)
+- **EPSILON = 1e-9 s**: Threshold for "numerically insignificant" - balances precision vs performance
+- **Integer loop counter**: Avoids floating-point accumulation errors in sub-step counting
+- **Time consistency enforced**: Returns error if `currentCommunicationPoint` doesn't match internal clock
+- **Synchronous only**: Blocks until computation completes (`noSetFMUStatePriorToCurrentPoint` ignored)
+- **No variable step size within DoStep**: Uses fixed sub-steps (adaptive methods would require more complex integrators)
+
+#### Configuration
+
+Adjust in `model_config.h`:
+```c
+#define MAX_SOLVER_STEPSIZE 1e-3  // Maximum stable integration step (1 ms default)
+```
+
+Smaller values → more stable but slower
+Larger values → faster but may diverge for stiff systems
+
+#### Advanced: Epsilon Choice
+
+`EPSILON = 1e-9` (1 nanosecond) chosen because:
+- **Physical insignificance**: Below classical physics regime
+- **Numerical robustness**: 10⁶× larger than machine epsilon (2.2e-16)
+- **Accumulated error safety**: Provides margin for floating-point drift
+- **Industry standard**: Matches MATLAB, SciPy, FMI examples
+
+Remainders < 1e-9 s are skipped as numerical noise.
 
 ---

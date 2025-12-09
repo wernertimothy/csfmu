@@ -7,6 +7,7 @@ typedef struct modelInstance modelInstance;
 /* opaque model functions */
 typedef void (*getStateDerivatives)(modelInstance*);
 typedef void (*integrate)(modelInstance*, double);
+typedef void (*getOutputs)(modelInstance*);
 
 /* model meta data */
 typedef struct {
@@ -28,6 +29,7 @@ struct modelInstance {
     double* outputs;                          ///< Pointer to output values
     getStateDerivatives getStateDerivatives;  ///< Function to compute dx/dt
     integrate integrate;                      ///< Function to perform integration step
+    getOutputs getOutputs;                    ///< Functino to compute outputs y
 };
 
 /* memory management */
@@ -35,12 +37,14 @@ modelInstance* newModel(size_t nx, size_t nu, size_t ny, size_t np);
 void freeModel(modelInstance* model);
 
 /* Euler Forward x+ = x + dt*dt */
+// TODO: move to integrator.h
 void eulerForward(modelInstance* model, double stepSize);
 
 /* First order system */
+// TODO: move to specific model implementation
 void firstOrderSystem(modelInstance* model);
 
-/* model time step */
-void modelDoTimeStep(modelInstance* model, double stepSize);
-
+/* calculate outputs */
+// TODO: move to specific model implementation
+void firstOrderOutputs(modelInstance* model);
 #endif
