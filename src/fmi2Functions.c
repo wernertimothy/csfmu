@@ -368,22 +368,6 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
 }
 
 /**
- * terminate the fmu
- */
-fmi2Status fmi2Terminate(fmi2Component c) {
-    // TODO
-    return fmi2OK;
-}
-
-/**
- * reset the fmu
- */
-fmi2Status fmi2Reset(fmi2Component c) {
-    // TODO
-    return fmi2OK;
-}
-
-/** 
  * set a real value
  */
 fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Real value[]) {
@@ -573,4 +557,228 @@ fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2R
     myfmu2->model->getOutputs(myfmu2->model);
 
     return fmi2OK;
+}
+
+/**
+ * Cancel step
+ *
+ */
+fmi2Status fmi2CancelStep(fmi2Component c) {
+    (void)c;
+    return fmi2Error;
+}
+
+/**
+ * Terminate the FMU
+ */
+fmi2Status fmi2Terminate(fmi2Component c) {
+    (void)c;
+    return fmi2Error;
+}
+
+/**
+ * Reset the FMU
+ */
+fmi2Status fmi2Reset(fmi2Component c) {
+    (void)c;
+    return fmi2Error;
+}
+
+/***************************************************
+ * Status query functions
+ * These return fmi2Error as they are not implemented
+ * in this basic FMU template.
+ ***************************************************/
+
+fmi2Status fmi2GetStatus(fmi2Component c, const fmi2StatusKind s, fmi2Status* value) {
+    (void)c;
+    (void)s;
+    (void)value;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetRealStatus(fmi2Component c, const fmi2StatusKind s, fmi2Real* value) {
+    (void)c;
+    (void)s;
+    (void)value;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetIntegerStatus(fmi2Component c, const fmi2StatusKind s, fmi2Integer* value) {
+    (void)c;
+    (void)s;
+    (void)value;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetBooleanStatus(fmi2Component c, const fmi2StatusKind s, fmi2Boolean* value) {
+    (void)c;
+    (void)s;
+    (void)value;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetStringStatus(fmi2Component c, const fmi2StatusKind s, fmi2String* value) {
+    (void)c;
+    (void)s;
+    (void)value;
+    return fmi2Error;
+}
+
+/***************************************************
+ * FMU state management functions
+ * These return fmi2Error as state save/restore
+ * is not implemented in this basic FMU template.
+ ***************************************************/
+
+fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
+    (void)c;
+    (void)FMUstate;
+    return fmi2Error;
+}
+
+fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate) {
+    (void)c;
+    (void)FMUstate;
+    return fmi2Error;
+}
+
+fmi2Status fmi2FreeFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
+    (void)c;
+    (void)FMUstate;
+    return fmi2Error;
+}
+
+fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate FMUstate, size_t* size) {
+    (void)c;
+    (void)FMUstate;
+    (void)size;
+    return fmi2Error;
+}
+
+fmi2Status fmi2SerializeFMUstate(fmi2Component c, fmi2FMUstate FMUstate, fmi2Byte serializedState[], size_t size) {
+    (void)c;
+    (void)FMUstate;
+    (void)serializedState;
+    (void)size;
+    return fmi2Error;
+}
+
+fmi2Status fmi2DeSerializeFMUstate(fmi2Component c, const fmi2Byte serializedState[], size_t size, fmi2FMUstate* FMUstate) {
+    (void)c;
+    (void)serializedState;
+    (void)size;
+    (void)FMUstate;
+    return fmi2Error;
+}
+
+/***************************************************
+ * Directional derivatives and input/output derivatives
+ * These return fmi2Error as they are not implemented.
+ ***************************************************/
+
+fmi2Status fmi2GetDirectionalDerivative(fmi2Component c,
+                                        const fmi2ValueReference vUnknown_ref[], size_t nUnknown,
+                                        const fmi2ValueReference vKnown_ref[], size_t nKnown,
+                                        const fmi2Real dvKnown[], fmi2Real dvUnknown[]) {
+    (void)c;
+    (void)vUnknown_ref;
+    (void)nUnknown;
+    (void)vKnown_ref;
+    (void)nKnown;
+    (void)dvKnown;
+    (void)dvUnknown;
+    return fmi2Error;
+}
+
+fmi2Status fmi2SetRealInputDerivatives(fmi2Component c, const fmi2ValueReference vr[], size_t nvr,
+                                       const fmi2Integer order[], const fmi2Real value[]) {
+    (void)c;
+    (void)vr;
+    (void)nvr;
+    (void)order;
+    (void)value;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetRealOutputDerivatives(fmi2Component c, const fmi2ValueReference vr[], size_t nvr,
+                                        const fmi2Integer order[], fmi2Real value[]) {
+    (void)c;
+    (void)vr;
+    (void)nvr;
+    (void)order;
+    (void)value;
+    return fmi2Error;
+}
+
+/***************************************************
+ * Model Exchange specific functions
+ * These are not applicable to co-simulation FMUs
+ * and return fmi2Error as they are not supported.
+ ***************************************************/
+
+fmi2Status fmi2SetTime(fmi2Component c, fmi2Real time) {
+    (void)c;
+    (void)time;
+    return fmi2Error;
+}
+
+fmi2Status fmi2SetContinuousStates(fmi2Component c, const fmi2Real x[], size_t nx) {
+    (void)c;
+    (void)x;
+    (void)nx;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetDerivatives(fmi2Component c, fmi2Real derivatives[], size_t nx) {
+    (void)c;
+    (void)derivatives;
+    (void)nx;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetEventIndicators(fmi2Component c, fmi2Real eventIndicators[], size_t ni) {
+    (void)c;
+    (void)eventIndicators;
+    (void)ni;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetContinuousStates(fmi2Component c, fmi2Real x[], size_t nx) {
+    (void)c;
+    (void)x;
+    (void)nx;
+    return fmi2Error;
+}
+
+fmi2Status fmi2GetNominalsOfContinuousStates(fmi2Component c, fmi2Real x_nominal[], size_t nx) {
+    (void)c;
+    (void)x_nominal;
+    (void)nx;
+    return fmi2Error;
+}
+
+fmi2Status fmi2CompletedIntegratorStep(fmi2Component c, fmi2Boolean noSetFMUStatePriorToCurrentPoint,
+                                       fmi2Boolean* enterEventMode, fmi2Boolean* terminateSimulation) {
+    (void)c;
+    (void)noSetFMUStatePriorToCurrentPoint;
+    (void)enterEventMode;
+    (void)terminateSimulation;
+    return fmi2Error;
+}
+
+fmi2Status fmi2EnterEventMode(fmi2Component c) {
+    (void)c;
+    return fmi2Error;
+}
+
+fmi2Status fmi2NewDiscreteStates(fmi2Component c, fmi2EventInfo* eventInfo) {
+    (void)c;
+    (void)eventInfo;
+    return fmi2Error;
+}
+
+fmi2Status fmi2EnterContinuousTimeMode(fmi2Component c) {
+    (void)c;
+    return fmi2Error;
 }
