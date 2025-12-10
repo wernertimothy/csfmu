@@ -859,50 +859,104 @@ fmi2Status fmi2GetStringStatus(fmi2Component c, const fmi2StatusKind s, fmi2Stri
  ***************************************************/
 
 fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
-    (void)c;
+    /* unused parameters */
     (void)FMUstate;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2GetFMUstate is not supported.");
+    return fmi2Warning;
 }
 
 fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate) {
-    (void)c;
+    /* unused parameters */
     (void)FMUstate;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2SetFMUstate is not supported.");
+    return fmi2Warning;
 }
 
 fmi2Status fmi2FreeFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
-    (void)c;
+    /* unused parameters */
     (void)FMUstate;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2FreeFMUstate is not supported.");
+    return fmi2Warning;
 }
 
 fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate FMUstate, size_t* size) {
-    (void)c;
+    /* unused parameters */
     (void)FMUstate;
     (void)size;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2SerializedFMUstateSize is not supported.");
+    return fmi2Warning;
 }
 
 fmi2Status fmi2SerializeFMUstate(fmi2Component c, fmi2FMUstate FMUstate, fmi2Byte serializedState[], size_t size) {
-    (void)c;
+    /* unused parameters */
     (void)FMUstate;
     (void)serializedState;
     (void)size;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2SerializeFMUstate is not supported.");
+    return fmi2Warning;
 }
 
 fmi2Status fmi2DeSerializeFMUstate(fmi2Component c, const fmi2Byte serializedState[], size_t size, fmi2FMUstate* FMUstate) {
-    (void)c;
+    /* unused parameters */
     (void)serializedState;
     (void)size;
     (void)FMUstate;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2DeSerializeFMUstate is not supported.");
+    return fmi2Warning;
 }
 
 /***************************************************
@@ -913,37 +967,64 @@ fmi2Status fmi2GetDirectionalDerivative(fmi2Component c,
                                         const fmi2ValueReference vUnknown_ref[], size_t nUnknown,
                                         const fmi2ValueReference vKnown_ref[], size_t nKnown,
                                         const fmi2Real dvKnown[], fmi2Real dvUnknown[]) {
-    (void)c;
+    /* unused parameters */
     (void)vUnknown_ref;
     (void)nUnknown;
     (void)vKnown_ref;
     (void)nKnown;
     (void)dvKnown;
     (void)dvUnknown;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2GetDirectionalDerivative is not supported.");
+    return fmi2Warning;
 }
 
 fmi2Status fmi2SetRealInputDerivatives(fmi2Component c, const fmi2ValueReference vr[], size_t nvr,
                                        const fmi2Integer order[], const fmi2Real value[]) {
-    (void)c;
+    /* unused parameters */
     (void)vr;
     (void)nvr;
     (void)order;
     (void)value;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2SetRealInputDerivatives is not supported.");
+    return fmi2Warning;
 }
 
 fmi2Status fmi2GetRealOutputDerivatives(fmi2Component c, const fmi2ValueReference vr[], size_t nvr,
                                         const fmi2Integer order[], fmi2Real value[]) {
-    (void)c;
+    /* unused parameters */
     (void)vr;
     (void)nvr;
     (void)order;
     (void)value;
-    // TODO: log warning
-    return fmi2Error;
+
+    /* validate component */
+    if (!c) {
+        // can't log error
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    logWarningMessage(myfmu2, "fmi2GetRealOutputDerivatives is not supported.");
+    return fmi2Warning;
 }
 
 /***************************************************
