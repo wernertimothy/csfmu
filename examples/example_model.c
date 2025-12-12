@@ -2,17 +2,18 @@
 #include <stdio.h>
 #include "model.h"
 
+/**
+ * This is an example of how to use the model to run a basic simualtion
+ * 
+ * The system implemented is a simple first order system:
+ * 
+ * dx = -1/tau*x + k/tau*u
+ * y  = x
+ * 
+ * the integrator is an explicit wuler forward
+ */
+
 int main() {
-    /* example 
-    This is an example of how to use the model object to run a basic simulation.
-    The system implemented is a simple first order system:
-
-    dx = -1/tau*x + k/tau*u
-    y  = x
-
-    the integrator is set to eulerForward.
-
-    */
 
     /* simualtion condig */
     double dt   = 0.01;  ///> sample time
