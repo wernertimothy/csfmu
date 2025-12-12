@@ -76,6 +76,8 @@ typedef enum {
 
 /**
  * fmu state enum
+ * 
+ * note: states are mutually exclusive
  */
 typedef enum {
     stateStartEnd           = 0,      // pseudo state (not tracked)
@@ -86,8 +88,8 @@ typedef enum {
     stateStepFailed         = 1 << 4, // if fmi2DoStep returns fmi2Discard
     stateStepCanceled       = 1 << 5, // set by fmi2CancelStep
     stateTerminated         = 1 << 6, // set by fmi2Terminate
-    stateError              = 1 << 7, // if any returns fmi2Error
-    stateFatal              = 1 << 8, // if any returns fmi2Fatal
+    stateError              = 1 << 7, // if any returns fmi2Error (accumulated)
+    stateFatal              = 1 << 8, // if any returns fmi2Fatal (Accumulated)
 } stateCategory;
 
 /***************************************************
@@ -381,6 +383,7 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
 
     /* validate categories array */
     if (nCategories > 0 && categories == NULL) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "Invalid log categories.");
         return fmi2Error;
     }
@@ -469,7 +472,7 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
     myfmu2->model->getOutputs          = MODEL_OUTPUT_EQUATION;
 
     /* update state */
-    myfmu2->state |= stateInitializationMode;
+    myfmu2->state = stateInitializationMode;
 
     logEventMessage(myfmu2, "FMU entered initialization mode.");
     return fmi2OK;
@@ -497,8 +500,7 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
     }
 
     /* transition state */
-    myfmu2->state &= ~stateInitializationMode;
-    myfmu2->state |= stateStepComplete;
+    myfmu2->state = stateStepComplete;
 
     logEventMessage(myfmu2, "FMU initilized succsessfully");
     return fmi2OK;
@@ -529,6 +531,7 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
 
     /* validate value refrence*/
     if (nvr > 0 && (!vr || !value)) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "Invalid value reference or value.");
         return fmi2Error;
     }
@@ -547,6 +550,7 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
             myfmu2->model->inputs[inputIndex] = value[k];
         }
         else {
+            myfmu2->state |= stateError;
             logErrorMessage(myfmu2, "The value reference appears to be out of scope for setting a value.");
             return fmi2Error;
         }
@@ -609,6 +613,7 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
 
     /* validate value reference */
     if (nvr > 0 && (!vr || !value)) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "Invalid value reference or value.");
         return fmi2Error;
     }
@@ -632,6 +637,7 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
             value[k] = myfmu2->model->outputs[outputIndex];
         }
         else {
+            myfmu2->state |= stateError;
             logErrorMessage(myfmu2, "The value reference appears to be out of scope for getting values.");
             return fmi2Error;
         }
@@ -706,12 +712,14 @@ fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2R
 
     /* validate communicationStepSize */
     if (communicationStepSize <= 0.0) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "communicationStepSize must be greater than zero.");
         return fmi2Error;
     }
 
     /* validate time */
     if (!(areEqualReals(myfmu2->time, currentCommunicationPoint))) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "FMU internal clock does not match environment clock.");
         return fmi2Error;
     }
