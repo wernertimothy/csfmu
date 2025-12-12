@@ -20,4 +20,5 @@ int main() {
 
     /* initilaize fmu */
 
+    return 0;
 }
