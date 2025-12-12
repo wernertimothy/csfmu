@@ -4,14 +4,23 @@
 #include "model_config.h"
 #include "model.h"
 
-/*
-TODOs:
-- better way to check allowed state (bitmask)
-- implement all fmu states
-- should stubbed functions return warning or error ?
-*/
 
 #define EPSILON 1e-9 // numerical significance boarder
+
+/***************************************************
+ * fmi2Function state validation bitmasks
+//  ***************************************************/ 
+
+#define STATE_fmi2SetupExperiment (stateInstantiated)
+#define STATE_fmi2SetDebugLogging (stateInstantiated | stateInitializationMode | stateStepComplete | \
+                                   stateStepInProgress | stateStepFailed | stateStepCanceled | \
+                                   stateTerminated | stateError | stateFatal)
+#define STATE_fmi2EnterInitializationMode (stateInstantiated)
+#define STATE_fmi2ExitInitializationMode (stateInitializationMode)
+#define STATE_fmi2SetReal (stateInstantiated | stateInitializationMode | stateStepComplete)
+#define STATE_fmi2GetReal (stateInstantiated | stateStepComplete | stateStepFailed | \
+                           stateStepCanceled | stateTerminated | stateError)
+#define STATE_fmi2DoStep (stateStepComplete)
 
 /***************************************************
  * Type Definitions and Enums
@@ -67,17 +76,30 @@ typedef enum {
 
 /**
  * fmu state enum
- * TODO: make complete
  */
 typedef enum {
+    stateStartEnd           = 0,      // pseudo state (not tracked)
     stateInstantiated       = 1 << 0, // set by fmi2Instantiate
     stateInitializationMode = 1 << 1, // set by fmi2EnterInitializationMode
-    stateInitialized        = 1 << 2, // set by fmi2ExitInitializationMode
+    stateStepComplete       = 1 << 2, // set by fmi2ExitInitializationMode and fmi2doStep
+    stateStepInProgress     = 1 << 3, // set by asynchronous fmi2doStep
+    stateStepFailed         = 1 << 4, // if fmi2DoStep returns fmi2Discard
+    stateStepCanceled       = 1 << 5, // set by fmi2CancelStep
+    stateTerminated         = 1 << 6, // set by fmi2Terminate
+    stateError              = 1 << 7, // if any returns fmi2Error
+    stateFatal              = 1 << 8, // if any returns fmi2Fatal
 } stateCategory;
 
 /***************************************************
  * Helper Functions
  ***************************************************/
+
+ /**
+  * helper function to check fmu state
+  */
+ static inline fmi2Boolean stateIsAllowed(unsigned int currentState, unsigned int expectedState) {
+    return (currentState & expectedState);
+ }
 
 /**
  * helper function to check log category
@@ -302,13 +324,15 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
     myFMU2* myfmu2 = (myFMU2*)c;
 
     /* validate state */
-    if (!(myfmu2->state & stateInstantiated)) {
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2SetupExperiment))) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "FMU needs to be fully instantiated.");
         return fmi2Error;
     }
 
     /* validate time window */
     if (stopTimeDefined && stopTime < startTime) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "stopTime must be >= startTime");
         return fmi2Error;
     }
@@ -349,7 +373,11 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
     myFMU2* myfmu2 = (myFMU2*)c;
 
     /* validate state */
-    // can be called in every state
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2SetDebugLogging))) {
+        myfmu2->state |= stateError;
+        logErrorMessage(myfmu2, "Can't call fmi2SetDebugLogging in this state.");
+        return fmi2Error;
+    }
 
     /* validate categories array */
     if (nCategories > 0 && categories == NULL) {
@@ -423,7 +451,8 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
     myFMU2* myfmu2 = (myFMU2*)c;
 
     /* validate state */
-    if (!(myfmu2->state & stateInstantiated)) {
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2EnterInitializationMode))) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "fmi2EnterInitializationMode can only be called after fmi2Instantiate and fmi2SetupExperiment");
         return fmi2Error;
     }
@@ -461,14 +490,15 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
     myFMU2* myfmu2 = (myFMU2*)c;
 
     /* validate state */
-    if (!(myfmu2->state & stateInitializationMode)) {
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2ExitInitializationMode))) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "fmi2ExitInitializationMode can only be called after fmi2EnterInitializationMode");
         return fmi2Error;
     }
 
     /* transition state */
     myfmu2->state &= ~stateInitializationMode;
-    myfmu2->state |= stateInitialized;
+    myfmu2->state |= stateStepComplete;
 
     logEventMessage(myfmu2, "FMU initilized succsessfully");
     return fmi2OK;
@@ -491,14 +521,15 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
     myFMU2* myfmu2 = (myFMU2*)c;
 
     /* validate state */
-    if (!(myfmu2->state & (stateInstantiated | stateInitializationMode ))) {
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2SetReal))) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "FMU needs to be fully instantiated and in initilaization mode to set values.");
         return fmi2Error;
     }
 
     /* validate value refrence*/
     if (nvr > 0 && (!vr || !value)) {
-        logErrorMessage(myfmu2, "Invalid value reference or values.");
+        logErrorMessage(myfmu2, "Invalid value reference or value.");
         return fmi2Error;
     }
 
@@ -570,7 +601,8 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
     myFMU2* myfmu2 = (myFMU2*)c;
 
     /* validate state */
-    if (!(myfmu2->state & (stateInstantiated | stateInitializationMode))) {
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2GetReal))) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "FMU needs to be fully instantiated and in initiliaztion mode to get values.");
         return fmi2Error;
     }
@@ -666,7 +698,8 @@ fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2R
     myFMU2* myfmu2 = (myFMU2*)c;
 
     /* validate state */
-    if (!(myfmu2->state & stateInitialized)) {
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2DoStep))) {
+        myfmu2->state |= stateError;
         logErrorMessage(myfmu2, "FMU needs to be fully initialized.");
         return fmi2Error;
     }
