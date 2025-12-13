@@ -1,6 +1,6 @@
 # fmuTemplate
 
-A template for Co-Simulation FMUs written in C.
+A template for synchronous Co-Simulation FMUs written in C.
 
 You want to simulate a model?
 Your model is a unit of a coupled system?
@@ -10,7 +10,7 @@ FMU is the way to go.
 
 ## Co-Simulation FMUs
 
-Since you have found your way to this project, you are probably already familiar with what a FMU is.
+Since you have found your way to this project, you are probably already familiar with what an FMU is.
 If not, go here to read more about [Co-Sim FMUs][].
 
 ## Getting Started

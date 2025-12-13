@@ -9,7 +9,7 @@
 
 /***************************************************
  * fmi2Function state validation bitmasks
-//  ***************************************************/ 
+***************************************************/ 
 
 #define STATE_fmi2SetupExperiment (stateInstantiated)
 #define STATE_fmi2SetDebugLogging (stateInstantiated | stateInitializationMode | stateStepComplete | \

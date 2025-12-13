@@ -15,25 +15,22 @@
 
 int main() {
 
-    /* simualtion condig */
-    double dt   = 0.01;  ///> sample time
-    double T    = 1.0;   ///> final simulation time
-    double time = 0.0;   ///> current time of simulation
-
-    /* system dimensions */
+    /* begin model config */
+    
+    /* dimensions */
     size_t nx = 1;       ///> number of states
     size_t nu = 1;       ///> number of inputs
     size_t ny = 1;       ///> number of output
     size_t np = 2;       ///> number of parameter
-
-    /* system values */
+    
+    /* parameter */
     double tau = 0.15;   ///> PT1 time constant
     double k   = 1.0;    ///> PT1 gain
     double x0  = 0.0;    ///> initial condition
-
+    
     /* instantiate model */
     modelInstance* model  = newModel(nx, nu, ny, np);
-
+    
     /* initialize model*/
     model->getStateDerivatives = firstOrderSystem;  ///> system equations
     model->getOutputs          = firstOrderOutputs; ///> y = x
@@ -42,8 +39,14 @@ int main() {
     model->parameter[1]        = k;               
     model->states[0]           = x0;
     model->getOutputs(model);
+    
+    /* begin  simulation */
 
-    /* run simulation */
+    /* simualtion config */
+    double dt   = 0.01;  ///> sample time
+    double T    = 1.0;   ///> final simulation time
+    double time = 0.0;   ///> current time of simulation
+    
     int N = (int) T/dt;
     for (int k=0; k<N; k++) {
         /* log current state */

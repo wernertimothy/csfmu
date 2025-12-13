@@ -10,7 +10,7 @@ Every system can be abstracted into a mathematical function that maps *inputs* u
 For any dynamic system, i.e. a system that changes in time, this function is a *differential equation*.
 To simulate the system is to numerically solve this differential equation.
  
-An FMU is a way to define such a function and wrap it in a standardized API so simulate it.
+An FMU is a way to define such a function and wrap it in a standardized API to simulate it.
 This standard is called the **Functional Mock-up Interface (fmi)**.
  
 ## Okay. But why ?
