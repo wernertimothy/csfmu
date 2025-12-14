@@ -149,7 +149,7 @@ static inline void logEventMessage(myFMU2* fmu, fmi2String message) {
             fmu->componentEnvironment,
             fmu->instanceName,
             fmi2OK,
-            LOG_EVENT,
+            LOG_INFO,
             message
         );
     }
@@ -328,7 +328,7 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2SetupExperiment))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "FMU needs to be fully instantiated.");
+        logErrorMessage(myfmu2, "fmi2SetupExperiment must only be called after instatiation.");
         return fmi2Error;
     }
 

@@ -1,16 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include "fmi2Functions.h"
 
 /**
- * This is an example of how to use the fmu to run a basic simualtion
+ * This is an example of how to use the fmu to run a basic simulation
  * 
  * The system implemented is a simple first order system:
  * 
  * dx = -1/tau*x + k/tau*u
  * y  = x
  * 
- * the integrator is an explicit wuler forward
+ * the integrator is an explicit euler forward
  */
 
  void myLogger(fmi2ComponentEnvironment componentEnvironment,
@@ -20,22 +21,35 @@
                fmi2String message,
                ...) {
     (void)componentEnvironment;
-    (void)instanceName;
     (void)status;
-    (void)category;
-    // simple print
-    printf("%s\n", message);
+
+    /* handle variable format specifiers */
+    va_list args;
+    va_start(args, message);
+
+    // print message
+    printf("[%s] %s : ", category, instanceName);
+    vprintf(message, args);
+    printf("\n");
+
+    va_end(args);
 }
 
 
 int main() {
 
+    
+    /* simualtion config */
+    double dt   = 0.01;  ///> sample time
+    double T    = 1.0;   ///> final simulation time
+    double time = 0.0;   ///> current time of simulation
+    
     /* begin fmu config */
     fmi2String instanceName        = "fmuTemplate";
     fmi2Type   fmuType             = fmi2CoSimulation;
     fmi2String fmuGUID             = "{a1b2c3d4-e5f6-7890-abcd-ef1234567890}";
     fmi2String fmuResourceLocation = "";
-
+    
     const fmi2CallbackFunctions callbacks = {
         .allocateMemory       = calloc,
         .freeMemory           = free,
@@ -44,11 +58,58 @@ int main() {
         .logger               = myLogger
     };
 
-    /* initilaize fmu */
+    /* instantiate fmu */
     fmi2Component fmu = fmi2Instantiate(instanceName, fmuType, fmuGUID, fmuResourceLocation, &callbacks, fmi2False, fmi2True);
+    if (!fmu) goto cleanup;
+
+    /* initialize fmu */
+    fmi2Status fmuStatus = fmi2SetupExperiment(fmu, fmi2False, 0.0, time, fmi2True, T);
+    if (fmuStatus==fmi2Error) goto cleanup;
+
+    fmuStatus = fmi2EnterInitializationMode(fmu);
+    if (fmuStatus==fmi2Error) goto cleanup;
+
+    fmuStatus = fmi2ExitInitializationMode(fmu);
+    if (fmuStatus==fmi2Error) goto cleanup;
+
+    /* begin simulation */
+    double y = 0.0;
+    double u = 1.0;
+    const fmi2ValueReference VR_y = 3;
+    const fmi2ValueReference VR_u = 2;
+
+    /* deactivate logging */
+    fmuStatus = fmi2SetDebugLogging(fmu, fmi2False, 0, NULL);
+    if (fmuStatus==fmi2Error) goto cleanup;
+
+    int N = (int) T/dt;
+    for (int k=0; k<N; k++) {
+        /* log current state */
+        fmuStatus = fmi2GetReal(fmu, &VR_y, 1, &y);
+        if (fmuStatus==fmi2Error) goto cleanup;
+
+        printf("t = %.2f, y = %.2f\n", time, y);
+
+        /* set fmu input */
+        fmuStatus = fmi2SetReal(fmu, &VR_u, 1, &u);
+        if (fmuStatus==fmi2Error) goto cleanup;
+
+        /* step in time */
+        fmuStatus = fmi2DoStep(fmu, time, dt, fmi2False);
+        if (fmuStatus==fmi2Error) goto cleanup;
+
+        time += dt;
+    }
+    fmuStatus = fmi2GetReal(fmu, &VR_y, 1, &y);
+    if (fmuStatus==fmi2Error) goto cleanup;
+    printf("t = %.2f, y = %.2f\n", time, y);
+
+    /* activate logging */
+    fmuStatus = fmi2SetDebugLogging(fmu, fmi2True, 0, NULL);
+    if (fmuStatus==fmi2Error) goto cleanup;
 
     /* free fmu memory */
-    fmi2FreeInstance(fmu);
-
-    return 0;
+    cleanup:
+        fmi2FreeInstance(fmu);
+        return 0;
 }

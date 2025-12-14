@@ -3,14 +3,14 @@
 #include "model.h"
 
 /**
- * This is an example of how to use the model to run a basic simualtion
+ * This is an example of how to use the model to run a basic simulation
  * 
  * The system implemented is a simple first order system:
  * 
  * dx = -1/tau*x + k/tau*u
  * y  = x
  * 
- * the integrator is an explicit wuler forward
+ * the integrator is an explicit euler forward
  */
 
 int main() {
@@ -63,6 +63,9 @@ int main() {
         /* write outputs */
         model->getOutputs(model);
     }
+    /* log current state */
+    printf("t = %.2f, y = %.2f\n", time, model->outputs[0]);
+
 
     /* free model memory */
     freeModel(model);
