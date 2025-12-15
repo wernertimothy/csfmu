@@ -27,7 +27,7 @@
     va_list args;
     va_start(args, message);
 
-    // print message
+    /* print message */
     printf("[%s] %s : ", category, instanceName);
     vprintf(message, args);
     printf("\n");
@@ -38,7 +38,6 @@
 
 int main() {
 
-    
     /* simualtion config */
     double dt   = 0.01;  ///> sample time
     double T    = 1.0;   ///> final simulation time
@@ -64,13 +63,13 @@ int main() {
 
     /* initialize fmu */
     fmi2Status fmuStatus = fmi2SetupExperiment(fmu, fmi2False, 0.0, time, fmi2True, T);
-    if (fmuStatus==fmi2Error) goto cleanup;
+    if (fmuStatus >= fmi2Error) goto cleanup;
 
     fmuStatus = fmi2EnterInitializationMode(fmu);
-    if (fmuStatus==fmi2Error) goto cleanup;
+    if (fmuStatus >= fmi2Error) goto cleanup;
 
     fmuStatus = fmi2ExitInitializationMode(fmu);
-    if (fmuStatus==fmi2Error) goto cleanup;
+    if (fmuStatus >= fmi2Error) goto cleanup;
 
     /* begin simulation */
     double y = 0.0;
@@ -80,33 +79,37 @@ int main() {
 
     /* deactivate logging */
     fmuStatus = fmi2SetDebugLogging(fmu, fmi2False, 0, NULL);
-    if (fmuStatus==fmi2Error) goto cleanup;
+    if (fmuStatus >= fmi2Error) goto cleanup;
 
     int N = (int) T/dt;
     for (int k=0; k<N; k++) {
         /* log current state */
         fmuStatus = fmi2GetReal(fmu, &VR_y, 1, &y);
-        if (fmuStatus==fmi2Error) goto cleanup;
+        if (fmuStatus >= fmi2Error) goto cleanup;
 
         printf("t = %.2f, y = %.2f\n", time, y);
 
         /* set fmu input */
         fmuStatus = fmi2SetReal(fmu, &VR_u, 1, &u);
-        if (fmuStatus==fmi2Error) goto cleanup;
+        if (fmuStatus >= fmi2Error) goto cleanup;
 
         /* step in time */
         fmuStatus = fmi2DoStep(fmu, time, dt, fmi2False);
-        if (fmuStatus==fmi2Error) goto cleanup;
+        if (fmuStatus >= fmi2Error) goto cleanup;
 
         time += dt;
     }
     fmuStatus = fmi2GetReal(fmu, &VR_y, 1, &y);
-    if (fmuStatus==fmi2Error) goto cleanup;
+    if (fmuStatus >= fmi2Error) goto cleanup;
     printf("t = %.2f, y = %.2f\n", time, y);
 
     /* activate logging */
     fmuStatus = fmi2SetDebugLogging(fmu, fmi2True, 0, NULL);
-    if (fmuStatus==fmi2Error) goto cleanup;
+    if (fmuStatus >= fmi2Error) goto cleanup;
+
+    /* terminate */
+    fmuStatus = fmi2Terminate(fmu);
+    if (fmuStatus >= fmi2Error) goto cleanup;
 
     /* free fmu memory */
     cleanup:

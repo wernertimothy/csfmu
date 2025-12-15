@@ -26,6 +26,8 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
   - [fmi2GetString](#fmi2getstring)
 - [Simulation](#simulation)
   - [fmi2DoStep](#fmi2dostep)
+- [Shutdown](#shutdown)
+  - [fmi2Terminate](#fmi2terminate)
 
 ---
 
@@ -1097,5 +1099,137 @@ Larger values → faster but may diverge for stiff systems
 - **Industry standard**: Matches MATLAB, SciPy, FMI examples
 
 Remainders < 1e-9 s are skipped as numerical noise.
+
+---
+
+## Shutdown
+
+Functions for gracefully ending simulation and cleaning up FMU resources.
+
+### fmi2Terminate
+
+Signals the end of simulation and prepares the FMU for cleanup.
+
+#### Signature
+```c
+fmi2Status fmi2Terminate(fmi2Component c);
+```
+
+#### Description
+Signals that the simulation has ended and the FMU should perform any necessary finalization before destruction. This function represents **logical shutdown** - closing files, finalizing computations, releasing simulation-specific resources - as distinct from `fmi2FreeInstance` which handles **physical cleanup** (memory deallocation). After calling this function, the FMU transitions to the Terminated state where only `fmi2FreeInstance` or `fmi2Reset` can be called.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance to terminate |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Termination successful, FMU is ready for cleanup |
+| `fmi2Error` | NULL component or FMU not in a valid state for termination |
+
+#### FMI State Requirements
+**Can be called in**: **Step Complete** or **Step Failed** (after simulation ends)
+**State transitions**: Transitions from current state to **Terminated** state
+
+#### Valid Call Sequence
+The complete co-simulation lifecycle is:
+```c
+fmi2Instantiate       → Instantiated
+fmi2SetupExperiment   → Instantiated
+fmi2EnterInitMode     → Initialization Mode
+fmi2ExitInitMode      → Step Complete
+fmi2DoStep (loop)     → Step Complete
+fmi2Terminate         → Terminated  ← This function
+fmi2FreeInstance      → (destroyed)
+```
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
+fmi2EnterInitializationMode(fmu);
+fmi2ExitInitializationMode(fmu);
+
+// Simulation loop
+fmi2ValueReference inputRef = 2, outputRef = 3;
+fmi2Real input = 1.0, output;
+double t = 0.0, dt = 0.01, stopTime = 10.0;
+
+while (t < stopTime) {
+    fmi2SetReal(fmu, &inputRef, 1, &input);
+    fmi2DoStep(fmu, t, dt, fmi2True);
+    fmi2GetReal(fmu, &outputRef, 1, &output);
+    printf("t=%.2f, y=%.4f\n", t, output);
+    t += dt;
+}
+
+// Graceful shutdown
+fmi2Status status = fmi2Terminate(fmu);
+if (status != fmi2OK) {
+    fprintf(stderr, "Warning: Terminate failed\n");
+}
+
+// Final cleanup
+fmi2FreeInstance(fmu);
+```
+
+#### Error Recovery Example
+```c
+// Simulation with error handling
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+// ... setup and initialization ...
+
+double t = 0.0, dt = 0.01;
+fmi2Status status;
+
+for (int i = 0; i < 1000; i++) {
+    status = fmi2DoStep(fmu, t, dt, fmi2True);
+    if (status >= fmi2Error) {
+        // Step failed - still terminate gracefully
+        fprintf(stderr, "Step failed at t=%.2f\n", t);
+        break;
+    }
+    t += dt;
+}
+
+// Terminate works even after DoStep failure
+fmi2Terminate(fmu);  // Allowed from stateStepFailed
+fmi2FreeInstance(fmu);
+```
+
+#### Related Functions
+- [`fmi2DoStep`](#fmi2dostep) - Last function called before termination
+- [`fmi2FreeInstance`](#fmi2freeinstance) - Must be called after termination to free memory
+- [`fmi2Reset`](#fmi2reset) - Alternative to FreeInstance for reusing the FMU
+
+#### Notes
+- **Two-phase destruction pattern**: `fmi2Terminate` handles logical shutdown, `fmi2FreeInstance` handles memory cleanup
+- **Not strictly required**: Integration tools can skip `fmi2Terminate` and call `fmi2FreeInstance` directly, but termination is best practice
+- **Template implementation is minimal**: This FMU template has no files or resources to close, so the function just transitions state
+- **Real FMUs might**: Close log files, disconnect from hardware, finalize statistics, save checkpoint data
+- **After termination**: Only `fmi2FreeInstance` and `fmi2Reset` are allowed - prevents accidental re-simulation
+- **Callable after failure**: Can be called from `stateStepFailed` to enable graceful shutdown even when simulation encounters errors
+- **Event logging**: Logs "FMU was terminated" when logging is enabled, useful for debugging lifecycle issues
+- **Idiomatic C pattern**: Two-phase destruction (logical shutdown + memory cleanup) appears in SDL, OpenGL, database libraries
+
+#### Why Separate Terminate and FreeInstance?
+
+**Scenario: Complex FMU with resources**
+```c
+// Hypothetical FMU that logs to file
+fmi2DoStep(...);  // Last simulation step
+fmi2Terminate(fmu);  // Writes final statistics, closes log file gracefully
+fmi2FreeInstance(fmu);  // Frees memory
+```
+
+**Benefits:**
+1. **Graceful resource cleanup**: Files closed properly, buffers flushed
+2. **Error recovery**: Can terminate even after failures
+3. **Separation of concerns**: Simulation logic vs. memory management
+4. **Debugging**: Terminate can log final state for diagnostics
+
+**In this template**: The function is simple (just state transition) because the template has no resources, but the pattern is established for future extensions.
 
 ---

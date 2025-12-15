@@ -21,6 +21,7 @@
 #define STATE_fmi2GetReal (stateInstantiated | stateStepComplete | stateStepFailed | \
                            stateStepCanceled | stateTerminated | stateError)
 #define STATE_fmi2DoStep (stateStepComplete)
+#define STATE_fmi2Terminate (stateStepComplete | stateStepFailed)
 
 /***************************************************
  * Type Definitions and Enums
@@ -88,8 +89,8 @@ typedef enum {
     stateStepFailed         = 1 << 4, // if fmi2DoStep returns fmi2Discard
     stateStepCanceled       = 1 << 5, // set by fmi2CancelStep
     stateTerminated         = 1 << 6, // set by fmi2Terminate
-    stateError              = 1 << 7, // if any returns fmi2Error (accumulated)
-    stateFatal              = 1 << 8, // if any returns fmi2Fatal (Accumulated)
+    stateError              = 1 << 7, // if any returns fmi2Error (accumulated, not exclusive)
+    stateFatal              = 1 << 8, // if any returns fmi2Fatal (accumulated, not exclusive)
 } stateCategory;
 
 /***************************************************
@@ -275,7 +276,7 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
     /* set state */
     myfmu2->state = stateInstantiated;
 
-    logEventMessage(myfmu2, "FMU instantiated succsessfully.");
+    logEventMessage(myfmu2, "FMU instantiated.");
     return (fmi2Component)myfmu2;
 }
 
@@ -328,7 +329,7 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2SetupExperiment))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "fmi2SetupExperiment must only be called after instatiation.");
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2SetupExperiment.");
         return fmi2Error;
     }
 
@@ -344,7 +345,7 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
     myfmu2->stopTime  = stopTime;
     myfmu2->time      = startTime;
 
-    logEventMessage(myfmu2, "FMU Experiment set up succsessfully.");
+    logEventMessage(myfmu2, "FMU Experiment set up.");
     return fmi2OK;
 }
 
@@ -377,7 +378,7 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2SetDebugLogging))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Can't call fmi2SetDebugLogging in this state.");
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2SetDebugLogging.");
         return fmi2Error;
     }
 
@@ -391,14 +392,14 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
     /* set log level based on loggingOn flag */
     if (!loggingOn) {
         myfmu2->logLevel = logNone;
-        logEventMessage(myfmu2, "log level set succsessfully.");
+        logEventMessage(myfmu2, "log level set.");
         return fmi2OK;
     }
 
     /* enable all categories if nCategories == 0 */
     if (nCategories == 0) {
         myfmu2->logLevel = logAll;
-        logEventMessage(myfmu2, "Log level set succsessfully.");
+        logEventMessage(myfmu2, "Log level set.");
         return fmi2OK;
     }
 
@@ -408,7 +409,7 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
         const char* cat = categories[i];
 
         if (strcmp(cat, "logAll") == 0) {
-            logEventMessage(myfmu2, "Log level set succsessfully.");
+            logEventMessage(myfmu2, "Log level set.");
             myfmu2->logLevel = logAll;
             return fmi2OK; // No need to process remaining categories
         } else if (strcmp(cat, "logEvents") == 0) {
@@ -433,7 +434,7 @@ fmi2Status fmi2SetDebugLogging(fmi2Component c,
         // Unknown categories are silently ignored
     }
 
-    logEventMessage(myfmu2, "Log level set succsessfully.");
+    logEventMessage(myfmu2, "Log level set.");
     return fmi2OK;
 }
 
@@ -456,7 +457,7 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2EnterInitializationMode))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "fmi2EnterInitializationMode can only be called after fmi2Instantiate and fmi2SetupExperiment");
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2EnterInitializationMode.");
         return fmi2Error;
     }
 
@@ -495,14 +496,14 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2ExitInitializationMode))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "fmi2ExitInitializationMode can only be called after fmi2EnterInitializationMode");
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2ExitInitializationMode.");
         return fmi2Error;
     }
 
     /* transition state */
     myfmu2->state = stateStepComplete;
 
-    logEventMessage(myfmu2, "FMU initilized succsessfully");
+    logEventMessage(myfmu2, "FMU initilized.");
     return fmi2OK;
 }
 
@@ -525,7 +526,7 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2SetReal))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "FMU needs to be fully instantiated and in initilaization mode to set values.");
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2SetReal.");
         return fmi2Error;
     }
 
@@ -555,7 +556,7 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
             return fmi2Error;
         }
     }
-    logEventMessage(myfmu2, "Values succsessfully set.");
+    logEventMessage(myfmu2, "Values set.");
     return fmi2OK;
 }
 
@@ -607,7 +608,7 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2GetReal))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "FMU needs to be fully instantiated and in initiliaztion mode to get values.");
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2Getreal.");
         return fmi2Error;
     }
 
@@ -642,7 +643,7 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
             return fmi2Error;
         }
     }
-    logEventMessage(myfmu2, "Values succsessfully get.");
+    logEventMessage(myfmu2, "Values get.");
     return fmi2OK;
 }
 
@@ -706,7 +707,7 @@ fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2R
     /* validate state */
     if (!(stateIsAllowed(myfmu2->state, STATE_fmi2DoStep))) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "FMU needs to be fully initialized.");
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2DoStep.");
         return fmi2Error;
     }
 
@@ -750,7 +751,7 @@ fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2R
     /* write outpus */
     myfmu2->model->getOutputs(myfmu2->model);
 
-    logEventMessage(myfmu2, "FMU stepped succsessfully.");
+    logEventMessage(myfmu2, "FMU stepped.");
     return fmi2OK;
 }
 
@@ -775,7 +776,7 @@ fmi2Status fmi2CancelStep(fmi2Component c) {
  ***************************************************/
 
 /**
- * Terminate the FMU (not implemented)
+ * Terminate the FMU
  */
 fmi2Status fmi2Terminate(fmi2Component c) {
     /* validate component */
@@ -786,8 +787,20 @@ fmi2Status fmi2Terminate(fmi2Component c) {
     
     myFMU2* myfmu2 = (myFMU2*)c;
 
-    logWarningMessage(myfmu2, "fmi2Terminated is not supported.");
-    return fmi2Warning;
+    /* validate state */
+    if (!(stateIsAllowed(myfmu2->state, STATE_fmi2Terminate))) {
+        myfmu2->state |= stateError;
+        logErrorMessage(myfmu2, "Illegal call sequence for fmi2Terminate.");
+        return fmi2Error;
+    }
+
+    // nothing here to terminate
+
+    /* transition state */
+    myfmu2->state = stateTerminated;
+
+    logEventMessage(myfmu2, "FMU was terminated.");
+    return fmi2OK;
 }
 
 /**
