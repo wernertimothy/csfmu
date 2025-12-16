@@ -1,11 +1,14 @@
 
 #include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
 #include "fmi2Functions.h"
 #include "model_config.h"
 #include "model.h"
 
 
-#define EPSILON 1e-9 // numerical significance boarder
+#define EPSILON 1e-9         // numerical significance boarder
+#define LOG_BUFFER_SIZE 512  // buffer size for log messages
 
 /***************************************************
  * fmi2Function state validation bitmasks
@@ -112,48 +115,56 @@ static inline fmi2Boolean logCategoryActive(myFMU2* fmu, logCategory category) {
 }
 
 /**
- * helper function to log an error
+ * helper function log message core
  */
-static inline void logErrorMessage(myFMU2* fmu, fmi2String message) {
-    if (logCategoryActive(fmu, logStatusError)) {
+static inline void logMessage(myFMU2* fmu,
+                              logCategory category, 
+                              fmi2Status status, 
+                              const char* categoryName,
+                              fmi2String message, 
+                              va_list args) {
+    if (logCategoryActive(fmu, category)) {
+        char buffer[LOG_BUFFER_SIZE];
+        vsnprintf(buffer, sizeof(buffer), message, args);
+        // could catch truncation if (sizeWritten >= sizeof(buffer))
         fmu->logger(
             fmu->componentEnvironment,
             fmu->instanceName,
-            fmi2Error,
-            LOG_ERROR,
-            message
+            status,
+            categoryName,
+            buffer
         );
     }
+}
+
+/**
+ * helper function to log an error
+ */
+static inline void logErrorMessage(myFMU2* fmu, fmi2String message, ...) {
+    va_list args;
+    va_start(args, message);
+    logMessage(fmu, logStatusError, fmi2Error, LOG_ERROR, message, args);
+    va_end(args);
 }
 
 /**
  * helper function to log a warning
  */
-static inline void logWarningMessage(myFMU2* fmu, fmi2String message) {
-    if (logCategoryActive(fmu, logStatusWarning)) {
-        fmu->logger(
-            fmu->componentEnvironment,
-            fmu->instanceName,
-            fmi2Warning,
-            LOG_WARNING,
-            message
-        );
-    }
+static inline void logWarningMessage(myFMU2* fmu, fmi2String message, ...) {
+    va_list args;
+    va_start(args, message);
+    logMessage(fmu, logStatusWarning, fmi2Warning, LOG_WARNING, message, args);
+    va_end(args);
 }
 
 /**
  * helper function to log an event
  */
-static inline void logEventMessage(myFMU2* fmu, fmi2String message) {
-    if (logCategoryActive(fmu, logEvents)) {
-        fmu->logger(
-            fmu->componentEnvironment,
-            fmu->instanceName,
-            fmi2OK,
-            LOG_INFO,
-            message
-        );
-    }
+static inline void logEventMessage(myFMU2* fmu, fmi2String message, ...) {
+    va_list args;
+    va_start(args, message);
+    logMessage(fmu, logEvents, fmi2OK, LOG_INFO, message, args);
+    va_end(args);
 }
 
 /**
@@ -336,7 +347,7 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
     /* validate time window */
     if (stopTimeDefined && stopTime < startTime) {
         myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "stopTime must be >= startTime");
+        logErrorMessage(myfmu2, "stopTime %.4f must be >= startTime", stopTime);
         return fmi2Error;
     }
 
@@ -345,7 +356,7 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
     myfmu2->stopTime  = stopTime;
     myfmu2->time      = startTime;
 
-    logEventMessage(myfmu2, "FMU Experiment set up.");
+    logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. End = %.4f", startTime, stopTime);
     return fmi2OK;
 }
 
@@ -772,7 +783,7 @@ fmi2Status fmi2CancelStep(fmi2Component c) {
 }
 
 /***************************************************
- * FMI 2.0 Simulation Control (Stubs)
+ * FMI 2.0 Simulation Control 
  ***************************************************/
 
 /**
@@ -820,7 +831,7 @@ fmi2Status fmi2Reset(fmi2Component c) {
 }
 
 /***************************************************
- * FMI 2.0 Status Queries (Stubs)
+ * FMI 2.0 Status Queries 
  ***************************************************/
 
 fmi2Status fmi2GetStatus(fmi2Component c, const fmi2StatusKind s, fmi2Status* value) {
@@ -909,7 +920,7 @@ fmi2Status fmi2GetStringStatus(fmi2Component c, const fmi2StatusKind s, fmi2Stri
 }
 
 /***************************************************
- * FMI 2.0 FMU State Management (Stubs)
+ * FMI 2.0 FMU State Management 
  ***************************************************/
 
 fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
@@ -1014,7 +1025,7 @@ fmi2Status fmi2DeSerializeFMUstate(fmi2Component c, const fmi2Byte serializedSta
 }
 
 /***************************************************
- * FMI 2.0 Directional Derivatives (Stubs)
+ * FMI 2.0 Directional Derivatives 
  ***************************************************/
 
 fmi2Status fmi2GetDirectionalDerivative(fmi2Component c,
