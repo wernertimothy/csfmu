@@ -110,8 +110,8 @@ typedef enum {
 /**
  * helper function to check log category
  */
-static inline fmi2Boolean logCategoryActive(myFMU2* fmu, logCategory category) {
-    return (fmu->logLevel & category);
+static inline fmi2Boolean logCategoryIsActive(unsigned int logLevel, logCategory category) {
+    return (logLevel & category);
 }
 
 /**
@@ -124,7 +124,7 @@ static inline void logMessage(
     const char* categoryName,
     fmi2String message, 
     va_list args) {
-    if (logCategoryActive(fmu, category)) {
+    if (logCategoryIsActive(fmu->logLevel, category)) {
         char buffer[LOG_BUFFER_SIZE];
         vsnprintf(buffer, sizeof(buffer), message, args);
         // int sizeWritten = vsnprintf(buffer, sizeof(buffer), message, args);
