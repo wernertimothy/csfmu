@@ -117,15 +117,17 @@ static inline fmi2Boolean logCategoryActive(myFMU2* fmu, logCategory category) {
 /**
  * helper function log message core
  */
-static inline void logMessage(myFMU2* fmu,
-                              logCategory category, 
-                              fmi2Status status, 
-                              const char* categoryName,
-                              fmi2String message, 
-                              va_list args) {
+static inline void logMessage(
+    myFMU2* fmu,
+    logCategory category, 
+    fmi2Status status, 
+    const char* categoryName,
+    fmi2String message, 
+    va_list args) {
     if (logCategoryActive(fmu, category)) {
         char buffer[LOG_BUFFER_SIZE];
         vsnprintf(buffer, sizeof(buffer), message, args);
+        // int sizeWritten = vsnprintf(buffer, sizeof(buffer), message, args);
         // could catch truncation if (sizeWritten >= sizeof(buffer))
         fmu->logger(
             fmu->componentEnvironment,
@@ -209,13 +211,15 @@ const char* fmi2GetVersion(void) {
  * Validates required callbacks and GUID, allocates memory using the integration tool's
  * allocator, and initializes the internal model.
  */
-fmi2Component fmi2Instantiate(fmi2String instanceName,
-                              fmi2Type fmuType,
-                              fmi2String fmuGUID,
-                              fmi2String fmuResourceLocation,
-                              const fmi2CallbackFunctions* functions,
-                              fmi2Boolean visible,
-                              fmi2Boolean loggingOn) {
+fmi2Component fmi2Instantiate(
+    fmi2String instanceName,
+    fmi2Type fmuType,
+    fmi2String fmuGUID,
+    fmi2String fmuResourceLocation,
+    const fmi2CallbackFunctions* functions,
+    fmi2Boolean visible,
+    fmi2Boolean loggingOn) {
+
     /* unused parameters */
     (void)fmuResourceLocation;
     (void)visible;
@@ -318,12 +322,13 @@ void fmi2FreeInstance(fmi2Component c) {
 /**
  * Set up an experiment
  */
-fmi2Status fmi2SetupExperiment(fmi2Component c,
-                               fmi2Boolean toleranceDefined,
-                               fmi2Real tolerance,
-                               fmi2Real startTime,
-                               fmi2Boolean stopTimeDefined,
-                               fmi2Real stopTime) {
+fmi2Status fmi2SetupExperiment(
+    fmi2Component c,
+    fmi2Boolean toleranceDefined,
+    fmi2Real tolerance,
+    fmi2Real startTime,
+    fmi2Boolean stopTimeDefined,
+    fmi2Real stopTime) {
                                    
     /* unused parameter */
     (void)toleranceDefined;
@@ -374,10 +379,12 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
  * - logStatusPending            // not supported
  * - logAll
  */
-fmi2Status fmi2SetDebugLogging(fmi2Component c,
-                               fmi2Boolean loggingOn,
-                               size_t nCategories,
-                               const fmi2String categories[]) {
+fmi2Status fmi2SetDebugLogging(
+    fmi2Component c,
+    fmi2Boolean loggingOn,
+    size_t nCategories,
+    const fmi2String categories[]) {
+        
     /* validate component */
     if (!c) {
         // can't log error
