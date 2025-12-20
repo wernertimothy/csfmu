@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "model.h"
+#include "integrator.h"
 
 /**
  * This is an example of how to use the model to run a basic simulation

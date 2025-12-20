@@ -71,20 +71,6 @@ void freeModel(modelInstance* model) {
 }
 
 /**
- * Euler Forward numeric integrator
- * 
- * TODO: set MINIMUM_STEPSIZE step size and do multiple integration steps
- *       in case that stepSize > MINIMUM_STEPSIZE
- * TODO: implement an integrator.c module with various integrators e.g. RUKU4
- */
-void eulerForward(modelInstance* model, double stepSize) {
-    /* integrate using simple euler forward */
-    for (int k=0; k<model->info->numberOfStates; k++) {
-        model->states[k] += model->stateDerivatives[k] * stepSize;
-    }
-}
-
-/**
  * First Order System state equation
  * TODO: move to specifiv model implementation
  */

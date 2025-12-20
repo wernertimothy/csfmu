@@ -1,6 +1,8 @@
 #ifndef MODEL_H
 #define MODEL_H
 
+#include <stddef.h>
+
 /* Forward declaration of the model instance */
 typedef struct modelInstance modelInstance;
 
@@ -35,10 +37,6 @@ struct modelInstance {
 /* memory management */
 modelInstance* newModel(size_t nx, size_t nu, size_t ny, size_t np);
 void freeModel(modelInstance* model);
-
-/* Euler Forward x+ = x + dt*dt */
-// TODO: move to integrator.h
-void eulerForward(modelInstance* model, double stepSize);
 
 /* First order system */
 // TODO: move to specific model implementation

@@ -20,6 +20,7 @@ endif()
 # Build the FMU as a shared library (DLL/SO)
 add_library(${LIB_NAME} SHARED
     src/model.c
+    src/integrator.c
     src/fmi2Functions.c
 )
 
@@ -54,6 +55,7 @@ target_include_directories(${LIB_NAME} PUBLIC
 # Optional: Keep static library for testing
 add_library(${LIB_NAME}_static STATIC
     src/model.c
+    src/integrator.c
     src/fmi2Functions.c
 )
 

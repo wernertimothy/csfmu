@@ -5,6 +5,7 @@
 #include "fmi2Functions.h"
 #include "model_config.h"
 #include "model.h"
+#include "integrator.h"
 
 
 #define EPSILON 1e-9         // numerical significance boarder
