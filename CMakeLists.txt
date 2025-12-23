@@ -1,14 +1,21 @@
+
+#==============================================================================
+# 1. Project Setup
+#==============================================================================
+
 cmake_minimum_required(VERSION 3.12)
 project(fmuTemplate VERSION 1.0.0)
 
-include(CTest)
-enable_testing()
-
-set(LIB_NAME fmuTemplate)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Platform-specific settings for FMU
+#==============================================================================
+# 2. Build Configuration
+#==============================================================================
+
+set(LIB_NAME "fmuTemplate")
+
+# Platform detection for FMU binaries
 if(WIN32)
     set(FMI_PLATFORM "x86_64-windows")
 elseif(APPLE)
@@ -16,65 +23,104 @@ elseif(APPLE)
 else()
     set(FMI_PLATFORM "x86_64-linux")
 endif()
+message(STATUS "Build platform: ${FMI_PLATFORM}")
 
-# Build the FMU as a shared library (DLL/SO)
-add_library(${LIB_NAME} SHARED
-    src/model.c
-    src/integrator.c
+# Model selection (User can override with -DMODEL=<model_name>)
+if(NOT DEFINED MODEL)
+    set(MODEL "first_order")
+    message(STATUS "No model specified, defaulting to: ${MODEL}")
+else()
+    message(STATUS "Building model: ${MODEL}")
+endif()
+
+# Normalize model name to uppercase for preprocessor define
+string(TOUPPER ${MODEL} MODEL_UPPER)
+set(MODEL_DEFINE "MODEL_${MODEL_UPPER}")
+
+#==============================================================================
+# 3. Source Files
+#==============================================================================
+
+# Core FMU
+set(FMU_SOURCES
     src/fmi2Functions.c
 )
 
-# Set the output name to match FMI3 requirements
-set_target_properties(${LIB_NAME} PROPERTIES
-    PREFIX ""  # Remove "lib" prefix on Unix
-    OUTPUT_NAME "${LIB_NAME}"
-    POSITION_INDEPENDENT_CODE ON
+# Model (FMU-agnostic)
+set(MODEL_SOURCES
+    src/model.c
+    src/integrator.c
+    src/models/${MODEL}/equations.c
 )
 
-# Windows-specific settings
-if(WIN32)
-    target_compile_definitions(${LIB_NAME} PRIVATE
-        FMI3_FUNCTION_PREFIX=${LIB_NAME}_
-        _CRT_SECURE_NO_WARNINGS
-    )
-    set_target_properties(${LIB_NAME} PROPERTIES
-        WINDOWS_EXPORT_ALL_SYMBOLS ON
-    )
-endif()
+#==============================================================================
+# 4. FMU Shared Library
+#==============================================================================
 
-# Define FMI3_FUNCTION_PREFIX for all platforms
-target_compile_definitions(${LIB_NAME} PRIVATE
-    FMI3_FUNCTION_PREFIX=${LIB_NAME}_
+# Build the FMU as a shared library (DLL/SO)
+add_library(${LIB_NAME} SHARED
+    ${FMU_SOURCES}
+    ${MODEL_SOURCES}
 )
 
 target_include_directories(${LIB_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/external/fmi2/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/models
 )
 
-# Optional: Keep static library for testing
+target_compile_definitions(${LIB_NAME} PRIVATE
+    ${MODEL_DEFINE}
+)
+
+# Set the output name to match FMI requirements
+set_target_properties(${LIB_NAME} PROPERTIES
+    PREFIX ""
+    POSITION_INDEPENDENT_CODE ON
+)
+
+# Windows-specific settings
+if(WIN32)
+    target_compile_definitions(${LIB_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    set_target_properties(${LIB_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
+#==============================================================================
+# 5. FMU Static Library for examples/test
+#==============================================================================
+
 add_library(${LIB_NAME}_static STATIC
-    src/model.c
-    src/integrator.c
-    src/fmi2Functions.c
+    ${FMU_SOURCES}
+    ${MODEL_SOURCES}
 )
 
 target_include_directories(${LIB_NAME}_static PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/external/fmi2/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/models
 )
 
-# add_subdirectory(test)
+target_compile_definitions(${LIB_NAME}_static PRIVATE
+    ${MODEL_DEFINE}
+)
+
+#==============================================================================
+# 6. Subdirectories
+#==============================================================================
+
 add_subdirectory(examples)
 
-# Install rules for FMU packaging
+#==============================================================================
+# 7. FMU packaging
+#==============================================================================
+
+# Install shared library to FMU binaries direction
 install(TARGETS ${LIB_NAME}
     LIBRARY DESTINATION binaries/${FMI_PLATFORM}
     RUNTIME DESTINATION binaries/${FMI_PLATFORM}
 )
 
-# FMU Packaging
-# Check for virtual environment Python first
+# Find python
 if(WIN32)
     set(VENV_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe")
 else()
@@ -89,12 +135,13 @@ else()
     message(STATUS "Using system Python: ${Python3_EXECUTABLE}")
 endif()
 
+# Package FMU
 add_custom_command(
     TARGET ${LIB_NAME} POST_BUILD
     COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package_fmu.py
         $<TARGET_FILE:${LIB_NAME}>
-        ${CMAKE_CURRENT_SOURCE_DIR}/config/modelDescription.xml
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/modelDescription.xml
         ${CMAKE_BINARY_DIR}
         ${LIB_NAME}
     COMMENT "Packaging FMU..."

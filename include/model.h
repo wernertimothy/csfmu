@@ -23,7 +23,7 @@ typedef struct {
 /* An instance of a model */
 /* TODO: typedef Model */
 struct modelInstance {
-    modelInfo* info;                          ///< Discrete integration time step [s]
+    modelInfo* info;                          ///< Pointer to model meta data
     double* parameter;                        ///< Pointer to model parameters
     double* states;                           ///< Pointer to current state values
     double* stateDerivatives;                 ///< Pointer to computed derivatives
@@ -31,18 +31,24 @@ struct modelInstance {
     double* outputs;                          ///< Pointer to output values
     getStateDerivatives getStateDerivatives;  ///< Function to compute dx/dt
     integrate integrate;                      ///< Function to perform integration step
-    getOutputs getOutputs;                    ///< Functino to compute outputs y
+    getOutputs getOutputs;                    ///< Function to compute outputs y
 };
 
 /* memory management */
 modelInstance* newModel(size_t nx, size_t nu, size_t ny, size_t np);
 void freeModel(modelInstance* model);
 
-/* First order system */
-// TODO: move to specific model implementation
-void firstOrderSystem(modelInstance* model);
+/**
+ * build option dependend model configuration
+ * 
+ * pass model parameter, e.g.: -DMODEL=first_order
+ * gracefully defaults to first_order if none is specified
+ */
 
-/* calculate outputs */
-// TODO: move to specific model implementation
-void firstOrderOutputs(modelInstance* model);
+#if defined(MODEL_FIRST_ORDER) 
+    #include "first_order/model_config.h"
+#else
+    #error "No model selected. Use -DMODEL=..."
+#endif
+
 #endif

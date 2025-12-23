@@ -21,16 +21,13 @@ This is the best place for [getting started][].
 
 To get an overview over the implemented fmi functions, take a look at the reference for [fmi2][] or [fmi3][]
 
-## Usage
-
-## key ideas
+## Key Ideas
 * every model has inputs, outputs, states and parameter
 * core model is fmu agnosctic
 * FMU CoSimualtion adapter connects fmu API with model
 
 ## assumptions
 * synchornous
-* fixed step size
 
 [getting started]: docs/fmuTemplate_gettingStarted.md
 [Co-Sim FMUs]: docs/fmuTemplate_coSimFMUs.md

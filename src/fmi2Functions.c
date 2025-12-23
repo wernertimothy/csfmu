@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include "fmi2Functions.h"
-#include "model_config.h"
 #include "model.h"
 #include "integrator.h"
 

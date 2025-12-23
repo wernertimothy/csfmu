@@ -1,6 +1,12 @@
 #ifndef MODEL_CONFIG_H
 #define MODEL_CONFIG_H
 
+
+/* state equation */
+void firstOrderSystem(modelInstance* model);
+/* output equation */
+void firstOrderOutputs(modelInstance* model);
+
 /* model identifier */
 #define GUID "{a1b2c3d4-e5f6-7890-abcd-ef1234567890}"
 #define MODELNAME "fmuTemplate"
@@ -12,10 +18,10 @@
 #define NUMBER_OF_STATES  1
 
 /* initial state */
-const double INITIAL_STATE[NUMBER_OF_STATES] = {0.0};
+static const double INITIAL_STATE[NUMBER_OF_STATES] = {0.0};
 
 /* initial parameter */
-const double INITIAL_PARAMS[NUMBER_OF_PARAMS] = {0.15, 1.0};
+static const double INITIAL_PARAMS[NUMBER_OF_PARAMS] = {0.15, 1.0};
 
 /* fmu method for numerical integration */
 #define INTEGRATOR_METHOD eulerForward
