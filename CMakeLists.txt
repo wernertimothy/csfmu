@@ -9,6 +9,9 @@ project(fmuTemplate VERSION 1.0.0)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+include(CTest)
+enable_testing()
+
 #==============================================================================
 # 2. Build Configuration
 #==============================================================================
@@ -109,6 +112,7 @@ target_compile_definitions(${LIB_NAME}_static PRIVATE
 #==============================================================================
 
 add_subdirectory(examples)
+add_subdirectory(test/unit)
 
 #==============================================================================
 # 7. FMU packaging
