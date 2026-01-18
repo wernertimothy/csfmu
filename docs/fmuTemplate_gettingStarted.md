@@ -1,25 +1,23 @@
-# Welcome to fmuTemplate
+# Getting started with fmuTemplate
 
 **Welcome.**
 
-This overview will give you all information necessary to start implementing you own model equations, compile it to an FMU and test it.
+This overview will give you all information necessary to start implementing your own model equations, compile it to an FMU and test it, using this template.
 
-Before we begin, let's take a short stroll through the project and get you familiar with the landscape.
+The Project is structured as follows.
 
 ## The Folders
 
-The most important files are `src/fmi2Functions.c`, which implements the FMU functions and everything that is inside the `src/model/your_model` folder, which implements the model.
-The rest simply exists to help build an FMU.
-Let's have a look...
-
-* `docs`- contains references and helpful information about FMUs in general, the implemented fmi interfaces and inforamtion about this project in general.
-* `examples` - contains example implementations that will help you study to code and how to use it
-* `external` - contains the fmi2 and fmi3 interface, as well as unity for testing. This is third party code and not implemented by me. The only reason they exist here is because they are a necessary dependency and I want this priject to be self-contained.
-* `include` - contains header files
-* `scripts`- contains python helper scripts
-* `src`- contains the source files
-* `src/models` - contains folders for each model implementation. This is where you will add your custome code, i.e. the model you want to simulate.
-* `test`- contains unit and integration tests using unity and fmpy 
+  | Directory | Contents |
+  |-----------|----------|
+  | `docs/` | References and documentation |
+  | `examples/` | Example implementations |
+  | `external/` | Third-party dependencies (FMI headers, Unity) |
+  | `include/` | Project header files |
+  | `scripts/` | Build and packaging scripts |
+  | `src/` | Core FMU implementation |
+  | `src/models/` | **Model implementations (add yours here)** |
+  | `test/` | Unit and integration tests |
 
 ### How to Build the FMU
 
@@ -33,3 +31,5 @@ cmake --build .
 ```
 
 ## How to add your own Model
+
+
