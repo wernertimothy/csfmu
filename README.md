@@ -8,9 +8,10 @@ The units potentially all come frome different places speaking different languag
 
 FMU is the way to go.
 
-This project implements the minimum required interface for synchronous Co-Simulation FMUs using the fmi2 (fmi3 will follow soon) in a single source file. It also provides a plug-and-play interface for your own model implementation.
+This project implements the minimum required interface for synchronous Co-Simulation FMUs using the fmi2 (fmi3 will follow soon) in a single source file.
+It also provides a plug-and-play interface for your own model implementation.
 The model is completely FMU agnostic to provide as much flexibility as possible.
-The model is selected at compile time using a CMake build option, making the architecture highly generic template and easy to extend as required.
+The model is selected at compile time using a CMake build option, making the architecture a highly generic template and easy to extend as required.
 
 ## Getting Started
 
