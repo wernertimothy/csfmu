@@ -10,7 +10,7 @@ Key features:
 - **Plug-and-play model interface**: Add custom models without modifying FMU code
 - **FMU-agnostic design**: Models can be tested and simulated independently
 - **Compile-time model selection**: Choose models via CMake build options
-- **Extensible architecture**: Easy to add new models and integrators
+- **Extensible architecture**: It's easy to add new models and integrators or extend the fmi implementation.
 
 ## Getting Started
 

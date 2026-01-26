@@ -15,11 +15,19 @@ The Project is structured as follows.
   | `external/` | Third-party dependencies (FMI headers, Unity) |
   | `include/` | Project header files |
   | `scripts/` | Build and packaging scripts |
-  | `src/` | Core FMU implementation |
+  | `src/` | Core FMU and model-interface implementation |
   | `src/models/` | **Model implementations (this is where you will add your model)** |
   | `test/` | Unit and integration tests |
 
-### How to Build the FMU
+## Core principal of fmuTemplate
+
+This template is offering an expandable library of models with minimum restrictive implementation specifications alongside a model independent fmi implementation.
+
+The current model implementation restrictions are:
+* all model parameter, inputs, ouputs, states and state derivatives have double precision and are thus of type **fmi2Real**.
+* the order of **ModelVariables** in the `modelDescription.xml` is fixed to allow a model independent impementation of **fmi2GetReal** and **fmi2SetReal**.
+
+## How to Build the FMU
 
 Run the following to build a specific **model_name**, which needs to match a folder name under `src/models`.
 For example if you want to build the **first_order** model, run
@@ -34,20 +42,19 @@ cmake --build .
 ## How to add your own Model
 
 Start by picking an apropreate **name** for you model.
-Let's go with the famous *lorenz_attractor* for the sake of this tutorial.
+Let's go with the famous **lorenz_attractor** for the sake of this tutorial.
 
+First, create a new folder called `src/models/lorenz_attractor`, for your model.
 
-Create new folder with that name under `src/models`, for your model.
-
-You will need to add three files to that folder
+Second, add the following files and fill them with life:
 
 | File | Content |
 |------|-------------|
-|**equations.c** | The differential equations that describe your model |
-| **model_config.h** | Mappings, that connect your model with the FMI |
-| **modelDescription.xml** | Meta data about your FMU
+|**equations.c** | The state and output equations, that describe your model |
+| **model_config.h** | Mappings, that connect your model with the FMI, as well as the configuration of the solver, model dimensions, initial states, etc. |
+| **modelDescription.xml** | FMI specific meta data about your FMU
 
-Let's take a look at these files one by one.
+Let's take a look at these files one by one in detail.
 
 ---
 
@@ -57,7 +64,7 @@ In this file you should implement two functions, the models **state equations** 
 
 **State Equation**.
 This template assumes that your model can be represented as a potentially nonlinear differential equation, such that the derivatives of the states can be computed by a function **dx=f(t,x,u)**, where **dx** are the state derivatives with respect to time, **t** is the time, **x** are the states and **u** are the inputs to the model.
-f is the state equation you have to implement here.
+**f** is the state equation you have to implement here.
 It can have any name.
 The signature of the function is
 ```c
@@ -65,7 +72,7 @@ void exampleModelStateEquation(modelInstance* model);
 ```
 and it should calculate all state derivatives and write them to
 ```c
-model->dx[k]
+model->stateDerivatives[k]
 ```
 for all ```k``` in ```model->info.numberOfStates```.
 
