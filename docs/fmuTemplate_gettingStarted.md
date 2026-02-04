@@ -63,12 +63,12 @@ Let's take a look at these files one by one in detail.
 In this file you should implement two functions, the models **state equations** and **output equation**.
 
 **State Equation**.
-This template assumes that your model can be represented as a potentially nonlinear differential equation, such that the derivatives of the states can be computed by a function **dx=f(t,x,u)**, where **dx** are the state derivatives with respect to time, **t** is the time, **x** are the states and **u** are the inputs to the model.
+This template assumes that your model can be represented as a potentially nonlinear differential equation, such that the derivatives of the states can be computed by a function **dx=f(t,x,u)**, where **dx** are the state derivatives with respect to time **t**, **x** are the states and **u** are the inputs to the model.
 **f** is the state equation you have to implement here.
 It can have any name.
 The signature of the function is
 ```c
-void exampleModelStateEquation(modelInstance* model);
+void whateverTheName(modelInstance* model);
 ```
 and it should calculate all state derivatives and write them to
 ```c
@@ -103,7 +103,7 @@ void lorenzAttractor(modelInstance* model) {
 You can define your outputs and calculate them using an output equation **y=h(t,x,u)**.
 The equation can have any name.
 ```c
-void exampleModelOutputEquation(modelInstance* model);
+void whateverAnothername(modelInstance* model);
 ```
 and it should calculate all outputs and write them to
 ```c
@@ -123,6 +123,109 @@ void lorenzAttractorOutputs(modelInstance* model) {
 ---
 
 ### `model_config.h`
+
+This file is the **compile-time glue** between your model equations and the FMU infrastructure. It uses C preprocessor macros and definitions to configure your specific model without requiring any changes to the core FMU code via **compile-time polymorphism**.
+
+#### How It Works in the Architecture
+
+When you build with `-DMODEL=lorenz_attractor`, CMake:
+1. Converts the model name to uppercase: `LORENZ_ATTRACTOR`
+2. Creates a preprocessor definition: `MODEL_LORENZ_ATTRACTOR`
+3. This triggers conditional compilation in `include/model.h`:
+   ```c
+   #if defined(MODEL_LORENZ_ATTRACTOR)
+       #include "lorenz_attractor/model_config.h"
+   #endif
+   ```
+
+#### Required Definitions
+
+Your `model_config.h` must provide the following definitions. Here's the complete specification using the **Lorenz attractor** as an example:
+
+| Category | Name | Description | Example (Lorenz Attractor) |
+|----------|------|-------------|----------------------------|
+| **Function Declarations** | | | |
+| | State equation function | Forward declaration of the function that computes state derivatives | `void lorenzAttractor(modelInstance* model);` |
+| | Output equation function | Forward declaration of the function that computes outputs | `void lorenzAttractorOutputs(modelInstance* model);` |
+| **Model Identity** | | | |
+| | `GUID` | Globally unique identifier for this FMU (use a UUID generator) | `#"{8c4e8905-3735-4ba7-ab72-cf5f62a3ef77}"` |
+| | `MODELNAME` | Human-readable name for the FMU | `"lorenzAttractor"` |
+| **System Dimensions** | | | |
+| | `NUMBER_OF_PARAMS` | Number of model parameters | `3` |
+| | `NUMBER_OF_INPUTS` | Number of input signals | `0` |
+| | `NUMBER_OF_OUTPUTS` | Number of output signals | `3` |
+| | `NUMBER_OF_STATES` | Number of state variables | `3` |
+| **Initial Values** | | | |
+| | `INITIAL_STATE` | Initial values for all state variables | `{1.0, 1.0, 1.0};` |
+| | `INITIAL_PARAMS` | Default parameter values (σ, ρ, β) | `{10.0, 28.0, 8.0/3.0};` |
+| **Solver Configuration** | | | |
+| | `INTEGRATOR_METHOD` | Numerical integration method to use | `eulerForward` |
+| | `MAX_SOLVER_STEPSIZE` | Maximum internal step size for stability | `1e-4` |
+| **Function Mapping** | | | |
+| | `MODEL_STATE_EQUATION` | Maps to your state equation function | `lorenzAttractor` |
+| | `MODEL_OUTPUT_EQUATION` | Maps to your output equation function | `lorenzAttractorOutputs` |
+| **Logging (Optional)** | | | |
+| | `LOG_INFO` | Category name for info messages | `"INFO"` |
+| | `LOG_ERROR` | Category name for error messages | `"ERROR"` |
+| | `LOG_WARNING` | Category name for warning messages | `"WARNING"` |
+
+#### Complete Example
+
+Here's what the complete `src/models/lorenz_attractor/model_config.h` would look like:
+
+```c
+#ifndef MODEL_CONFIG_H
+#define MODEL_CONFIG_H
+
+/* Forward declarations of model equations */
+void lorenzAttractor(modelInstance* model);
+void lorenzAttractorOutputs(modelInstance* model);
+
+/* Model identity */
+#define GUID "{8c4e8905-3735-4ba7-ab72-cf5f62a3ef77}"
+#define MODELNAME "lorenzAttractor"
+
+/* System dimensions */
+#define NUMBER_OF_PARAMS  3  /* sigma, rho, beta */
+#define NUMBER_OF_INPUTS  0  /* No external inputs */
+#define NUMBER_OF_OUTPUTS 3  /* x, y, z */
+#define NUMBER_OF_STATES  3  /* x, y, z */
+
+/* Initial conditions: slightly perturbed from origin */
+static const double INITIAL_STATE[NUMBER_OF_STATES] = {1.0, 1.0, 1.0};
+
+/* Classic Lorenz parameters (chaotic regime) */
+static const double INITIAL_PARAMS[NUMBER_OF_PARAMS] = {
+    10.0,      /* sigma (Prandtl number) */
+    28.0,      /* rho (Rayleigh number) */
+    8.0/3.0    /* beta (geometric factor) */
+};
+
+/* Solver configuration */
+#define INTEGRATOR_METHOD eulerForward
+#define MAX_SOLVER_STEPSIZE 1e-4
+
+/* Function mapping */
+#define MODEL_STATE_EQUATION lorenzAttractor
+#define MODEL_OUTPUT_EQUATION lorenzAttractorOutputs
+
+/* Logging categories */
+#define LOG_INFO      "INFO"
+#define LOG_ERROR     "ERROR"
+#define LOG_WARNING   "WARNING"
+
+#endif
+```
+
+#### Key Design Points
+
+1. **Array sizes must match dimensions**: The size of `INITIAL_STATE` must equal `NUMBER_OF_STATES`, and `INITIAL_PARAMS` must equal `NUMBER_OF_PARAMS`.
+
+2. **Function names are mapped via macros**: The core FMU code calls `MODEL_STATE_EQUATION(model)`, which expands to `lorenzAttractor(model)` at compile time.
+
+3. **No runtime overhead**: All configuration is resolved during compilation - no function pointers or lookup tables needed.
+
+4. **Solver step size matters**: For stiff systems like the Lorenz attractor, choose `MAX_SOLVER_STEPSIZE` small enough to maintain numerical stability. The FMU will automatically subdivide larger simulation steps.
 
 ---
 
