@@ -25,6 +25,7 @@ Let's build your first FMU.
 
 **Linux / macOS:**
 ```bash
+git clone https://github.com/wernertimothy/fmuTemplate.git
 cd fmuTemplate
 mkdir -p build && cd build
 cmake -DMODEL=first_order ..
