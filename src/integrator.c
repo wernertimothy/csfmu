@@ -13,11 +13,18 @@
 #include "model.h"
 
 /**
- * Euler Forward numeric integrator
+ * Implementation notes for eulerForward():
+ * - Explicit (forward) Euler method: x[k+1] = x[k] + dt * f(x[k], u[k])
+ * - First-order accuracy: global error is O(dt)
+ * - Conditionally stable: step size must satisfy stability condition for the system
+ * - State derivatives must be computed (via model->getStateDerivatives()) before calling
+ * - Modifies model->states in-place
+ * - No internal bounds checking on array access
  */
-void eulerForward(modelInstance* model, double stepSize) {
-    /* integrate using simple euler forward */
-    for (int k=0; k<model->info->numberOfStates; k++) {
+void eulerForward(modelInstance* model, double stepSize)
+{
+    /* Integrate all states using explicit Euler formula */
+    for (size_t k = 0; k < model->info->numberOfStates; k++) {
         model->states[k] += model->stateDerivatives[k] * stepSize;
     }
 }
