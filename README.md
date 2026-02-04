@@ -7,10 +7,45 @@
 fmuTemplate provides a minimal, self-contained implementation of the FMI Co-Simulation interface in C, designed for a fast and easy integration of your custom models.
 
 Key features:
-- **Plug-and-play model interface**: Add custom models without modifying FMU code
+- **Plug-and-play model interface**: Add your model without modifying the FMU code
 - **FMU-agnostic design**: Models can be tested and simulated independently
-- **Compile-time model selection**: Choose models via CMake build options
+- **Compile-time model selection**: Choose your model via CMake build options
 - **Extensible architecture**: It's easy to add new models and integrators or extend the fmi implementation.
+
+## Quickstart
+
+Let's build your first FMU.
+
+### Prerequisites
+- CMake (3.10+)
+- C compiler (GCC, Clang, or MSVC)
+- Python 3.7+ with pip (for testing)
+
+### Build Your First FMU
+
+**Linux / macOS:**
+```bash
+cd fmuTemplate
+mkdir -p build && cd build
+cmake -DMODEL=first_order ..
+cmake --build .
+```
+
+This creates `fmuTemplate.fmu` in the `build/` directory.
+
+### Test It
+
+**Linux / macOS:**
+```bash
+pip3 install -r requirements.txt
+pytest
+```
+
+### What just Happened?
+You've compiled a **first-order lag system** (PT1) into a standard-compliant FMU that can be:
+- Simulated standalone with FMPy
+- Imported into tools like Simulink, Dymola, or OpenModelica
+- Used in co-simulation environments
 
 ## Getting Started
 

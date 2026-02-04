@@ -58,7 +58,7 @@ Let's take a look at these files one by one in detail.
 
 ---
 
-### equations.c
+### `equations.c`
 
 In this file you should implement two functions, the models **state equations** and **output equation**.
 
@@ -74,7 +74,7 @@ and it should calculate all state derivatives and write them to
 ```c
 model->stateDerivatives[k]
 ```
-for all ```k``` in ```model->info.numberOfStates```.
+for all **k** in **model->info.numberOfStates**.
 
 Here is an exampe implemenation of the **lorenz_attractor**
 
@@ -109,7 +109,7 @@ and it should calculate all outputs and write them to
 ```c
 model->outputs[k]
 ```
-for all ```k``` in ```model->info.numberOfOutputs```.
+for all **k** in **model->info.numberOfOutputs**.
 
 Here is an example implementation that defines all three states of the lorenz attractor as outputs.
 
@@ -122,11 +122,11 @@ void lorenzAttractorOutputs(modelInstance* model) {
 ```
 ---
 
-### model_config.h
+### `model_config.h`
 
 ---
 
-### modelDescription.xml
+### `modelDescription.xml`
 
 ---
 
