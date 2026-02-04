@@ -36,8 +36,17 @@ This creates `fmuTemplate.fmu` in the `build/` directory.
 
 ### Test It
 
+Navigate back to the repository root.
+```bash
+cd ..
+```
+
+from there
+
 **Linux / macOS:**
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip3 install -r requirements.txt
 pytest
 ```
@@ -47,6 +56,7 @@ You've compiled a **first-order lag system** (PT1) into a standard-compliant FMU
 - Simulated standalone with FMPy
 - Imported into tools like Simulink, Dymola, or OpenModelica
 - Used in co-simulation environments
+And tesed it's build and runtime sanity with FMPy
 
 ## Getting Started
 
