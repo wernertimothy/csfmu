@@ -66,12 +66,6 @@ Take a look at [getting started][], to learn about the project architecture and 
 
 ## Co-Simulation FMUs
 
-You want to simulate a model?
-Your model is a unit of a coupled system?
-The units potentially all come from different places speaking different languages?
-
-FMU is the way to go.
-
 Since you have found your way to this project, you are probably already familiar with what an FMU is.
 If not, go here to read more about [Co-Sim FMUs][].
 
