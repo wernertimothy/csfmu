@@ -16,8 +16,6 @@ enable_testing()
 # 2. Build Configuration
 #==============================================================================
 
-set(LIB_NAME "fmuTemplate")
-
 # Platform detection for FMU binaries
 if(WIN32)
     set(FMI_PLATFORM "x86_64-windows")
@@ -36,9 +34,15 @@ else()
     message(STATUS "Building model: ${MODEL}")
 endif()
 
+# Library name matches the model name (produces first_order.dylib/.so/.dll)
+set(LIB_NAME "${MODEL}")
+
 # Normalize model name to uppercase for preprocessor define
 string(TOUPPER ${MODEL} MODEL_UPPER)
 set(MODEL_DEFINE "MODEL_${MODEL_UPPER}")
+
+# Output directory for packaged FMU (User can override with -DFMU_OUTPUT_DIR=<path>)
+set(FMU_OUTPUT_DIR "${CMAKE_BINARY_DIR}" CACHE PATH "Directory where the packaged .fmu file is placed")
 
 #==============================================================================
 # 3. Source Files
@@ -146,8 +150,8 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package_fmu.py
         $<TARGET_FILE:${LIB_NAME}>
         ${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/modelDescription.xml
-        ${CMAKE_BINARY_DIR}
+        ${FMU_OUTPUT_DIR}
         ${LIB_NAME}
-    COMMENT "Packaging FMU..."
+    COMMENT "Packaging FMU to ${FMU_OUTPUT_DIR}/${LIB_NAME}.fmu ..."
     VERBATIM
 )

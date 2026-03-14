@@ -32,7 +32,7 @@ cmake -DMODEL=first_order ..
 cmake --build .
 ```
 
-This creates `fmuTemplate.fmu` in the `build/` directory.
+This creates `first_order.fmu` in the `build/` directory. The FMU is named after the selected model. You can change the output directory with `-DFMU_OUTPUT_DIR=<path>`.
 
 ### Test It
 

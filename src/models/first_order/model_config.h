@@ -9,7 +9,7 @@ void firstOrderOutputs(modelInstance* model);
 
 /* model identifier */
 #define GUID "{a1b2c3d4-e5f6-7890-abcd-ef1234567890}"
-#define MODELNAME "fmuTemplate"
+#define MODELNAME "first_order"
 
 /* system dimensions */
 #define NUMBER_OF_PARAMS  2

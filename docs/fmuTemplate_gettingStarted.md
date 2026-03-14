@@ -292,7 +292,7 @@ The `modelDescription.xml` consists of several major sections:
 
 ```xml
 <CoSimulation
-    modelIdentifier="fmuTemplate"
+    modelIdentifier="your_model_name"
     needsExecutionTool="false"
     canHandleVariableCommunicationStepSize="true"
     canInterpolateInputs="false"

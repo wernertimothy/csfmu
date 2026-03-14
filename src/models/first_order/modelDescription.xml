@@ -14,7 +14,7 @@
          Co-Simulation Capabilities
          ======================================================================== -->
     <CoSimulation
-        modelIdentifier="fmuTemplate"
+        modelIdentifier="first_order"
         needsExecutionTool="false"
         canHandleVariableCommunicationStepSize="true"
         canInterpolateInputs="false"
