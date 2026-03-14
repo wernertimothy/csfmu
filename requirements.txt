@@ -1,2 +1,2 @@
-fmpy
-pytest
+fmpy>=0.3.20
+pytest>=8.0
