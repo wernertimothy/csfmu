@@ -48,4 +48,38 @@
  */
 void eulerForward(modelInstance* model, double stepSize);
 
+/**
+ * @brief Performs one integration step using the classic 4th-order Runge-Kutta method.
+ *
+ * Advances the model state by one time step using the RK4 scheme:
+ *
+ *     k1 = f(x)
+ *     k2 = f(x + h/2 * k1)
+ *     k3 = f(x + h/2 * k2)
+ *     k4 = f(x + h * k3)
+ *     x(t + dt) = x(t) + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
+ *
+ * This method is fourth-order accurate (global error O(h^4)) and suitable for
+ * most non-stiff ODE systems. It requires four evaluations of the state
+ * derivative function per step.
+ *
+ * The function reuses the pre-computed derivatives in model->stateDerivatives
+ * as k1, avoiding a redundant evaluation. The remaining three stages (k2, k3,
+ * k4) are computed internally by temporarily modifying model->states.
+ *
+ * @param model Pointer to the model instance containing states and derivatives.
+ *              Must not be NULL. The getStateDerivatives function pointer must
+ *              be set before calling.
+ * @param stepSize Integration time step (dt). Must be positive.
+ *
+ * @note Uses C99 variable-length arrays for temporary storage. Suitable for
+ *       systems with moderate state counts (typical in FMU applications).
+ * @note model->stateDerivatives must be computed before calling (same contract
+ *       as eulerForward).
+ *
+ * @see eulerForward
+ * @see modelInstance
+ */
+void rungeKutta4(modelInstance* model, double stepSize);
+
 #endif

@@ -1,0 +1,160 @@
+#include "unity.h"
+#include "model.h"
+#include "integrator.h"
+#include <math.h>
+
+#define TOLERANCE 1e-10
+
+static modelInstance* model;
+
+/* Always returns the pre-set stateDerivatives unchanged */
+static void constantDerivative(modelInstance* m) {
+    (void)m;
+}
+
+/* Simple derivative: dx/dt = -k * x (exponential decay) */
+static void exponentialDecay(modelInstance* m) {
+    double k = m->parameter[0];
+    m->stateDerivatives[0] = -k * m->states[0];
+}
+
+/* Two-state system: dx1/dt = x2, dx2/dt = -x1 (harmonic oscillator) */
+static void harmonicOscillator(modelInstance* m) {
+    m->stateDerivatives[0] = m->states[1];
+    m->stateDerivatives[1] = -m->states[0];
+}
+
+void setUp(void) {
+}
+
+void tearDown(void) {
+    freeModel(model);
+}
+
+void test_rungeKutta4_singleStateWithConstantDerivative(void) {
+    model = newModel(1, 0, 0, 0);
+    model->stateDerivatives[0] = 2.0;
+    model->getStateDerivatives = constantDerivative;
+
+    /* With constant derivative, RK4 gives exact result: x = 0 + 2.0 * 0.1 = 0.2 */
+    rungeKutta4(model, 0.1);
+    TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.2, model->states[0]);
+}
+
+void test_rungeKutta4_zeroStepSize(void) {
+    model = newModel(1, 0, 0, 0);
+    model->states[0] = 5.0;
+    model->stateDerivatives[0] = 1.0;
+    model->getStateDerivatives = constantDerivative;
+
+    rungeKutta4(model, 0.0);
+    TEST_ASSERT_EQUAL_DOUBLE(5.0, model->states[0]);
+}
+
+void test_rungeKutta4_multipleStates(void) {
+    model = newModel(2, 0, 0, 0);
+    model->states[0] = 1.0;    /* x1(0) = 1 */
+    model->states[1] = 0.0;    /* x2(0) = 0 */
+    model->getStateDerivatives = harmonicOscillator;
+
+    /* dx1/dt = x2, dx2/dt = -x1 → harmonic oscillator */
+    /* Analytical: x1(t) = cos(t), x2(t) = -sin(t) */
+    model->getStateDerivatives(model);
+
+    double dt = 0.1;
+    rungeKutta4(model, dt);
+
+    TEST_ASSERT_DOUBLE_WITHIN(1e-7, cos(0.1), model->states[0]);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-7, -sin(0.1), model->states[1]);
+}
+
+void test_rungeKutta4_exponentialDecay(void) {
+    model = newModel(1, 0, 0, 1);
+    model->states[0] = 1.0;
+    model->parameter[0] = 1.0;  /* k = 1.0 */
+    model->getStateDerivatives = exponentialDecay;
+
+    double dt = 0.1;
+    double T = 1.0;
+    int steps = (int)(T / dt);
+
+    for (int i = 0; i < steps; i++) {
+        model->getStateDerivatives(model);
+        rungeKutta4(model, dt);
+    }
+
+    /* Analytical: x(1) = exp(-1) ≈ 0.36788 */
+    double analytical = exp(-1.0);
+
+    /* RK4 with dt=0.1 has 4th-order error — use 1e-6 tolerance */
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, analytical, model->states[0]);
+}
+
+void test_rungeKutta4_orderOfAccuracy(void) {
+    /* Run with step size h, then h/2, verify error ratio ≈ 16 (2^4) */
+    double analytical = exp(-1.0);
+    double errors[2];
+    double stepSizes[2] = {0.2, 0.1};
+
+    for (int run = 0; run < 2; run++) {
+        modelInstance* m = newModel(1, 0, 0, 1);
+        m->states[0] = 1.0;
+        m->parameter[0] = 1.0;
+        m->getStateDerivatives = exponentialDecay;
+
+        double dt = stepSizes[run];
+        int steps = (int)(1.0 / dt);
+
+        for (int i = 0; i < steps; i++) {
+            m->getStateDerivatives(m);
+            rungeKutta4(m, dt);
+        }
+
+        errors[run] = fabs(m->states[0] - analytical);
+        freeModel(m);
+    }
+
+    /* Error ratio should be ~16 for a 4th-order method (2^4) */
+    double ratio = errors[0] / errors[1];
+    TEST_ASSERT_DOUBLE_WITHIN(2.0, 16.0, ratio);
+
+    /* Set model so tearDown doesn't double-free */
+    model = newModel(1, 0, 0, 0);
+}
+
+void test_rungeKutta4_statesRestoredAfterStep(void) {
+    /* Verify that after a step, states contain the final result (not intermediate) */
+    model = newModel(1, 0, 0, 1);
+    model->states[0] = 1.0;
+    model->parameter[0] = 1.0;
+    model->getStateDerivatives = exponentialDecay;
+
+    model->getStateDerivatives(model);
+    rungeKutta4(model, 0.1);
+
+    /* Single-step RK4 result — use 1e-6 tolerance for 4th-order error */
+    double analytical = exp(-0.1);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, analytical, model->states[0]);
+}
+
+// ============ Test Runner ============
+
+int main(void) {
+    UNITY_BEGIN();
+
+    // Basic functionality
+    RUN_TEST(test_rungeKutta4_singleStateWithConstantDerivative);
+
+    // Edge cases
+    RUN_TEST(test_rungeKutta4_zeroStepSize);
+
+    // Multiple states
+    RUN_TEST(test_rungeKutta4_multipleStates);
+
+    // Validation
+    RUN_TEST(test_rungeKutta4_exponentialDecay);
+    RUN_TEST(test_rungeKutta4_orderOfAccuracy);
+    RUN_TEST(test_rungeKutta4_statesRestoredAfterStep);
+
+    return UNITY_END();
+}

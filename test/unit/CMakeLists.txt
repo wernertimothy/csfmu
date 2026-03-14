@@ -34,7 +34,16 @@ target_compile_definitions(test_eulerForward PRIVATE ${MODEL_DEFINE})
 target_link_libraries(test_eulerForward PRIVATE ${LIB_NAME}_static unity m)
 target_include_directories(test_eulerForward PRIVATE
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/external/unity/src 
+    ${CMAKE_SOURCE_DIR}/external/unity/src
+)
+
+# rungeKutta4
+add_executable(test_rungeKutta4 test_rungeKutta4.c)
+target_compile_definitions(test_rungeKutta4 PRIVATE ${MODEL_DEFINE})
+target_link_libraries(test_rungeKutta4 PRIVATE ${LIB_NAME}_static unity m)
+target_include_directories(test_rungeKutta4 PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/external/unity/src
 )
 
 #==============================================================================
@@ -44,3 +53,4 @@ target_include_directories(test_eulerForward PRIVATE
 add_test(NAME test_newModel COMMAND test_newModel)
 add_test(NAME test_freeModel COMMAND test_freeModel)
 add_test(NAME test_eulerForward COMMAND test_eulerForward)
+add_test(NAME test_rungeKutta4 COMMAND test_rungeKutta4)

@@ -451,3 +451,47 @@ Before building your FMU, verify:
 
 ## How to add your own Integrator
 
+All integrators share the same signature defined in `include/model.h`:
+```c
+void yourIntegrator(modelInstance* model, double stepSize);
+```
+
+The contract is:
+* **model->stateDerivatives** contains the derivatives at the current state (pre-computed before the call)
+* The function must update **model->states** in-place with the result of the integration step
+* If your method needs intermediate derivative evaluations (like multi-stage methods), call **model->getStateDerivatives(model)** internally after temporarily modifying **model->states**
+
+First, add your implementation to `src/integrator.c` and its declaration to `include/integrator.h`.
+
+Here is a minimal example of the **explicit midpoint method** (2nd-order Runge-Kutta):
+
+```c
+void midpoint(modelInstance* model, double stepSize)
+{
+    size_t nx = model->info->numberOfStates;
+    double k1[nx], stateBackup[nx];
+
+    /* k1 = f(x) — reuse pre-computed derivatives */
+    memcpy(k1, model->stateDerivatives, nx * sizeof(double));
+    memcpy(stateBackup, model->states, nx * sizeof(double));
+
+    /* evaluate at midpoint: f(x + h/2 * k1) */
+    for (size_t i = 0; i < nx; i++) {
+        model->states[i] = stateBackup[i] + 0.5 * stepSize * k1[i];
+    }
+    model->getStateDerivatives(model);
+
+    /* x(t+h) = x(t) + h * f(midpoint) */
+    for (size_t i = 0; i < nx; i++) {
+        model->states[i] = stateBackup[i] + stepSize * model->stateDerivatives[i];
+    }
+}
+```
+
+Then, set **INTEGRATOR_METHOD** in your model's `model_config.h` to use it:
+
+```c
+#define INTEGRATOR_METHOD midpoint
+```
+
+See **eulerForward** and **rungeKutta4** in `src/integrator.c` for reference implementations.
