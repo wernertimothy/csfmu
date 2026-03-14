@@ -30,12 +30,12 @@ The current model implementation restrictions are:
 ## How to Build the FMU
 
 Run the following to build a specific **model_name**, which needs to match a folder name under `src/models`.
-For example if you want to build the **first_order** model, run
+For example if you want to build the **first_order** model and package the fmu to a folder called `fmus` inside the root, run
 
 ```bash
 rm -rf build
 mkdir -p build && cd build
-cmake -DMODEL=first_order ..
+cmake -DMODEL=first_order -DFMU_OUTPUT_DIR=../fmus ..
 cmake --build .
 ```
 
