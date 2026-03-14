@@ -22,6 +22,7 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
   - [fmi2DoStep](#fmi2dostep)
 - [Shutdown](#shutdown)
   - [fmi2Terminate](#fmi2terminate)
+  - [fmi2Reset](#fmi2reset)
 
 ---
 
@@ -1070,5 +1071,131 @@ fmi2FreeInstance(fmu);  // Frees memory
 4. **Debugging**: Terminate can log final state for diagnostics
 
 **In this template**: The function is simple (just state transition) because the template has no resources, but the pattern is established for future extensions.
+
+---
+
+### fmi2Reset
+
+Resets the FMU to the state immediately after `fmi2Instantiate`.
+
+#### Signature
+```c
+fmi2Status fmi2Reset(fmi2Component c);
+```
+
+#### Description
+Resets the FMU back to its post-instantiation state without freeing and reallocating memory. All mutable simulation state (time, model arrays, function pointers) is cleared, while the instance identity (name, callbacks, FMU type, log level) is preserved. After a successful reset, the caller must repeat the full initialization cycle (`fmi2SetupExperiment` → `fmi2EnterInitializationMode` → `fmi2ExitInitializationMode`) before stepping again.
+
+This function is the preferred alternative to destroying and recreating the FMU when running repeated simulations (e.g., parameter sweeps or optimization loops), since it avoids the overhead of memory reallocation.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance to reset |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Reset successful, FMU is back in Instantiated state |
+| `fmi2Error` | NULL component |
+
+#### FMI State Requirements
+**Can be called in**: Any state except **Start/End** (pseudo-state before instantiation)
+**State transitions**: Transitions from current state to **Instantiated**
+
+#### What Gets Reset
+| Category | Behavior |
+|----------|----------|
+| Simulation time | `startTime`, `stopTime`, `time` → `0.0` |
+| Model states | All zeroed |
+| State derivatives | All zeroed |
+| Inputs | All zeroed |
+| Outputs | All zeroed |
+| Parameters | All zeroed (re-applied from `INITIAL_PARAMS` during `fmi2EnterInitializationMode`) |
+| Function pointers | Set to `NULL` (re-bound during `fmi2EnterInitializationMode`) |
+| FMU state machine | → `stateInstantiated` |
+
+#### What Is Preserved
+| Category | Behavior |
+|----------|----------|
+| Instance name | Unchanged |
+| FMU type | Unchanged |
+| Callbacks (logger, allocate, free) | Unchanged |
+| Log level | Unchanged |
+
+#### Usage Example
+```c
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+
+// First simulation run
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 1.0);
+fmi2EnterInitializationMode(fmu);
+fmi2ExitInitializationMode(fmu);
+for (double t = 0.0; t < 1.0; t += 0.01) {
+    fmi2DoStep(fmu, t, 0.01, fmi2True);
+}
+fmi2Terminate(fmu);
+
+// Reset instead of free + re-instantiate
+fmi2Reset(fmu);
+
+// Second simulation run with different parameters
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 2.0);
+fmi2EnterInitializationMode(fmu);
+// Override a parameter before exiting init mode
+fmi2ValueReference paramRef = 0;
+fmi2Real newTau = 0.5;
+fmi2SetReal(fmu, &paramRef, 1, &newTau);
+fmi2ExitInitializationMode(fmu);
+for (double t = 0.0; t < 2.0; t += 0.01) {
+    fmi2DoStep(fmu, t, 0.01, fmi2True);
+}
+fmi2Terminate(fmu);
+
+// Final cleanup
+fmi2FreeInstance(fmu);
+```
+
+#### Parameter Sweep Example
+```c
+// Run multiple simulations with different gain values
+fmi2Component fmu = fmi2Instantiate(/* ... */);
+fmi2ValueReference gainRef = 1;  // k parameter
+fmi2ValueReference outputRef = 3;
+double gains[] = {0.5, 1.0, 2.0, 5.0};
+
+for (int i = 0; i < 4; i++) {
+    fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 1.0);
+    fmi2EnterInitializationMode(fmu);
+    fmi2SetReal(fmu, &gainRef, 1, &gains[i]);
+    fmi2ExitInitializationMode(fmu);
+
+    for (double t = 0.0; t < 1.0; t += 0.01) {
+        fmi2DoStep(fmu, t, 0.01, fmi2True);
+    }
+
+    fmi2Real finalOutput;
+    fmi2GetReal(fmu, &outputRef, 1, &finalOutput);
+    printf("k=%.1f → y_final=%.4f\n", gains[i], finalOutput);
+
+    fmi2Terminate(fmu);
+    if (i < 3) fmi2Reset(fmu);  // Reset for next run (skip on last)
+}
+
+fmi2FreeInstance(fmu);
+```
+
+#### Related Functions
+- [`fmi2Terminate`](#fmi2terminate) - Typically called before Reset to end the current simulation
+- [`fmi2FreeInstance`](#fmi2freeinstance) - Alternative to Reset when the FMU is no longer needed
+- [`fmi2Instantiate`](#fmi2instantiate) - Reset returns to the state produced by this function
+- [`fmi2EnterInitializationMode`](#fmi2enterinitializationmode) - Must be called after Reset to re-initialize
+
+#### Notes
+- **Soft re-instantiation**: Avoids the cost of `fmi2FreeInstance` + `fmi2Instantiate` by reusing existing memory allocations
+- **Function pointers cleared to NULL**: This is intentional — calling `fmi2DoStep` on a reset-but-uninitialized FMU will crash immediately (NULL dereference) rather than silently computing with stale equation bindings
+- **Parameters are zeroed, not restored**: Initial parameter values from `INITIAL_PARAMS` are re-applied during `fmi2EnterInitializationMode`, not during Reset. This matches the FMI spec: Reset returns to the post-Instantiate state, where parameters have not yet been set
+- **Error state recovery**: Reset can be called from error states, providing a way to recover without destroying the instance
+- **Log level preserved**: The logging configuration survives a reset, which is useful for debugging repeated runs
 
 ---

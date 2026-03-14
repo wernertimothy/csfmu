@@ -918,7 +918,18 @@ fmi2Status fmi2Terminate(fmi2Component c)
 }
 
 /**
- * Reset the FMU to post-instantiation state (not implemented)
+ * Reset the FMU to the state right after fmi2Instantiate
+ *
+ * Per FMI 2.0 spec (section 4.2.4), this brings the FMU back to
+ * stateInstantiated so the caller can repeat the full initialization
+ * cycle (SetupExperiment → EnterInit → ExitInit → DoStep).
+ *
+ * Implementation notes:
+ * - Resets simulation time to 0.0
+ * - Zeros all model arrays (states, derivatives, inputs, outputs, parameters)
+ * - Clears function pointers (re-bound during EnterInitializationMode)
+ * - Preserves instance identity (name, callbacks, FMU type, log level)
+ * - Can be called from any state except stateStartEnd
  */
 fmi2Status fmi2Reset(fmi2Component c)
 {
@@ -929,8 +940,29 @@ fmi2Status fmi2Reset(fmi2Component c)
 
     myFMU2* myfmu2 = (myFMU2*)c;
 
-    logWarningMessage(myfmu2, "fmi2Reset is not supported.");
-    return fmi2Warning;
+    /* Reset simulation time */
+    myfmu2->startTime = 0.0;
+    myfmu2->stopTime  = 0.0;
+    myfmu2->time      = 0.0;
+
+    /* Reset model arrays to zero */
+    modelInstance* model = myfmu2->model;
+    memset(model->states,           0, model->info->numberOfStates    * sizeof(double));
+    memset(model->stateDerivatives, 0, model->info->numberOfStates    * sizeof(double));
+    memset(model->inputs,           0, model->info->numberOfInputs    * sizeof(double));
+    memset(model->outputs,          0, model->info->numberOfOutputs   * sizeof(double));
+    memset(model->parameter,        0, model->info->numberOfParameter * sizeof(double));
+
+    /* Clear function pointers (re-bound in fmi2EnterInitializationMode) */
+    model->getStateDerivatives = NULL;
+    model->integrate           = NULL;
+    model->getOutputs          = NULL;
+
+    /* Transition to post-instantiation state */
+    myfmu2->state = stateInstantiated;
+
+    logEventMessage(myfmu2, "FMU was reset.");
+    return fmi2OK;
 }
 
 /***************************************************
