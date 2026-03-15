@@ -17,12 +17,18 @@ enable_testing()
 #==============================================================================
 
 # Platform detection for FMU binaries
-if(WIN32)
-    set(FMI_PLATFORM "x86_64-windows")
-elseif(APPLE)
-    set(FMI_PLATFORM "x86_64-darwin")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    set(FMI_ARCH "aarch64")
 else()
-    set(FMI_PLATFORM "x86_64-linux")
+    set(FMI_ARCH "x86_64")
+endif()
+
+if(WIN32)
+    set(FMI_PLATFORM "${FMI_ARCH}-windows")
+elseif(APPLE)
+    set(FMI_PLATFORM "${FMI_ARCH}-darwin")
+else()
+    set(FMI_PLATFORM "${FMI_ARCH}-linux")
 endif()
 message(STATUS "Build platform: ${FMI_PLATFORM}")
 

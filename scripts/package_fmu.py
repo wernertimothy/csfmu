@@ -8,16 +8,19 @@ import platform
 def package_fmu(lib_path, model_desc_path, output_dir, fmu_name):
     """Package FMU according to FMI 2.0 standard."""
     
-    # Determine platform and library extension
+    # Determine architecture and platform
+    machine = platform.machine().lower()
+    arch = "aarch64" if machine in ("arm64", "aarch64") else "x86_64"
+
     system = platform.system()
     if system == "Windows":
-        platform_name = "win64"
+        platform_name = f"{arch}-windows"
         lib_ext = ".dll"
     elif system == "Darwin":
-        platform_name = "darwin64"
+        platform_name = f"{arch}-darwin"
         lib_ext = ".dylib"
     else:  # Linux
-        platform_name = "linux64"
+        platform_name = f"{arch}-linux"
         lib_ext = ".so"
     
     # Create temporary work directory
