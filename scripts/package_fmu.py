@@ -8,37 +8,47 @@ import platform
 def package_fmu(lib_path, model_desc_path, output_dir, fmu_name):
     """Package FMU according to FMI 2.0 standard."""
     
-    # Determine architecture and platform
+    # Determine architecture and platform names
+    # We place the binary under both the modern (<arch>-<os>) and legacy
+    # (<os>64) directory names so the FMU works with tools that use either
+    # convention (e.g. fmpy uses the legacy name in its low-level API).
     machine = platform.machine().lower()
     arch = "aarch64" if machine in ("arm64", "aarch64") else "x86_64"
 
     system = platform.system()
     if system == "Windows":
-        platform_name = f"{arch}-windows"
+        modern_name = f"{arch}-windows"
+        legacy_name = "win64"
         lib_ext = ".dll"
     elif system == "Darwin":
-        platform_name = f"{arch}-darwin"
+        modern_name = f"{arch}-darwin"
+        legacy_name = "darwin64"
         lib_ext = ".dylib"
     else:  # Linux
-        platform_name = f"{arch}-linux"
+        modern_name = f"{arch}-linux"
+        legacy_name = "linux64"
         lib_ext = ".so"
-    
+
+    platform_names = [modern_name]
+    if legacy_name != modern_name:
+        platform_names.append(legacy_name)
+
     # Create temporary work directory
     work_dir = os.path.join(output_dir, "fmu_temp")
     if os.path.exists(work_dir):
         shutil.rmtree(work_dir)
     os.makedirs(work_dir)
-    
+
     try:
-        # Create FMU directory structure
-        binaries_dir = os.path.join(work_dir, "binaries", platform_name)
-        os.makedirs(binaries_dir)
-        
-        # Copy library
+        # Copy library to each platform directory
         lib_file = lib_path if os.path.isfile(lib_path) else lib_path + lib_ext
         if not os.path.exists(lib_file):
             raise FileNotFoundError(f"Library not found: {lib_file}")
-        shutil.copy2(lib_file, binaries_dir)
+
+        for pname in platform_names:
+            binaries_dir = os.path.join(work_dir, "binaries", pname)
+            os.makedirs(binaries_dir)
+            shutil.copy2(lib_file, binaries_dir)
         
         # Copy modelDescription.xml to root
         if not os.path.exists(model_desc_path):

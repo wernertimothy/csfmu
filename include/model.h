@@ -168,6 +168,8 @@ void freeModel(modelInstance* model);
  */
 #if defined(MODEL_FIRST_ORDER)
     #include "first_order/model_config.h"
+#elif defined(MODEL_MASS_SPRING_DAMPER)
+    #include "mass_spring_damper/model_config.h"
 #else
     #error "No model selected. Use -DMODEL=<model_name> in CMake configuration"
 #endif

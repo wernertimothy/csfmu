@@ -11,13 +11,15 @@ The Project is structured as follows.
   | Directory | Contents |
   |-----------|----------|
   | `docs/` | References and documentation |
-  | `examples/` | Example implementations |
+  | `examples/` | Example implementations (see note below) |
   | `external/` | Third-party dependencies (FMI headers, Unity) |
   | `include/` | Project header files |
   | `scripts/` | Build and packaging scripts |
   | `src/` | Core FMU and model-interface implementation |
   | `src/models/` | **Model implementations (this is where you will add your model)** |
   | `test/` | Unit and integration tests |
+
+**Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. Each model also has a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
 
 ## Core principal of fmuTemplate
 
