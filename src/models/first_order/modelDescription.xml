@@ -21,7 +21,10 @@
         maxOutputDerivativeOrder="0"
         canGetAndSetFMUstate="false"
         canSerializeFMUstate="false"
-        providesDirectionalDerivative="false">
+        providesDirectionalDerivative="false"
+        canRunAsynchronously="false"
+        canBeInstantiatedOnlyOncePerProcess="false"
+        canNotUseMemoryManagementFunctions="false">
     </CoSimulation>
 
     <!-- ========================================================================
