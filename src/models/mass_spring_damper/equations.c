@@ -24,7 +24,7 @@
  *     d = damper coefficient (parameter[2])
  *     u = net applied force on the mass (inputs[0])
  *     x = position of the mass relative to equilibrium (states[0])
- *     v = velocity of the mass (sates[1])
+ *     v = velocity of the mass (states[1])
  *
  * This represents a second-order-system
  *
@@ -47,7 +47,7 @@ void massSpringDamper(modelInstance* model)
     double k = model->parameter[1];  /* spring stiffness */
     double d = model->parameter[2];  /* damping coeff */
 
-    /* Compute state derivative: dx/dt = (-x + k*u) / tau */
+    /* Compute state derivatives: dx/dt = v, dv/dt = (-k*x - d*v + u) / m */
     double dx = v;
     double dv = (-k*x - d*v + u)/m;
 

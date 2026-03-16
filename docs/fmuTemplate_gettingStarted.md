@@ -97,7 +97,7 @@ void lorenzAttractor(modelInstance* model) {
   double dx3 = x1*x2-beta*x3;
   /* write back to model */
   model->stateDerivatives[0] = dx1;
-  model->stateDerivatives[1] = dx2:
+  model->stateDerivatives[1] = dx2;
   model->stateDerivatives[2] = dx3;
 }
 ```
@@ -113,7 +113,7 @@ and it should calculate all outputs and write them to
 ```c
 model->outputs[k]
 ```
-for all **k** in **model->info.numberOfOutputs**.
+for all **k** in **model->info->numberOfOutputs**.
 
 Here is an example implementation that defines all three states of the lorenz attractor as outputs.
 
@@ -141,6 +141,10 @@ When you build with -DMODEL=lorenz_attractor, CMake:
        #include "lorenz_attractor/model_config.h"
    #endif
    ```
+
+#### A Note on the Include Guard
+
+You'll notice that all `model_config.h` files share the same `#ifndef MODEL_CONFIG_H` include guard. This is intentional — it's part of the compile-time polymorphism design. Since CMake selects exactly one model per build (`-DMODEL=<name>`), only one `model_config.h` is ever included. They all represent the same configuration slot, so they share the same guard. You do **not** need unique guards per model.
 
 #### Required Definitions
 
