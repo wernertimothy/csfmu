@@ -23,6 +23,10 @@
 
 #include "model.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief Performs one integration step using the explicit Euler (forward Euler) method.
  *
@@ -81,5 +85,9 @@ void eulerForward(modelInstance* model, double stepSize);
  * @see modelInstance
  */
 void rungeKutta4(modelInstance* model, double stepSize);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

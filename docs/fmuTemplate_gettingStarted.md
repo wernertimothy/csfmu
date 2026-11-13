@@ -52,15 +52,17 @@ Second, add the following files and fill them with life:
 
 | File | Content |
 |------|-------------|
-|**equations.c** | The state and output equations, that describe your model |
+|**equations.c** or **equations.cpp** | The state and output equations, that describe your model (C or C++) |
 | **model_config.h** | Mappings, that connect your model with the FMI, as well as the configuration of the solver, model dimensions, initial states, etc. |
 | **modelDescription.xml** | FMI specific meta data about your FMU
+
+The build system auto-detects whether your model uses C or C++ based on the file extension. If `equations.cpp` exists it will be compiled with the C++ compiler; otherwise `equations.c` is used.
 
 Let's take a look at these files one by one in detail.
 
 ---
 
-### `equations.c`
+### `equations.c` (or `equations.cpp`)
 
 In this file you should implement two functions, the models **state equations** and **output equation**.
 
@@ -124,6 +126,66 @@ void lorenzAttractorOutputs(modelInstance* model) {
   }
 }
 ```
+
+#### C++ Models
+
+You can also implement your equations in C++ by naming the file `equations.cpp`. This lets you use classes, the C++ standard library, templates, and other C++ features inside your model.
+
+The only requirement is that the two functions assigned to the model's function pointers must have **C linkage** (via `extern "C"`). Everything else can be pure C++.
+
+Here is the `pendulum_on_cart` model as an example:
+
+```cpp
+// equations.cpp
+#include "model.h"
+#include <cmath>
+
+class PendulumOnCart {
+public:
+    PendulumOnCart(double* states, double* inputs, double* params)
+        : x_dot(states[1]),
+          theta(states[2]), theta_dot(states[3]),
+          F(inputs[0]),
+          M(params[0]), m(params[1]), l(params[2]), g(params[3]) {}
+
+    void derivatives(double* dx) const {
+        double sinTh = std::sin(theta);
+        double cosTh = std::cos(theta);
+        double denom = M + m * sinTh * sinTh;
+
+        dx[0] = x_dot;
+        dx[1] = (F + m * sinTh * (l * theta_dot * theta_dot + g * cosTh)) / denom;
+        dx[2] = theta_dot;
+        dx[3] = (-F * cosTh - m * l * theta_dot * theta_dot * cosTh * sinTh
+                 - (M + m) * g * sinTh) / (l * denom);
+    }
+
+private:
+    double x_dot, theta, theta_dot;
+    double F;
+    double M, m, l, g;
+};
+
+extern "C" {
+
+void pendulumOnCartSystem(modelInstance* model) {
+    PendulumOnCart p(model->states, model->inputs, model->parameter);
+    p.derivatives(model->stateDerivatives);
+}
+
+void pendulumOnCartOutputs(modelInstance* model) {
+    model->outputs[0] = model->states[0];
+    model->outputs[1] = model->states[2];
+}
+
+}  // extern "C"
+```
+
+Key points for C++ models:
+- Only the wrapper functions need `extern "C"` — internal classes and helpers do not
+- The `model.h` and `integrator.h` headers already have `extern "C"` guards, so they can be `#include`d from `.cpp` files directly
+- The `model_config.h` forward declarations are included inside the `extern "C"` block in `model.h`, so no additional guards are needed there
+
 ---
 
 ### `model_config.h`

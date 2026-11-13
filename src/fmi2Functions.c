@@ -86,8 +86,8 @@ typedef struct {
  * Multiple categories can be enabled simultaneously via bitwise OR.
  */
 typedef enum {
-    logNone = 0,
-    logEvents = 1 << 0,
+    logNone                  = 0,
+    logEvents                = 1 << 0,
     logSingularLinearSystems = 1 << 1,
     logNonlinearSystems      = 1 << 2,
     logDynamicStateSelection = 1 << 3,

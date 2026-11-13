@@ -30,6 +30,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief Forward declaration of the model instance structure.
  *
@@ -170,8 +174,14 @@ void freeModel(modelInstance* model);
     #include "first_order/model_config.h"
 #elif defined(MODEL_MASS_SPRING_DAMPER)
     #include "mass_spring_damper/model_config.h"
+#elif defined(MODEL_PENDULUM_ON_CART)
+    #include "pendulum_on_cart/model_config.h"
 #else
     #error "No model selected. Use -DMODEL=<model_name> in CMake configuration"
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif

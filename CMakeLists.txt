@@ -4,10 +4,12 @@
 #==============================================================================
 
 cmake_minimum_required(VERSION 3.12)
-project(fmuTemplate VERSION 1.0.0)
+project(fmuTemplate VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(CTest)
 enable_testing()
@@ -60,10 +62,19 @@ set(FMU_SOURCES
 )
 
 # Model (FMU-agnostic)
+# Auto-detect C or C++ model equations
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/equations.cpp")
+    set(MODEL_EQUATIONS "src/models/${MODEL}/equations.cpp")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/equations.c")
+    set(MODEL_EQUATIONS "src/models/${MODEL}/equations.c")
+else()
+    message(FATAL_ERROR "No equations.c or equations.cpp found for model '${MODEL}'")
+endif()
+
 set(MODEL_SOURCES
     src/model.c
     src/integrator.c
-    src/models/${MODEL}/equations.c
+    ${MODEL_EQUATIONS}
 )
 
 #==============================================================================
