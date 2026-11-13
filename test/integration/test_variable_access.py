@@ -179,3 +179,40 @@ def test_reset_restores_start_values(initialized_fmu, model_description) -> None
     for variable in model_description.modelVariables:
         if variable.start is not None:
             assert get_value(initialized_fmu, variable) == start_value(variable), variable.name
+
+
+def test_variables_can_be_read_in_initialization_mode(new_fmu, model_description) -> None:
+    """
+    Every variable can be read during initialization mode. Outputs are
+    computed from the values set so far, so they already equal the outputs
+    at the first communication point.
+    """
+    fmu = new_fmu()
+    settable = [v for v in model_description.modelVariables if v.causality in ("parameter", "input", "local")]
+    outputs = variables_with(model_description, "output")
+
+    fmu.setupExperiment(startTime=0.0)
+    fmu.enterInitializationMode()
+    for variable in settable:
+        set_value(fmu, variable, changed_value(variable))
+    during_initialization = [get_value(fmu, output) for output in outputs]
+    fmu.exitInitializationMode()
+
+    assert [get_value(fmu, output) for output in outputs] == during_initialization
+
+
+def test_outputs_follow_values_set_before_initialization(new_fmu, model_description) -> None:
+    """Outputs read in the instantiated state reflect the values set so far."""
+    fmu = new_fmu()
+    settable = [v for v in model_description.modelVariables if v.causality in ("parameter", "input", "local")]
+    outputs = variables_with(model_description, "output")
+
+    for variable in settable:
+        set_value(fmu, variable, changed_value(variable))
+    before_initialization = [get_value(fmu, output) for output in outputs]
+
+    fmu.setupExperiment(startTime=0.0)
+    fmu.enterInitializationMode()
+    fmu.exitInitializationMode()
+
+    assert [get_value(fmu, output) for output in outputs] == before_initialization

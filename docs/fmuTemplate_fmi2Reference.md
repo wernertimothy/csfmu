@@ -23,9 +23,25 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
   - [fmi2SetString / fmi2GetString](#fmi2setstring--fmi2getstring)
 - [Simulation](#simulation)
   - [fmi2DoStep](#fmi2dostep)
+  - [fmi2GetStatus / fmi2GetXXXStatus](#fmi2getstatus--fmi2getxxxstatus)
+- [FMU State](#fmu-state)
+  - [fmi2GetFMUstate](#fmi2getfmustate)
+  - [fmi2SetFMUstate](#fmi2setfmustate)
+  - [fmi2FreeFMUstate](#fmi2freefmustate)
+  - [fmi2SerializedFMUstateSize / fmi2SerializeFMUstate / fmi2DeSerializeFMUstate](#fmi2serializedfmustatesize--fmi2serializefmustate--fmi2deserializefmustate)
 - [Shutdown](#shutdown)
   - [fmi2Terminate](#fmi2terminate)
   - [fmi2Reset](#fmi2reset)
+- [Unsupported Functions](#unsupported-functions)
+
+## Error Handling
+
+All functions follow the same rules:
+
+- A function that fails returns `fmi2Error` and puts the FMU into the **Error** state. This includes calls that are not allowed in the current state, invalid arguments and unknown value references.
+- In the Error state every further call fails, except: `fmi2Reset` (start over), `fmi2FreeInstance`, `fmi2SetFMUstate` (go back to a snapshot), `fmi2GetXXX` and `fmi2SetDebugLogging` (diagnosis), and the functions that only handle snapshots (`fmi2FreeFMUstate`, serialization).
+- `fmi2Warning` means the call had its effect, but something is worth reporting. `fmi2Discard` is only returned by the status queries, for a status that is not available. Neither changes the state.
+- A NULL component returns `fmi2Error` (there is no instance whose state could change).
 
 ---
 
@@ -146,10 +162,10 @@ Allocates and initializes a new FMU instance. This is the first function that mu
 | Name | Type | Description |
 |------|------|-------------|
 | `instanceName` | `fmi2String` | Unique name for this FMU instance (for logging/debugging) |
-| `fmuType` | `fmi2Type` | Type of FMU: `fmi2CoSimulation` or `fmi2ModelExchange` |
+| `fmuType` | `fmi2Type` | Must be `fmi2CoSimulation` (Model Exchange is not supported) |
 | `fmuGUID` | `fmi2String` | GUID from modelDescription.xml - must match FMU's GUID |
 | `fmuResourceLocation` | `fmi2String` | URI to the `resources` directory (may be used for loading data files) |
-| `functions` | `const fmi2CallbackFunctions*` | Pointer to callback function structure (logger, allocator, etc.) |
+| `functions` | `const fmi2CallbackFunctions*` | Pointer to callback function structure. Only `logger` and `componentEnvironment` are used |
 | `visible` | `fmi2Boolean` | Whether simulation should be visible (UI-related, often ignored) |
 | `loggingOn` | `fmi2Boolean` | Whether logging should be enabled initially |
 
@@ -157,7 +173,7 @@ Allocates and initializes a new FMU instance. This is the first function that mu
 | Return Value | Condition |
 |--------------|-----------|
 | Valid `fmi2Component` pointer | Successfully instantiated |
-| `NULL` | Instantiation failed (GUID mismatch, allocation failure, invalid callbacks) |
+| `NULL` | Instantiation failed (missing logger, missing instance name, `fmuType` is not Co-Simulation, GUID mismatch, allocation failure) |
 
 #### FMI State Requirements
 **Can be called in**: No instance exists yet (before any state)
@@ -202,11 +218,13 @@ if (fmu == NULL) {
 
 #### Notes
 - **GUID validation is mandatory** - the provided `fmuGUID` must exactly match the `guid` of the model definition (`MODEL_DEFINITION` in the model's `variables.c`). The generated `modelDescription.xml` carries the same value
-- All callback functions in `fmi2CallbackFunctions` must be valid (non-NULL), especially `logger`, `allocateMemory`, `freeMemory`, and `componentEnvironment`
+- **Only the logger is required**: `functions` and `functions->logger` must not be NULL. `componentEnvironment` is passed back to the logger unchanged and may be NULL
+- **Memory callbacks are not used**: The FMU allocates with `calloc()` and frees with `free()`. This is announced by `canNotUseMemoryManagementFunctions="true"` in the `modelDescription.xml`, so `allocateMemory` and `freeMemory` may be NULL
+- **The instance name is copied**: The caller may free its string after the call. The name must not be NULL or empty
 - Internally allocates both `myFMU2` wrapper and `modelInstance` using `newModel(&MODEL_DEFINITION)`
 - **All variables hold their start values** after instantiation (parameters, inputs and states as declared in the model's variable table). Values set afterwards with `fmi2SetReal` etc. are kept through initialization
 - Returns an opaque `fmi2Component` pointer - integration tool should never access internals directly
-- If instantiation fails, logs error via the logger callback before returning NULL
+- If instantiation fails, logs error via the logger callback before returning NULL (independent of `loggingOn`, category `logStatusError`)
 
 ---
 
@@ -320,7 +338,8 @@ if (status != fmi2OK) {
 - Must be called before `fmi2EnterInitializationMode`
 - `tolerance` is typically undefined for co-simulation (solver-specific)
 - Internally stores `startTime`, `stopTime`, and initializes internal time clock to `startTime`
-- Currently validates that `startTime < stopTime` and returns error if violated
+- If `stopTimeDefined` is true, `stopTime` must be `>= startTime`, and [`fmi2DoStep`](#fmi2dostep) later refuses to step beyond it. If it is false, `stopTime` is ignored
+- `startTime` must be finite
 - The time values are in seconds (SI units as per FMI standard)
 
 ---
@@ -352,10 +371,11 @@ Enables or disables logging and controls which message categories are logged. Th
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Logging configuration updated successfully |
-| `fmi2Error` | Invalid parameters (NULL component or NULL categories with nCategories > 0) |
+| `fmi2Warning` | Configuration updated, but at least one category name is unknown (or NULL) and was ignored |
+| `fmi2Error` | NULL component or NULL categories with nCategories > 0 |
 
 #### FMI State Requirements
-**Can be called in**: Any state after instantiation (very flexible)
+**Can be called in**: Any state after instantiation, including the Error state
 **State transitions**: None (configuration function only)
 
 #### Behavior
@@ -372,31 +392,25 @@ The function has three distinct behaviors based on parameters:
 
 3. **Enable specific categories** (`loggingOn == fmi2True` and `nCategories > 0`):
    - Only the specified categories become active
-   - Unknown category names are silently ignored (best effort)
+   - Unknown category names are ignored; the function then returns `fmi2Warning`
 
 #### Log Categories
 
-This FMU supports the following standard FMI 2.0 categories (from spec section 2.2.4):
+The FMU has the following categories. They are listed as `LogCategories` in the `modelDescription.xml`, and the same name is passed as `category` to the logger callback.
 
-**Supported:**
-- `logAll` - Enable all categories
-- `logEvents` - Event detection and handling
-- `logStatusWarning` - Warning messages
-- `logStatusError` - Error messages (always enabled by default)
-
-**Defined but not supported** (silently ignored):
-- `logSingularLinearSystems`
-- `logNonlinearSystems`
-- `logDynamicStateSelection`
-- `logStatusDiscard`
-- `logStatusFatal`
-- `logStatusPending`
+| Category | Messages |
+|----------|----------|
+| `logEvents` | Lifecycle of the FMU: instantiated, experiment set up, initialized, reset, terminated, FMU state saved or restored |
+| `logStatusWarning` | A function returned `fmi2Warning` or `fmi2Discard` |
+| `logStatusError` | A function returned `fmi2Error` (the message tells why) |
+| `logFmi2Call` | Successful calls of `fmi2GetXXX`, `fmi2SetXXX` and `fmi2DoStep` (very verbose) |
+| `logAll` | All of the above |
 
 #### Usage Example
 ```c
 fmi2Component fmu = fmi2Instantiate(/* ... */);
 
-// Example 1: Enable only error logging (default)
+// Example 1: Enable only error logging
 fmi2String errorOnly[] = {"logStatusError"};
 fmi2SetDebugLogging(fmu, fmi2True, 1, errorOnly);
 
@@ -424,12 +438,11 @@ fmi2DoStep(fmu, 0.1, 0.1, fmi2True);
 
 #### Notes
 - **Implementation uses bitmask**: Categories are stored as bit flags for efficient checking (`unsigned int logLevel`)
-- **Helper function available**: Internal `logCategoryActive(fmu, category)` checks if a category is enabled
-- **Thread-safe**: Can be called from any thread (though the logger callback itself must be thread-safe)
+- **One table of categories**: `LOG_CATEGORIES` in `fmi2Functions.c` maps names to bits. It is used by this function and by the logger, so the names cannot diverge
 - **Dynamic control**: Integration tools can enable verbose logging only during problematic simulation periods
 - **Categories parameter can be NULL**: When `nCategories == 0`, NULL is valid and means "enable all"
-- **Unknown categories ignored**: Per FMI spec, best effort - unrecognized category names don't cause errors
-- **Default logging**: Errors are logged by default even if no categories explicitly enabled
+- **No default category**: With `loggingOn = fmi2False` nothing is logged, not even errors. Only a failed `fmi2Instantiate` always reports its reason
+- **Messages are passed as data**: The logger callback is printf-like. The FMU formats its message first and calls the logger with the format `"%s"`, so a `%` in a variable or instance name is never interpreted
 
 ---
 
@@ -462,7 +475,7 @@ Moves the FMU from the instantiated state into initialization mode. The function
 
 #### FMI State Requirements
 **Can be called in**: **Instantiated** state (after `fmi2SetupExperiment`, before first `fmi2ExitInitializationMode`)
-**State transitions**: Adds **Initialization Mode** state flag (FMU remains instantiated)
+**State transitions**: **Instantiated** → **Initialization Mode**
 
 #### Where Initial Values Come From
 
@@ -513,6 +526,7 @@ fmi2ExitInitializationMode(fmu);
 #### Notes
 - **Start values are not applied here**: They are written once, in `fmi2Instantiate` and `fmi2Reset`. Applying them here would overwrite values the integration tool has set in the instantiated state (this is where fmpy applies `start_values`)
 - **Must be instantiated first**: Returns `fmi2Error` if not called in the instantiated state
+- **`fmi2SetupExperiment` is optional for this FMU**: Without it the experiment starts at time 0 and has no stop time
 
 ---
 
@@ -541,17 +555,7 @@ Completes the initialization phase and transitions the FMU from initialization m
 
 #### FMI State Requirements
 **Can be called in**: **Initialization Mode** (after `fmi2EnterInitializationMode`)
-**State transitions**: Removes **Initialization Mode** flag, adds **Initialized** state flag
-
-#### State Transition Details
-
-The function performs a two-step state transition:
-
-1. **Remove initialization mode**: `state &= ~stateInitializationMode` clears the initialization flag
-2. **Add initialized state**: `state |= stateInitialized` sets the initialized flag
-3. **Preserve instantiated state**: The FMU remains instantiated (bitmask allows multiple states)
-
-After this call, the FMU state is: `stateInstantiated | stateInitialized`
+**State transitions**: **Initialization Mode** → **Step Complete**
 
 #### Usage Example
 ```c
@@ -595,7 +599,6 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 - **No parameter validation**: The FMU trusts that the integration tool has set all required values during initialization mode
 - **Finalization point**: After this call, `fmi2EnterInitializationMode` cannot be called again without calling `fmi2Reset` first
 - **Ready for stepping**: Integration tool typically reads initial outputs immediately after this call, then begins the simulation loop
-- **Bitwise state machine**: Uses `&= ~flag` to remove a flag and `|= flag` to add a flag - allows multiple states to coexist
 - **Error if wrong state**: Returns `fmi2Error` if not currently in initialization mode (catches lifecycle violations)
 
 ---
@@ -623,6 +626,8 @@ All access functions below work the same way:
 | Output | Never |
 
 Integration tools should always look up value references by variable name in the `modelDescription.xml` and never hardcode them.
+
+**Outputs are always consistent with the other variables.** Every setter marks the outputs as stale, and every getter recomputes them first if needed (by calling the model's output equation). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last.
 
 **Example for the `first_order` model:**
 
@@ -745,7 +750,7 @@ Reads one or more real-valued variables by their value references. Every real va
 | `fmi2Error` | NULL component, call not allowed in the current state, invalid arrays, unknown value reference, or variable is not of type Real |
 
 #### FMI State Requirements
-**Can be called in**: **Instantiated**, **Step Complete**, **Step Failed**, **Step Canceled**, **Terminated**, **Error**
+**Can be called in**: **Instantiated**, **Initialization Mode**, **Step Complete**, **Step Failed**, **Step Canceled**, **Terminated**, **Error**
 **State transitions**: None on success. On error the FMU enters the error state
 
 #### Usage Example
@@ -782,7 +787,8 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 
 #### Notes
 - **Output array is written**: The `value[]` parameter is an output, caller must allocate space for `nvr` elements
-- **Outputs are valid from the end of initialization**: They are computed in `fmi2ExitInitializationMode` and after every `fmi2DoStep`
+- **Outputs are always up to date**: They are computed in `fmi2ExitInitializationMode` and after every `fmi2DoStep`, and again before reading if a variable was set in between; see [Value References](#value-references)
+- **Readable in the Error state**: Useful to inspect the FMU after a failure. The values are those of the moment the error occurred
 - **Model independent**: The function only uses the variable table of the model definition; see [Value References](#value-references)
 - **Bulk operations**: Read multiple variables in one call for efficiency
 - **nvr=0 is valid**: Calling with empty arrays is a no-op
@@ -992,50 +998,52 @@ The heart of co-simulation - advances the FMU's internal state from time `t` to 
 | Name | Type | Description |
 |------|------|-------------|
 | `c` | `fmi2Component` | The FMU instance |
-| `currentCommunicationPoint` | `fmi2Real` | The current simulation time (should match FMU's internal clock) |
-| `communicationStepSize` | `fmi2Real` | Time increment to advance (must be > 0) |
+| `currentCommunicationPoint` | `fmi2Real` | The current simulation time (must match FMU's internal clock) |
+| `communicationStepSize` | `fmi2Real` | Time increment to advance (must be finite and > 0) |
 | `noSetFMUStatePriorToCurrentPoint` | `fmi2Boolean` | Flag for FMU state management (ignored in this implementation) |
 
 #### Return Values
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Step completed successfully |
-| `fmi2Error` | Invalid component, negative/zero step size, wrong state, or time inconsistency |
+| `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, step ends behind the stop time, or a state is not finite after the step |
 
 #### FMI State Requirements
-**Can be called in**: **Initialized** state (after `fmi2ExitInitializationMode`, before `fmi2Terminate`)
-**State transitions**: Remains in **Initialized** state
+**Can be called in**: **Step Complete** (after `fmi2ExitInitializationMode`, before `fmi2Terminate`)
+**State transitions**: Remains in **Step Complete**. On error the FMU enters the **Error** state
 
 #### Algorithm: Sub-Stepping for Numerical Stability
 
-The implementation uses **adaptive sub-stepping** to maintain numerical accuracy:
+The communication step is divided into the smallest number of **equal** sub-steps that are not larger than the model's `maxStepSize`:
 
 1. **Calculate sub-steps**:
    ```c
-   numberOfSteps = floor(communicationStepSize / maxStepSize)
-   stepRemainder = communicationStepSize - (numberOfSteps * maxStepSize)
+   numberOfSteps  = ceil(communicationStepSize / maxStepSize - 1e-9)   // at least 1
+   actualStepSize = communicationStepSize / numberOfSteps
    ```
+   The small tolerance keeps rounding in the division from adding a step (`0.3 / 0.1` is `2.9999999999999996` in floating point and must give 3 steps, not 4).
 
-2. **Execute full steps**:
-   - Take `numberOfSteps` steps of size `maxStepSize`
+2. **Execute sub-steps**:
+   - Take `numberOfSteps` steps of size `actualStepSize`
    - Each step: compute derivatives → integrate states
 
-3. **Handle remainder**:
-   - If `stepRemainder >= EPSILON` (1e-9 s): take final step of size `stepRemainder`
-   - If `stepRemainder < EPSILON`: skip (numerically insignificant)
+3. **Check the result**:
+   - If a state is NaN or infinite, the integration has diverged and the function returns `fmi2Error`
 
 4. **Update time and outputs**:
-   - Advance internal clock by `communicationStepSize`
+   - Set the internal clock to `currentCommunicationPoint + communicationStepSize`
    - Compute outputs from final state
 
 **Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
 
-#### Time Consistency Validation
+**Why equal sub-steps?** A full-steps-plus-remainder scheme needs a threshold below which the remainder is dropped, and the remainder step can be arbitrarily small. Equal steps need neither.
 
-Before stepping, validates that `currentCommunicationPoint` matches the FMU's internal clock (within tolerance `EPSILON = 1e-9`). This catches:
-- Integration tool errors (wrong time tracking)
-- FMU implementation bugs
-- Co-simulation orchestration issues
+#### Time Validation
+
+Before stepping, the function validates:
+
+- **Clock**: `currentCommunicationPoint` must match the FMU's internal clock. The tolerance is relative (`1e-9 * max(1, |time|)`), so the check also works at large simulation times. Because the clock is set to the end of the step as seen by the integration tool, rounding errors do not accumulate over the steps.
+- **Stop time**: If a stop time was defined in `fmi2SetupExperiment`, the step must not end behind it (same tolerance).
 
 #### Usage Example
 ```c
@@ -1082,14 +1090,13 @@ fmi2FreeInstance(fmu);
 **Scenario**: Integration tool requests 0.025 s step, but `maxStepSize = 0.01 s`
 
 **Execution**:
-1. Calculate: `numberOfSteps = 2`, `stepRemainder = 0.005 s`
-2. Step 1: Integrate 0.01 s (states: t → t+0.01)
-3. Step 2: Integrate 0.01 s (states: t+0.01 → t+0.02)
-4. Remainder: Integrate 0.005 s (states: t+0.02 → t+0.025)
-5. Update clock: `time += 0.025 s`
-6. Compute outputs at t+0.025
+1. Calculate: `numberOfSteps = ceil(2.5) = 3`, `actualStepSize = 0.025 / 3 ≈ 0.00833 s`
+2. Step 1 to 3: Integrate 0.00833 s each
+3. Check that all states are finite
+4. Set clock to `currentCommunicationPoint + 0.025 s`
+5. Compute outputs at t+0.025
 
-**Result**: FMU advanced full 0.025 s using three stable sub-steps.
+**Result**: FMU advanced full 0.025 s using three stable sub-steps of equal size.
 
 #### Related Functions
 - [`fmi2ExitInitializationMode`](#fmi2exitinitializationmode) - Must be called before first DoStep
@@ -1103,9 +1110,8 @@ fmi2FreeInstance(fmu);
 - **Zero-order hold assumption**: Inputs are assumed constant during each communication step (FMI standard)
 - **Outputs computed once**: After all sub-steps complete, not after each internal step
 - **maxStepSize configurable**: Field of the model definition in the model's `variables.c`
-- **EPSILON = 1e-9 s**: Threshold for "numerically insignificant" - balances precision vs performance
-- **Integer loop counter**: Avoids floating-point accumulation errors in sub-step counting
-- **Time consistency enforced**: Returns error if `currentCommunicationPoint` doesn't match internal clock
+- **Divergence is an error**: A step that produces NaN or infinite states returns `fmi2Error`. The FMU is then in the Error state; continue with `fmi2Reset` or `fmi2SetFMUstate`
+- **Never discards a step**: The function returns `fmi2OK` or `fmi2Error`, never `fmi2Discard` or `fmi2Pending`
 - **Synchronous only**: Blocks until computation completes (`noSetFMUStatePriorToCurrentPoint` ignored)
 - **No variable step size within DoStep**: Uses fixed sub-steps (adaptive methods would require more complex integrators)
 
@@ -1119,15 +1125,280 @@ Adjust in the model definition (`src/models/<model_name>/variables.c`):
 Smaller values → more stable but slower
 Larger values → faster but may diverge for stiff systems
 
-#### Advanced: Epsilon Choice
+---
 
-`EPSILON = 1e-9` (1 nanosecond) chosen because:
-- **Physical insignificance**: Below classical physics regime
-- **Numerical robustness**: 10⁶× larger than machine epsilon (2.2e-16)
-- **Accumulated error safety**: Provides margin for floating-point drift
-- **Industry standard**: Matches MATLAB, SciPy, FMI examples
+### fmi2GetStatus / fmi2GetXXXStatus
 
-Remainders < 1e-9 s are skipped as numerical noise.
+Query the status of the co-simulation slave.
+
+#### Signature
+```c
+fmi2Status fmi2GetStatus       (fmi2Component c, const fmi2StatusKind s, fmi2Status*  value);
+fmi2Status fmi2GetRealStatus   (fmi2Component c, const fmi2StatusKind s, fmi2Real*    value);
+fmi2Status fmi2GetIntegerStatus(fmi2Component c, const fmi2StatusKind s, fmi2Integer* value);
+fmi2Status fmi2GetBooleanStatus(fmi2Component c, const fmi2StatusKind s, fmi2Boolean* value);
+fmi2Status fmi2GetStringStatus (fmi2Component c, const fmi2StatusKind s, fmi2String*  value);
+```
+
+#### Description
+These functions mainly serve slaves that step asynchronously (`fmi2DoStep` returns `fmi2Pending`) or that discard steps (`fmi2DoStep` returns `fmi2Discard`). This FMU does neither, so there is little to report, but every status kind of the standard is answered by the function of the matching type:
+
+| Function | Status kind | Value |
+|----------|-------------|-------|
+| `fmi2GetStatus` | `fmi2DoStepStatus` | `fmi2OK` (steps are computed synchronously, so the last step is always finished) |
+| `fmi2GetRealStatus` | `fmi2LastSuccessfulTime` | End of the last successful step (the internal clock of the FMU) |
+| `fmi2GetBooleanStatus` | `fmi2Terminated` | `fmi2False` (the FMU never asks to stop the simulation) |
+| `fmi2GetStringStatus` | `fmi2PendingStatus` | `""` (no step is ever pending) |
+| `fmi2GetIntegerStatus` | - | FMI 2.0 defines no status of type Integer |
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `s` | `fmi2StatusKind` | Which status to return |
+| `value` | pointer | **Output**: the status |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | `value` holds the status |
+| `fmi2Discard` | The status kind is not available from this function. The FMU state does not change |
+| `fmi2Error` | NULL component, NULL `value` or call not allowed in the current state |
+
+#### FMI State Requirements
+**Can be called in**: **Step Complete**, **Step In Progress**, **Step Failed**, **Terminated**
+**State transitions**: None on success or `fmi2Discard`. On error the FMU enters the error state
+
+#### Usage Example
+```c
+fmi2DoStep(fmu, time, 0.01, fmi2True);
+
+fmi2Real lastTime;
+if (fmi2GetRealStatus(fmu, fmi2LastSuccessfulTime, &lastTime) == fmi2OK) {
+    printf("FMU is at t = %g\n", lastTime);
+}
+```
+
+#### Related Functions
+- [`fmi2DoStep`](#fmi2dostep) - The step these functions report on
+
+#### Notes
+- **`fmi2Discard` is not an error**: It only says "no such information". A message is written to the category `logStatusWarning`
+
+---
+
+## FMU State
+
+Functions for taking a snapshot of the FMU and returning to it later (capability flags `canGetAndSetFMUstate` and `canSerializeFMUstate`). Typical uses are step rejection in a master algorithm, repeating a simulation from an intermediate point and saving a simulation to disk.
+
+A snapshot contains everything that changes during a simulation: all variables (parameters, inputs, outputs, states), the internal clock, the experiment settings and the state of the FMU state machine. Instance name, callbacks and log level belong to the instance and are not part of it.
+
+### fmi2GetFMUstate
+
+Takes a snapshot of the FMU.
+
+#### Signature
+```c
+fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate);
+```
+
+#### Description
+Copies the current state of the FMU into a snapshot. If `*FMUstate` is NULL a new snapshot is allocated and returned in `*FMUstate`. If it points to a snapshot obtained earlier, that snapshot is overwritten and no memory is allocated.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `FMUstate` | `fmi2FMUstate*` | **In/out**: NULL to create a snapshot, or an existing snapshot to overwrite |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Snapshot taken |
+| `fmi2Error` | NULL component, NULL `FMUstate`, `*FMUstate` is not a snapshot of this model, allocation failure, or FMU is in the Error state |
+
+#### FMI State Requirements
+**Can be called in**: Any state except **Error**
+**State transitions**: None on success. On error the FMU enters the error state
+
+#### Usage Example
+```c
+fmi2FMUstate snapshot = NULL;  // must be initialized with NULL
+
+fmi2GetFMUstate(fmu, &snapshot);
+
+// try a large step
+if (fmi2DoStep(fmu, time, 0.1, fmi2False) != fmi2OK) {
+    // go back and take two smaller ones
+    fmi2SetFMUstate(fmu, snapshot);
+    fmi2DoStep(fmu, time, 0.05, fmi2False);
+    fmi2DoStep(fmu, time + 0.05, 0.05, fmi2False);
+}
+
+fmi2FreeFMUstate(fmu, &snapshot);
+```
+
+#### Related Functions
+- [`fmi2SetFMUstate`](#fmi2setfmustate) - Return to the snapshot
+- [`fmi2FreeFMUstate`](#fmi2freefmustate) - Free the snapshot
+
+#### Notes
+- **The snapshot belongs to the caller**: It is not freed by `fmi2FreeInstance`. Free it with `fmi2FreeFMUstate`
+- **Initialize the pointer with NULL**: An uninitialized `fmi2FMUstate` would be taken for an existing snapshot
+- **One block of memory**: A snapshot is a single allocation without pointers. All snapshots of a model have the same size, which is why an existing one can be reused
+
+---
+
+### fmi2SetFMUstate
+
+Sets the FMU back to a snapshot.
+
+#### Signature
+```c
+fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate);
+```
+
+#### Description
+Restores all variables, the internal clock, the experiment settings and the state of the FMU state machine from a snapshot. The snapshot itself is not changed and can be used again.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `FMUstate` | `fmi2FMUstate` | Snapshot from `fmi2GetFMUstate` or `fmi2DeSerializeFMUstate` |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | FMU is back at the snapshot |
+| `fmi2Error` | NULL component, or `FMUstate` is NULL or not a snapshot of this model |
+
+#### FMI State Requirements
+**Can be called in**: Any state, including **Error**
+**State transitions**: To the state the FMU was in when the snapshot was taken
+
+#### Usage Example
+See [`fmi2GetFMUstate`](#fmi2getfmustate).
+
+#### Related Functions
+- [`fmi2GetFMUstate`](#fmi2getfmustate) - Take the snapshot
+- [`fmi2Reset`](#fmi2reset) - The other way out of the Error state
+
+#### Notes
+- **Recovery from errors**: Because a snapshot can only be taken from a healthy FMU, restoring one always leaves the Error state
+- **The next `fmi2DoStep` must start at the restored time**: The internal clock goes back with the snapshot
+- **Works across instances**: A snapshot can be set into another instance of the same model
+
+---
+
+### fmi2FreeFMUstate
+
+Frees a snapshot.
+
+#### Signature
+```c
+fmi2Status fmi2FreeFMUstate(fmi2Component c, fmi2FMUstate* FMUstate);
+```
+
+#### Description
+Frees the memory of a snapshot and sets `*FMUstate` to NULL. A NULL pointer or a NULL snapshot is ignored.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `FMUstate` | `fmi2FMUstate*` | **In/out**: snapshot to free; set to NULL |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Snapshot freed (or nothing to free) |
+| `fmi2Error` | NULL component |
+
+#### FMI State Requirements
+**Can be called in**: Any state, including **Error**
+**State transitions**: None
+
+#### Usage Example
+```c
+fmi2FreeFMUstate(fmu, &snapshot);  // snapshot is NULL afterwards
+fmi2FreeFMUstate(fmu, &snapshot);  // harmless
+```
+
+#### Related Functions
+- [`fmi2GetFMUstate`](#fmi2getfmustate) - Creates the snapshot
+
+#### Notes
+- **Free snapshots before the instance**: The function needs a valid component
+
+---
+
+### fmi2SerializedFMUstateSize / fmi2SerializeFMUstate / fmi2DeSerializeFMUstate
+
+Convert a snapshot to a byte vector and back.
+
+#### Signature
+```c
+fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate FMUstate, size_t* size);
+
+fmi2Status fmi2SerializeFMUstate(fmi2Component c, fmi2FMUstate FMUstate,
+                                 fmi2Byte serializedState[], size_t size);
+
+fmi2Status fmi2DeSerializeFMUstate(fmi2Component c, const fmi2Byte serializedState[],
+                                   size_t size, fmi2FMUstate* FMUstate);
+```
+
+#### Description
+`fmi2SerializedFMUstateSize` returns the number of bytes needed, `fmi2SerializeFMUstate` copies the snapshot into a byte vector provided by the caller, and `fmi2DeSerializeFMUstate` creates a snapshot from such a byte vector. The bytes can be stored in a file and loaded in a later run.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `FMUstate` | `fmi2FMUstate` / `fmi2FMUstate*` | Snapshot to serialize, or **in/out** for deserialization (NULL to create, existing snapshot to overwrite) |
+| `serializedState` | `fmi2Byte[]` | Byte vector, allocated by the caller |
+| `size` | `size_t` / `size_t*` | Length of the byte vector, or **output** of `fmi2SerializedFMUstateSize` |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | Success |
+| `fmi2Error` | NULL component or pointer, invalid snapshot, byte vector too small (serialize), or wrong size / bytes that are not an FMU state of this model (deserialize) |
+
+#### FMI State Requirements
+**Can be called in**: Any state, including **Error** (the functions only handle snapshots)
+**State transitions**: None on success. On error the FMU enters the error state
+
+#### Usage Example
+```c
+fmi2FMUstate snapshot = NULL;
+fmi2GetFMUstate(fmu, &snapshot);
+
+// serialize
+size_t size;
+fmi2SerializedFMUstateSize(fmu, snapshot, &size);
+fmi2Byte* bytes = malloc(size);
+fmi2SerializeFMUstate(fmu, snapshot, bytes, size);
+fmi2FreeFMUstate(fmu, &snapshot);
+
+// ... write bytes to a file, read them back later ...
+
+// deserialize and continue from there
+fmi2FMUstate restored = NULL;
+if (fmi2DeSerializeFMUstate(fmu, bytes, size, &restored) == fmi2OK) {
+    fmi2SetFMUstate(fmu, restored);
+    fmi2FreeFMUstate(fmu, &restored);
+}
+free(bytes);
+```
+
+#### Related Functions
+- [`fmi2GetFMUstate`](#fmi2getfmustate) / [`fmi2SetFMUstate`](#fmi2setfmustate) - Take and restore snapshots
+
+#### Notes
+- **The serialized form is a copy of the snapshot's memory**: This is possible because a snapshot contains no pointers. The bytes can only be read back by the same FMU binary: not on another platform and not after the model's structs have changed
+- **Bytes from outside are verified**: Size, a marker, a hash of the model's GUID and the stored state are checked before the bytes are accepted. This catches states of another model and corrupted headers, but not manipulated variable values
+- **Deterministic**: Two snapshots of the same FMU state serialize to the same bytes
 
 ---
 
@@ -1204,27 +1475,28 @@ if (status != fmi2OK) {
 fmi2FreeInstance(fmu);
 ```
 
-#### Error Recovery Example
+#### Error Handling Example
 ```c
 // Simulation with error handling
 fmi2Component fmu = fmi2Instantiate(/* ... */);
 // ... setup and initialization ...
 
 double t = 0.0, dt = 0.01;
-fmi2Status status;
+fmi2Status status = fmi2OK;
 
 for (int i = 0; i < 1000; i++) {
     status = fmi2DoStep(fmu, t, dt, fmi2True);
     if (status >= fmi2Error) {
-        // Step failed - still terminate gracefully
         fprintf(stderr, "Step failed at t=%.2f\n", t);
         break;
     }
     t += dt;
 }
 
-// Terminate works even after DoStep failure
-fmi2Terminate(fmu);  // Allowed from stateStepFailed
+// After an error the FMU can only be reset or freed: do not terminate
+if (status < fmi2Error) {
+    fmi2Terminate(fmu);
+}
 fmi2FreeInstance(fmu);
 ```
 
@@ -1239,7 +1511,7 @@ fmi2FreeInstance(fmu);
 - **Template implementation is minimal**: This FMU template has no files or resources to close, so the function just transitions state
 - **Real FMUs might**: Close log files, disconnect from hardware, finalize statistics, save checkpoint data
 - **After termination**: Only `fmi2FreeInstance` and `fmi2Reset` are allowed - prevents accidental re-simulation
-- **Callable after failure**: Can be called from `stateStepFailed` to enable graceful shutdown even when simulation encounters errors
+- **Not callable in the Error state**: After a function returned `fmi2Error`, `fmi2Terminate` fails as well. Free or reset the FMU instead. (The mask also contains `stateStepFailed`, as in the standard, but this FMU never discards a step)
 - **Event logging**: Logs "FMU was terminated" when logging is enabled, useful for debugging lifecycle issues
 - **Idiomatic C pattern**: Two-phase destruction (logical shutdown + memory cleanup) appears in SDL, OpenGL, database libraries
 
@@ -1255,9 +1527,8 @@ fmi2FreeInstance(fmu);  // Frees memory
 
 **Benefits:**
 1. **Graceful resource cleanup**: Files closed properly, buffers flushed
-2. **Error recovery**: Can terminate even after failures
-3. **Separation of concerns**: Simulation logic vs. memory management
-4. **Debugging**: Terminate can log final state for diagnostics
+2. **Separation of concerns**: Simulation logic vs. memory management
+3. **Debugging**: Terminate can log final state for diagnostics
 
 **In this template**: The function is simple (just state transition) because the template has no resources, but the pattern is established for future extensions.
 
@@ -1273,7 +1544,7 @@ fmi2Status fmi2Reset(fmi2Component c);
 ```
 
 #### Description
-Resets the FMU back to its post-instantiation state without freeing and reallocating memory. The simulation time is cleared and all model variables are set back to their start values, while the instance identity (name, callbacks, FMU type, log level) is preserved. After a successful reset, the caller must repeat the full initialization cycle (`fmi2SetupExperiment` → `fmi2EnterInitializationMode` → `fmi2ExitInitializationMode`) before stepping again.
+Resets the FMU back to its post-instantiation state without freeing and reallocating memory. The simulation time is cleared and all model variables are set back to their start values, while the instance identity (name, callbacks, log level) is preserved. After a successful reset, the caller must repeat the full initialization cycle (`fmi2SetupExperiment` → `fmi2EnterInitializationMode` → `fmi2ExitInitializationMode`) before stepping again.
 
 This function is the preferred alternative to destroying and recreating the FMU when running repeated simulations (e.g., parameter sweeps or optimization loops), since it avoids the overhead of memory reallocation.
 
@@ -1289,15 +1560,15 @@ This function is the preferred alternative to destroying and recreating the FMU 
 | `fmi2Error` | NULL component |
 
 #### FMI State Requirements
-**Can be called in**: Any state except **Start/End** (pseudo-state before instantiation)
+**Can be called in**: Any state after instantiation, including the **Error** state
 **State transitions**: Transitions from current state to **Instantiated**
 
 #### What Gets Reset
 | Category | Behavior |
 |----------|----------|
-| Simulation time | `startTime`, `stopTime`, `time` → `0.0` |
+| Experiment | `startTime`, `stopTime`, `time` → `0.0`, no stop time defined |
 | Parameters, inputs, states | Back to the start values of the model's variable table |
-| Outputs | All zeroed (computed again in `fmi2ExitInitializationMode`) |
+| Outputs | All zeroed and marked as stale (computed again when read and in `fmi2ExitInitializationMode`) |
 | State derivatives | All zeroed |
 | Function pointers | Re-bound from the model definition |
 | FMU state machine | → `stateInstantiated` |
@@ -1306,8 +1577,7 @@ This function is the preferred alternative to destroying and recreating the FMU 
 | Category | Behavior |
 |----------|----------|
 | Instance name | Unchanged |
-| FMU type | Unchanged |
-| Callbacks (logger, allocate, free) | Unchanged |
+| Logger callback and component environment | Unchanged |
 | Log level | Unchanged |
 
 #### Usage Example
@@ -1382,7 +1652,23 @@ fmi2FreeInstance(fmu);
 - **Soft re-instantiation**: Avoids the cost of `fmi2FreeInstance` + `fmi2Instantiate` by reusing existing memory allocations
 - **Same state as after instantiation**: Reset and `fmi2Instantiate` share one function (`resetModel()`), so the variables are guaranteed to be identical in both cases. Values set before the reset are discarded
 - **Stepping still requires initialization**: `fmi2DoStep` on a reset-but-uninitialized FMU is rejected by the state machine
-- **Error state recovery**: Reset can be called from error states, providing a way to recover without destroying the instance
+- **Error state recovery**: Reset is the way out of the Error state without destroying the instance (the other one is `fmi2SetFMUstate`)
+- **Snapshots survive**: FMU states taken with `fmi2GetFMUstate` stay valid across a reset
 - **Log level preserved**: The logging configuration survives a reset, which is useful for debugging repeated runs
+
+---
+
+## Unsupported Functions
+
+The following functions belong to capabilities this FMU does not have. The capability flags in the `modelDescription.xml` tell the integration tool not to call them. If they are called anyway, they return `fmi2Error` and the FMU enters the Error state.
+
+| Function | Capability | Flag in `modelDescription.xml` |
+|----------|------------|--------------------------------|
+| `fmi2CancelStep` | Asynchronous steps (`fmi2DoStep` never returns `fmi2Pending`) | - |
+| `fmi2SetRealInputDerivatives` | Input interpolation | `canInterpolateInputs="false"` |
+| `fmi2GetRealOutputDerivatives` | Output derivatives | `maxOutputDerivativeOrder="0"` |
+| `fmi2GetDirectionalDerivative` | Directional derivatives | `providesDirectionalDerivative="false"` |
+
+The Model Exchange functions (`fmi2SetTime`, `fmi2SetContinuousStates`, `fmi2GetDerivatives`, ...) are exported because the standard header declares them. They return `fmi2Error` without changing the FMU.
 
 ---

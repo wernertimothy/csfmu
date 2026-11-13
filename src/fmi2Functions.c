@@ -1,49 +1,26 @@
-#include <string.h>
-#include <stdio.h>
+#include <math.h>
 #include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "fmi2Functions.h"
 #include "model.h"
-#include "integrator.h"
 
-/* Numerical tolerance for floating-point comparisons */
-#define EPSILON 1e-9
+/* Relative tolerance for comparing points in time */
+#define TIME_TOLERANCE 1e-9
+
+/* Tolerance on the number of sub-steps (absorbs rounding in stepSize / maxStepSize) */
+#define SUBSTEP_TOLERANCE 1e-9
+
+/* Largest number of sub-steps a single fmi2DoStep may take */
+#define MAX_NUMBER_OF_SUBSTEPS 1e9
 
 /* Buffer size for formatted log messages */
 #define LOG_BUFFER_SIZE 512
 
-/* Category names passed to the integration tool's logger */
-#define LOG_INFO    "INFO"
-#define LOG_ERROR   "ERROR"
-#define LOG_WARNING "WARNING"
-
-/***************************************************
- * FMI2 Function State Validation Bitmasks
- *
- * These macros define which FMU states are valid
- * for calling each FMI function. Used for runtime
- * state machine validation.
- ***************************************************/
-
-#define STATE_fmi2SetupExperiment (stateInstantiated)
-#define STATE_fmi2SetDebugLogging (stateInstantiated | stateInitializationMode | stateStepComplete | \
-                                   stateStepInProgress | stateStepFailed | stateStepCanceled | \
-                                   stateTerminated | stateError | stateFatal)
-#define STATE_fmi2EnterInitializationMode (stateInstantiated)
-#define STATE_fmi2ExitInitializationMode (stateInitializationMode)
-#define STATE_fmi2SetReal (stateInstantiated | stateInitializationMode | stateStepComplete)
-#define STATE_fmi2GetReal (stateInstantiated | stateStepComplete | stateStepFailed | \
-                           stateStepCanceled | stateTerminated | stateError)
-/* Integer, Boolean and String variables follow the same rules as Real variables */
-#define STATE_fmi2SetInteger STATE_fmi2SetReal
-#define STATE_fmi2SetBoolean STATE_fmi2SetReal
-#define STATE_fmi2SetString  STATE_fmi2SetReal
-#define STATE_fmi2GetInteger STATE_fmi2GetReal
-#define STATE_fmi2GetBoolean STATE_fmi2GetReal
-#define STATE_fmi2GetString  STATE_fmi2GetReal
-/* Fixed parameters and states may only be set before the simulation starts */
-#define STATE_setBeforeSimulation (stateInstantiated | stateInitializationMode)
-#define STATE_fmi2DoStep (stateStepComplete)
-#define STATE_fmi2Terminate (stateStepComplete | stateStepFailed)
+/* Marks a block of memory as an FMU state of this template ("FMUS") */
+#define SNAPSHOT_MAGIC 0x464D5553u
 
 /***************************************************
  * Type Definitions and Enums
@@ -57,13 +34,13 @@
  */
 typedef struct {
     /* Metadata */
-    fmi2String instanceName;
-    fmi2Type   fmuType;
+    char* instanceName;
 
     /* Experiment time bounds */
-    fmi2Real startTime;
-    fmi2Real stopTime;
-    fmi2Real time;
+    fmi2Real    startTime;
+    fmi2Real    stopTime;
+    fmi2Boolean stopTimeDefined;
+    fmi2Real    time;
 
     /* Logging configuration */
     unsigned int logLevel;
@@ -71,12 +48,12 @@ typedef struct {
     /* FMU state machine tracking */
     unsigned int state;
 
+    /* Outputs must be recomputed before they are read */
+    fmi2Boolean outputsAreStale;
+
     /* Integration tool callbacks */
-    fmi2CallbackLogger         logger;
-    fmi2CallbackAllocateMemory allocateMemory;
-    fmi2CallbackFreeMemory     freeMemory;
-    fmi2StepFinished           stepFinished;
-    fmi2ComponentEnvironment   componentEnvironment;
+    fmi2CallbackLogger       logger;
+    fmi2ComponentEnvironment componentEnvironment;
 
     /* Model instance (FMU-agnostic) */
     modelInstance* model;
@@ -85,136 +62,278 @@ typedef struct {
 /**
  * Log category enumeration
  *
- * Bitmask-based log levels matching FMI 2.0 specification.
- * Multiple categories can be enabled simultaneously via bitwise OR.
+ * Bitmask-based log levels. Multiple categories can be enabled
+ * simultaneously via bitwise OR.
  */
 typedef enum {
-    logNone                  = 0,
-    logEvents                = 1 << 0,
-    logSingularLinearSystems = 1 << 1,
-    logNonlinearSystems      = 1 << 2,
-    logDynamicStateSelection = 1 << 3,
-    logStatusWarning         = 1 << 4,
-    logStatusDiscard         = 1 << 5,
-    logStatusError           = 1 << 6,
-    logStatusFatal           = 1 << 7,
-    logStatusPending         = 1 << 8,
-    logAll                   = (1 << 9) - 1
+    logNone          = 0,
+    logEvents        = 1 << 0,  /* Lifecycle of the FMU (instantiated, initialized, ...) */
+    logStatusWarning = 1 << 1,  /* A function returned fmi2Warning or fmi2Discard */
+    logStatusError   = 1 << 2,  /* A function returned fmi2Error */
+    logFmi2Call      = 1 << 3,  /* Successful calls of frequently used functions */
+    logAll           = (1 << 4) - 1
 } logCategory;
+
+/**
+ * Names of the log categories
+ *
+ * Single place that maps category names to bits. The same names must be
+ * listed as LogCategories in the modelDescription.xml
+ * (see fmi2ModelDescription.c).
+ */
+static const struct {
+    const char*  name;
+    unsigned int mask;
+} LOG_CATEGORIES[] = {
+    { "logAll",           logAll },
+    { "logEvents",        logEvents },
+    { "logStatusWarning", logStatusWarning },
+    { "logStatusError",   logStatusError },
+    { "logFmi2Call",      logFmi2Call },
+};
+
+#define NUMBER_OF_LOG_CATEGORIES (sizeof(LOG_CATEGORIES) / sizeof(LOG_CATEGORIES[0]))
 
 /**
  * FMU state machine enumeration
  *
- * States are mutually exclusive (not accumulated like error flags).
+ * The FMU is in exactly one of these states. They are bits so that the set
+ * of states a function may be called in can be written as a bitmask.
  * Follows FMI 2.0 state machine specification for co-simulation.
  */
 typedef enum {
-    stateStartEnd           = 0,           /* Pseudo-state (not tracked) */
-    stateInstantiated       = 1 << 0,  /* Set by fmi2Instantiate */
+    stateStartEnd           = 0,       /* Pseudo-state (not tracked) */
+    stateInstantiated       = 1 << 0,  /* Set by fmi2Instantiate and fmi2Reset */
     stateInitializationMode = 1 << 1,  /* Set by fmi2EnterInitializationMode */
     stateStepComplete       = 1 << 2,  /* Set by fmi2ExitInitializationMode and fmi2DoStep */
-    stateStepInProgress     = 1 << 3,  /* Set by asynchronous fmi2DoStep */
-    stateStepFailed         = 1 << 4,  /* If fmi2DoStep returns fmi2Discard */
-    stateStepCanceled       = 1 << 5,  /* Set by fmi2CancelStep */
+    stateStepInProgress     = 1 << 3,  /* Asynchronous fmi2DoStep (not used) */
+    stateStepFailed         = 1 << 4,  /* fmi2DoStep returned fmi2Discard (not used) */
+    stateStepCanceled       = 1 << 5,  /* Set by fmi2CancelStep (not used) */
     stateTerminated         = 1 << 6,  /* Set by fmi2Terminate */
-    stateError              = 1 << 7,  /* Accumulated flag (not exclusive) */
-    stateFatal              = 1 << 8,  /* Accumulated flag (not exclusive) */
+    stateError              = 1 << 7,  /* A function returned fmi2Error */
 } stateCategory;
+
+/**
+ * Snapshot of an FMU instance (fmi2FMUstate)
+ *
+ * Holds everything that changes during a simulation. Instance name,
+ * callbacks and log level belong to the instance and are not part of it.
+ * The struct contains no pointers, so its bytes are also the serialized
+ * form of the FMU state.
+ */
+typedef struct {
+    uint32_t      magic;     /* SNAPSHOT_MAGIC */
+    uint32_t      guidHash;  /* Identifies the model the snapshot was taken from */
+    fmi2Real      startTime;
+    fmi2Real      stopTime;
+    fmi2Real      time;
+    fmi2Boolean   stopTimeDefined;
+    fmi2Boolean   outputsAreStale;
+    unsigned int  state;
+    unsigned char modelData[];  /* Filled by saveModelData() */
+} fmuSnapshot;
+
+/***************************************************
+ * FMI2 Function State Validation Bitmasks
+ *
+ * These macros define which FMU states are valid
+ * for calling each FMI function. Used for runtime
+ * state machine validation.
+ *
+ * Once a function has returned fmi2Error the FMU is in stateError. From
+ * there it can only be reset, freed or set back to a snapshot; reading
+ * variables and changing the logging stay possible for diagnosis.
+ ***************************************************/
+
+#define STATE_anyButError (stateInstantiated | stateInitializationMode | stateStepComplete | \
+                           stateStepInProgress | stateStepFailed | stateStepCanceled | stateTerminated)
+#define STATE_any         (STATE_anyButError | stateError)
+
+#define STATE_fmi2SetupExperiment (stateInstantiated)
+#define STATE_fmi2SetDebugLogging (STATE_any)
+#define STATE_fmi2EnterInitializationMode (stateInstantiated)
+#define STATE_fmi2ExitInitializationMode (stateInitializationMode)
+#define STATE_fmi2SetReal (stateInstantiated | stateInitializationMode | stateStepComplete)
+#define STATE_fmi2GetReal (stateInstantiated | stateInitializationMode | stateStepComplete | \
+                           stateStepFailed | stateStepCanceled | stateTerminated | stateError)
+/* Integer, Boolean and String variables follow the same rules as Real variables */
+#define STATE_fmi2SetInteger STATE_fmi2SetReal
+#define STATE_fmi2SetBoolean STATE_fmi2SetReal
+#define STATE_fmi2SetString  STATE_fmi2SetReal
+#define STATE_fmi2GetInteger STATE_fmi2GetReal
+#define STATE_fmi2GetBoolean STATE_fmi2GetReal
+#define STATE_fmi2GetString  STATE_fmi2GetReal
+/* Fixed parameters and states may only be set before the simulation starts */
+#define STATE_setBeforeSimulation (stateInstantiated | stateInitializationMode)
+#define STATE_fmi2DoStep (stateStepComplete)
+#define STATE_fmi2Terminate (stateStepComplete | stateStepFailed)
+#define STATE_fmi2Reset (STATE_any)
+#define STATE_fmi2GetStatus (stateStepComplete | stateStepInProgress | stateStepFailed | stateTerminated)
+/* A snapshot can only be taken from a healthy FMU, but it can be restored
+ * to recover from an error */
+#define STATE_fmi2GetFMUstate (STATE_anyButError)
+#define STATE_fmi2SetFMUstate (STATE_any)
+#define STATE_fmi2FreeFMUstate (STATE_any)
+#define STATE_fmi2SerializeFMUstate (STATE_any)
 
 /***************************************************
  * Helper Functions
  ***************************************************/
 
 /**
- * Check if current FMU state allows a function call
+ * Name of a log category as listed in the modelDescription.xml
  */
-static inline fmi2Boolean stateIsAllowed(unsigned int currentState, unsigned int expectedState)
+static const char* logCategoryName(logCategory category)
 {
-    return (currentState & expectedState);
-}
-
-/**
- * Check if a log category is currently active
- */
-static inline fmi2Boolean logCategoryIsActive(unsigned int logLevel, logCategory category)
-{
-    return (logLevel & category);
+    for (size_t k = 0; k < NUMBER_OF_LOG_CATEGORIES; k++) {
+        if (LOG_CATEGORIES[k].mask == (unsigned int)category) {
+            return LOG_CATEGORIES[k].name;
+        }
+    }
+    return "logAll";
 }
 
 /**
  * Core logging function (variadic message support)
  *
  * Formats message with vsnprintf and forwards to integration tool's logger.
+ *
+ * Implementation notes:
+ * - The logger of the integration tool is itself printf-like. The formatted
+ *   text is therefore passed as argument of "%s" and never as the format,
+ *   otherwise a '%' in the text (e.g. in a variable name) would be
+ *   interpreted a second time
+ * - Messages longer than LOG_BUFFER_SIZE are truncated
  */
-static inline void logMessage(
-    myFMU2* fmu,
+static void logMessage(
+    const myFMU2* fmu,
     logCategory category,
     fmi2Status status,
-    const char* categoryName,
-    fmi2String message,
+    const char* message,
     va_list args)
 {
-    if (logCategoryIsActive(fmu->logLevel, category)) {
+    if (fmu->logLevel & category) {
         char buffer[LOG_BUFFER_SIZE];
         vsnprintf(buffer, sizeof(buffer), message, args);
-        /* Could detect truncation: if (sizeWritten >= sizeof(buffer)) */
         fmu->logger(
             fmu->componentEnvironment,
             fmu->instanceName,
             status,
-            categoryName,
+            logCategoryName(category),
+            "%s",
             buffer
         );
     }
 }
 
 /**
- * Log an error message
+ * Log an event in the lifecycle of the FMU
  */
-static inline void logErrorMessage(myFMU2* fmu, fmi2String message, ...)
+static void logEventMessage(const myFMU2* fmu, const char* message, ...)
 {
     va_list args;
     va_start(args, message);
-    logMessage(fmu, logStatusError, fmi2Error, LOG_ERROR, message, args);
+    logMessage(fmu, logEvents, fmi2OK, message, args);
+    va_end(args);
+}
+
+/**
+ * Log a successful call of a frequently used function
+ */
+static void logCallMessage(const myFMU2* fmu, const char* message, ...)
+{
+    va_list args;
+    va_start(args, message);
+    logMessage(fmu, logFmi2Call, fmi2OK, message, args);
     va_end(args);
 }
 
 /**
  * Log a warning message
  */
-static inline void logWarningMessage(myFMU2* fmu, fmi2String message, ...)
+static void logWarningMessage(const myFMU2* fmu, const char* message, ...)
 {
     va_list args;
     va_start(args, message);
-    logMessage(fmu, logStatusWarning, fmi2Warning, LOG_WARNING, message, args);
+    logMessage(fmu, logStatusWarning, fmi2Warning, message, args);
     va_end(args);
 }
 
 /**
- * Log an event message
+ * Log an error and put the FMU into the error state
+ *
+ * Always returns fmi2Error, so that a function can fail with
+ * "return enterErrorState(fmu, ...)".
  */
-static inline void logEventMessage(myFMU2* fmu, fmi2String message, ...)
+static fmi2Status enterErrorState(myFMU2* fmu, const char* message, ...)
 {
     va_list args;
     va_start(args, message);
-    logMessage(fmu, logEvents, fmi2OK, LOG_INFO, message, args);
+    logMessage(fmu, logStatusError, fmi2Error, message, args);
     va_end(args);
+
+    fmu->state = stateError;
+    return fmi2Error;
 }
 
 /**
- * Compute absolute value of a real number
+ * Common checks at the start of every FMI function
+ *
+ * Returns the FMU instance, or NULL if the component is NULL or the
+ * function may not be called in the current state. In the latter case the
+ * error is logged and the FMU enters the error state.
  */
-static inline fmi2Real absReal(fmi2Real value)
+static myFMU2* enterFunction(fmi2Component c, unsigned int allowedStates, const char* functionName)
 {
-    return value >= 0 ? value : -value;
+    myFMU2* fmu = (myFMU2*)c;
+
+    if (!fmu) {
+        return NULL;
+    }
+
+    if (!(fmu->state & allowedStates)) {
+        enterErrorState(fmu, "Illegal call sequence for %s.", functionName);
+        return NULL;
+    }
+
+    return fmu;
 }
 
 /**
- * Check if two real numbers are equal within EPSILON tolerance
+ * Fail a function that belongs to a capability the FMU does not have
+ *
+ * The capability flags in the modelDescription.xml tell the integration
+ * tool not to call these functions, so calling them is an error (and not a
+ * warning, which would mean that the call had an effect).
  */
-static inline fmi2Boolean areEqualReals(fmi2Real a, fmi2Real b)
+static fmi2Status notSupported(fmi2Component c, const char* functionName)
 {
-    return absReal(a - b) < EPSILON;
+    myFMU2* fmu = (myFMU2*)c;
+
+    if (!fmu) {
+        return fmi2Error;
+    }
+
+    return enterErrorState(fmu, "%s is not supported.", functionName);
+}
+
+/**
+ * Tolerance for comparing a point in time with the given one
+ */
+static fmi2Real timeTolerance(fmi2Real time)
+{
+    return TIME_TOLERANCE * fmax(1.0, fabs(time));
+}
+
+/**
+ * Recompute the outputs if a variable was set since they were computed
+ */
+static void refreshOutputs(myFMU2* fmu)
+{
+    if (fmu->outputsAreStale) {
+        fmu->model->getOutputs(fmu->model);
+        fmu->outputsAreStale = fmi2False;
+    }
 }
 
 /***************************************************
@@ -242,13 +361,29 @@ const char* fmi2GetVersion(void)
  ***************************************************/
 
 /**
+ * Report why fmi2Instantiate failed
+ *
+ * There is no instance yet, so the logger of the integration tool is called
+ * directly and independent of loggingOn.
+ */
+static fmi2Component instantiationFailed(const fmi2CallbackFunctions* functions, fmi2String instanceName,
+                                         const char* message)
+{
+    functions->logger(functions->componentEnvironment, instanceName ? instanceName : "",
+                      fmi2Error, logCategoryName(logStatusError), "%s", message);
+    return NULL;
+}
+
+/**
  * Creates an instance of the FMU
  *
  * Implementation notes:
- * - Validates required callbacks (logger, allocateMemory, freeMemory) before allocation
- * - Validates GUID matches the GUID of the model definition
- * - Uses integration tool's allocator for all memory
- * - Zero-initializes structure to prevent undefined behavior
+ * - Validates the logger callback, instance name, FMU type and GUID before
+ *   anything is allocated
+ * - Only Co-Simulation is supported
+ * - All memory is allocated with calloc() and freed with free(). The memory
+ *   callbacks of the integration tool are not used, which is announced by
+ *   canNotUseMemoryManagementFunctions="true" in the modelDescription.xml
  * - Creates model instance from MODEL_DEFINITION; all variables hold
  *   their start values afterwards
  * - On any failure, cleans up partial allocations via fmi2FreeInstance
@@ -266,69 +401,57 @@ fmi2Component fmi2Instantiate(
     (void)fmuResourceLocation;
     (void)visible;
 
-    /* Validate logger callback before allocation */
+    /* Without a logger nothing can be reported */
     if (!functions || !functions->logger) {
         return NULL;
     }
 
-    /* Validate required callbacks */
-    if (!functions->allocateMemory || !functions->freeMemory) {
-        functions->logger(functions->componentEnvironment, instanceName,
-                         fmi2Error, LOG_ERROR,
-                         "Missing required memory callbacks");
-        return NULL;
+    /* Validate instance name */
+    if (!instanceName || instanceName[0] == '\0') {
+        return instantiationFailed(functions, instanceName, "Missing instance name.");
+    }
+
+    /* Validate FMU type */
+    if (fmuType != fmi2CoSimulation) {
+        return instantiationFailed(functions, instanceName, "Only Co-Simulation is supported.");
     }
 
     /* Validate GUID */
     if (!fmuGUID || strcmp(fmuGUID, MODEL_DEFINITION.guid) != 0) {
-        functions->logger(functions->componentEnvironment, instanceName,
-                         fmi2Error, LOG_ERROR,
-                         "GUID mismatch");
-        return NULL;
+        return instantiationFailed(functions, instanceName, "GUID mismatch.");
     }
 
-    /* Allocate FMU instance */
-    myFMU2* myfmu2 = (myFMU2*)functions->allocateMemory(1, sizeof(myFMU2));
+    /* Allocate FMU instance (zero-initialized, so all pointers are NULL) */
+    myFMU2* myfmu2 = calloc(1, sizeof(myFMU2));
     if (!myfmu2) {
-        functions->logger(functions->componentEnvironment, instanceName,
-                         fmi2Error, LOG_ERROR,
-                         "Memory allocation failed");
-        return NULL;
+        return instantiationFailed(functions, instanceName, "Memory allocation failed.");
     }
 
-    /* Zero-initialize to prevent uninitialized pointer bugs */
-    memset(myfmu2, 0, sizeof(myFMU2));
-
-    /* Store callbacks immediately (needed for error recovery) */
+    /* Store callbacks */
     myfmu2->logger = functions->logger;
-    myfmu2->allocateMemory = functions->allocateMemory;
-    myfmu2->freeMemory = functions->freeMemory;
-    myfmu2->stepFinished = functions->stepFinished;
     myfmu2->componentEnvironment = functions->componentEnvironment;
 
-    /* Duplicate instance name */
-    myfmu2->instanceName = strdup(instanceName);
+    /* Copy instance name (the caller may free its string after this call) */
+    size_t sizeOfName = strlen(instanceName) + 1;
+    myfmu2->instanceName = malloc(sizeOfName);
     if (!myfmu2->instanceName) {
         fmi2FreeInstance((fmi2Component)myfmu2);
-        return NULL;
+        return instantiationFailed(functions, instanceName, "Memory allocation failed.");
     }
-
-    /* Store FMU type */
-    myfmu2->fmuType = fmuType;
-
-    /* Initialize logging */
-    if (loggingOn) {
-        myfmu2->logLevel = logAll;
-    } else {
-        myfmu2->logLevel = logNone;
-    }
+    memcpy(myfmu2->instanceName, instanceName, sizeOfName);
 
     /* Create model instance */
     myfmu2->model = newModel(&MODEL_DEFINITION);
     if (!myfmu2->model) {
         fmi2FreeInstance((fmi2Component)myfmu2);
-        return NULL;
+        return instantiationFailed(functions, instanceName, "Memory allocation failed.");
     }
+
+    /* Outputs are computed when they are read for the first time */
+    myfmu2->outputsAreStale = fmi2True;
+
+    /* Initialize logging */
+    myfmu2->logLevel = loggingOn ? logAll : logNone;
 
     /* Set initial state */
     myfmu2->state = stateInstantiated;
@@ -342,10 +465,11 @@ fmi2Component fmi2Instantiate(
  *
  * Implementation notes:
  * - NULL-safe (can be called with NULL component)
+ * - Can be called in any state, also on a partially created instance
  * - Logs farewell message before cleanup
- * - Frees instance name (allocated by strdup)
  * - Frees model via freeModel()
- * - Uses integration tool's freeMemory callback
+ * - Snapshots taken with fmi2GetFMUstate are not freed here; they belong to
+ *   the integration tool until it calls fmi2FreeFMUstate
  */
 void fmi2FreeInstance(fmi2Component c)
 {
@@ -357,14 +481,9 @@ void fmi2FreeInstance(fmi2Component c)
 
     logEventMessage(myfmu2, "FMU will be freed from memory.");
 
-    /* Free instance name */
-    free((void*)myfmu2->instanceName);
-
-    /* Free model */
+    free(myfmu2->instanceName);
     freeModel(myfmu2->model);
-
-    /* Free FMU instance using tool's allocator */
-    myfmu2->freeMemory((void*)myfmu2);
+    free(myfmu2);
 }
 
 /***************************************************
@@ -375,8 +494,9 @@ void fmi2FreeInstance(fmi2Component c)
  * Set up experiment time bounds
  *
  * Implementation notes:
- * - tolerance parameter ignored (not used in co-simulation)
+ * - tolerance parameter ignored (the integrators use a fixed step size)
  * - Validates stopTime >= startTime if defined
+ * - If a stop time is defined, fmi2DoStep refuses to step beyond it
  * - Initializes internal clock to startTime
  */
 fmi2Status fmi2SetupExperiment(
@@ -389,58 +509,50 @@ fmi2Status fmi2SetupExperiment(
 {
     /* Unused parameters */
     (void)toleranceDefined;
-    (void)tolerance;  /* Integration error tolerance - irrelevant in co-simulation */
+    (void)tolerance;
 
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2SetupExperiment)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2SetupExperiment.");
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2SetupExperiment, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
     /* Validate time window */
-    if (stopTimeDefined && stopTime < startTime) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "stopTime %.4f must be >= startTime", stopTime);
-        return fmi2Error;
+    if (!isfinite(startTime)) {
+        return enterErrorState(myfmu2, "startTime must be finite.");
+    }
+    if (stopTimeDefined && !(stopTime >= startTime)) {
+        return enterErrorState(myfmu2, "stopTime %.16g must be >= startTime %.16g.", stopTime, startTime);
     }
 
     /* Store experiment parameters */
     myfmu2->startTime = startTime;
-    myfmu2->stopTime = stopTime;
+    myfmu2->stopTimeDefined = stopTimeDefined ? fmi2True : fmi2False;
+    myfmu2->stopTime = stopTimeDefined ? stopTime : 0.0;
     myfmu2->time = startTime;
 
-    logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. End = %.4f", startTime, stopTime);
+    if (stopTimeDefined) {
+        logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. End = %.4f", startTime, stopTime);
+    } else {
+        logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. No end defined.", startTime);
+    }
     return fmi2OK;
 }
 
 /**
  * Control which log categories are enabled
  *
- * FMI 2.0 standard categories (section 2.2.4):
- * - logEvents
- * - logSingularLinearSystems (not supported)
- * - logNonlinearSystems (not supported)
- * - logDynamicStateSelection (not supported)
- * - logStatusWarning
- * - logStatusDiscard (not supported)
- * - logStatusError
- * - logStatusFatal (not supported)
- * - logStatusPending (not supported)
- * - logAll
+ * Categories of this FMU (see LOG_CATEGORIES):
+ * - logEvents: lifecycle of the FMU
+ * - logStatusWarning: a function returned fmi2Warning or fmi2Discard
+ * - logStatusError: a function returned fmi2Error
+ * - logFmi2Call: successful calls of fmi2GetXXX, fmi2SetXXX and fmi2DoStep
+ * - logAll: all of the above
  *
  * Implementation notes:
  * - If loggingOn=false, disables all logging
  * - If nCategories=0, enables all categories
  * - Otherwise, enables only specified categories
- * - Unknown categories are silently ignored
+ * - Unknown categories are ignored, but reported with fmi2Warning
  */
 fmi2Status fmi2SetDebugLogging(
     fmi2Component c,
@@ -448,31 +560,20 @@ fmi2Status fmi2SetDebugLogging(
     size_t nCategories,
     const fmi2String categories[])
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2SetDebugLogging)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2SetDebugLogging.");
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2SetDebugLogging, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
     /* Validate categories array */
-    if (nCategories > 0 && categories == NULL) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Invalid log categories.");
-        return fmi2Error;
+    if (loggingOn && nCategories > 0 && categories == NULL) {
+        return enterErrorState(myfmu2, "Invalid log categories.");
     }
 
     /* Disable all logging if loggingOn=false */
     if (!loggingOn) {
+        logEventMessage(myfmu2, "Logging switched off.");
         myfmu2->logLevel = logNone;
-        logEventMessage(myfmu2, "log level set.");
         return fmi2OK;
     }
 
@@ -484,34 +585,30 @@ fmi2Status fmi2SetDebugLogging(
     }
 
     /* Enable specified categories */
-    myfmu2->logLevel = logNone;
-    for (size_t i = 0; i < nCategories; i++) {
-        const char* cat = categories[i];
+    unsigned int logLevel = logNone;
+    size_t numberOfUnknownCategories = 0;
 
-        if (strcmp(cat, "logAll") == 0) {
-            logEventMessage(myfmu2, "Log level set.");
-            myfmu2->logLevel = logAll;
-            return fmi2OK;  /* No need to process remaining categories */
-        } else if (strcmp(cat, "logEvents") == 0) {
-            myfmu2->logLevel |= logEvents;
-        } else if (strcmp(cat, "logSingularLinearSystems") == 0) {
-            myfmu2->logLevel |= logSingularLinearSystems;
-        } else if (strcmp(cat, "logNonlinearSystems") == 0) {
-            myfmu2->logLevel |= logNonlinearSystems;
-        } else if (strcmp(cat, "logDynamicStateSelection") == 0) {
-            myfmu2->logLevel |= logDynamicStateSelection;
-        } else if (strcmp(cat, "logStatusWarning") == 0) {
-            myfmu2->logLevel |= logStatusWarning;
-        } else if (strcmp(cat, "logStatusDiscard") == 0) {
-            myfmu2->logLevel |= logStatusDiscard;
-        } else if (strcmp(cat, "logStatusError") == 0) {
-            myfmu2->logLevel |= logStatusError;
-        } else if (strcmp(cat, "logStatusFatal") == 0) {
-            myfmu2->logLevel |= logStatusFatal;
-        } else if (strcmp(cat, "logStatusPending") == 0) {
-            myfmu2->logLevel |= logStatusPending;
+    for (size_t i = 0; i < nCategories; i++) {
+        fmi2Boolean known = fmi2False;
+
+        for (size_t k = 0; categories[i] && k < NUMBER_OF_LOG_CATEGORIES; k++) {
+            if (strcmp(categories[i], LOG_CATEGORIES[k].name) == 0) {
+                logLevel |= LOG_CATEGORIES[k].mask;
+                known = fmi2True;
+                break;
+            }
         }
-        /* Unknown categories are silently ignored */
+
+        if (!known) {
+            numberOfUnknownCategories++;
+        }
+    }
+
+    myfmu2->logLevel = logLevel;
+
+    if (numberOfUnknownCategories > 0) {
+        logWarningMessage(myfmu2, "%zu unknown log categories were ignored.", numberOfUnknownCategories);
+        return fmi2Warning;
     }
 
     logEventMessage(myfmu2, "Log level set.");
@@ -527,20 +624,13 @@ fmi2Status fmi2SetDebugLogging(
  *   since then are kept
  * - The integration tool can keep overriding parameters and states until
  *   fmi2ExitInitializationMode
+ * - A missing fmi2SetupExperiment is tolerated: the experiment then starts
+ *   at time 0 and has no stop time
  */
 fmi2Status fmi2EnterInitializationMode(fmi2Component c)
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2EnterInitializationMode)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2EnterInitializationMode.");
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2EnterInitializationMode, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
@@ -562,22 +652,14 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c)
  */
 fmi2Status fmi2ExitInitializationMode(fmi2Component c)
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2ExitInitializationMode)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2ExitInitializationMode.");
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2ExitInitializationMode, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
     /* Compute initial outputs */
     myfmu2->model->getOutputs(myfmu2->model);
+    myfmu2->outputsAreStale = fmi2False;
 
     /* Transition state */
     myfmu2->state = stateStepComplete;
@@ -593,6 +675,11 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
  * the model definition (the same mapping is used to generate
  * modelDescription.xml). The table tells type, role and storage location,
  * so none of the functions below knows anything about the model.
+ *
+ * Outputs are kept consistent with the other variables: every fmi2SetXXX
+ * marks them as stale and every fmi2GetXXX recomputes them if needed. This
+ * way outputs can be read in initialization mode and a model with direct
+ * feedthrough (y depends on u) answers with the inputs set last.
  ***************************************************/
 
 /**
@@ -611,32 +698,29 @@ static const char* typeName(varType type)
 /**
  * Common checks at the start of every fmi2GetXXX / fmi2SetXXX function
  *
- * Validates the FMU state and the argument arrays. On failure the error is
- * logged and the FMU enters the error state.
+ * Validates the component, the FMU state and the argument arrays. Returns
+ * the FMU instance or NULL on failure (see enterFunction()).
  */
-static fmi2Status checkVariableAccess(
-    myFMU2* fmu,
+static myFMU2* enterVariableAccess(
+    fmi2Component c,
     unsigned int allowedStates,
     const char* functionName,
     const fmi2ValueReference vr[],
     size_t nvr,
     const void* value)
 {
-    /* Validate state */
-    if (!stateIsAllowed(fmu->state, allowedStates)) {
-        fmu->state |= stateError;
-        logErrorMessage(fmu, "Illegal call sequence for %s.", functionName);
-        return fmi2Error;
+    myFMU2* fmu = enterFunction(c, allowedStates, functionName);
+    if (!fmu) {
+        return NULL;
     }
 
-    /* Validate value reference */
+    /* Validate argument arrays */
     if (nvr > 0 && (!vr || !value)) {
-        fmu->state |= stateError;
-        logErrorMessage(fmu, "Invalid value reference or value.");
-        return fmi2Error;
+        enterErrorState(fmu, "%s: invalid value reference or value.", functionName);
+        return NULL;
     }
 
-    return fmi2OK;
+    return fmu;
 }
 
 /**
@@ -658,24 +742,21 @@ static void* resolveVariable(myFMU2* fmu, fmi2ValueReference vr, varType expecte
     const modelDefinition* def = fmu->model->def;
 
     if (vr >= def->numberOfVariables) {
-        fmu->state |= stateError;
-        logErrorMessage(fmu, "Value reference %u does not exist.", vr);
+        enterErrorState(fmu, "Value reference %u does not exist.", vr);
         return NULL;
     }
 
     const modelVariable* variable = &def->variables[vr];
 
     if (variable->type != expectedType) {
-        fmu->state |= stateError;
-        logErrorMessage(fmu, "Variable '%s' (value reference %u) is of type %s, not %s.",
+        enterErrorState(fmu, "Variable '%s' (value reference %u) is of type %s, not %s.",
                         variable->name, vr, typeName(variable->type), typeName(expectedType));
         return NULL;
     }
 
     if (forWrite) {
         if (variable->role == VAR_OUTPUT) {
-            fmu->state |= stateError;
-            logErrorMessage(fmu, "Variable '%s' is an output and cannot be set.", variable->name);
+            enterErrorState(fmu, "Variable '%s' is an output and cannot be set.", variable->name);
             return NULL;
         }
 
@@ -683,9 +764,8 @@ static void* resolveVariable(myFMU2* fmu, fmi2ValueReference vr, varType expecte
             variable->role == VAR_STATE ||
             (variable->role == VAR_PARAMETER && variable->variability == VAR_FIXED);
 
-        if (onlyBeforeSimulation && !stateIsAllowed(fmu->state, STATE_setBeforeSimulation)) {
-            fmu->state |= stateError;
-            logErrorMessage(fmu, "Variable '%s' can only be set before the simulation starts.", variable->name);
+        if (onlyBeforeSimulation && !(fmu->state & STATE_setBeforeSimulation)) {
+            enterErrorState(fmu, "Variable '%s' can only be set before the simulation starts.", variable->name);
             return NULL;
         }
     }
@@ -702,15 +782,8 @@ static void* resolveVariable(myFMU2* fmu, fmi2ValueReference vr, varType expecte
  */
 fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Real value[])
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2SetReal, "fmi2SetReal", vr, nvr, value) != fmi2OK) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2SetReal, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
@@ -723,7 +796,9 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
         *variable = value[k];
     }
 
-    logEventMessage(myfmu2, "Values set.");
+    myfmu2->outputsAreStale = fmi2True;
+
+    logCallMessage(myfmu2, "Values set.");
     return fmi2OK;
 }
 
@@ -732,15 +807,8 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
  */
 fmi2Status fmi2SetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Integer value[])
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2SetInteger, "fmi2SetInteger", vr, nvr, value) != fmi2OK) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2SetInteger, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
@@ -753,7 +821,9 @@ fmi2Status fmi2SetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t
         *variable = value[k];
     }
 
-    logEventMessage(myfmu2, "Values set.");
+    myfmu2->outputsAreStale = fmi2True;
+
+    logCallMessage(myfmu2, "Values set.");
     return fmi2OK;
 }
 
@@ -765,15 +835,8 @@ fmi2Status fmi2SetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t
  */
 fmi2Status fmi2SetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Boolean value[])
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2SetBoolean, "fmi2SetBoolean", vr, nvr, value) != fmi2OK) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2SetBoolean, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
@@ -786,7 +849,9 @@ fmi2Status fmi2SetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
         *variable = (value[k] != fmi2False);
     }
 
-    logEventMessage(myfmu2, "Values set.");
+    myfmu2->outputsAreStale = fmi2True;
+
+    logCallMessage(myfmu2, "Values set.");
     return fmi2OK;
 }
 
@@ -798,22 +863,14 @@ fmi2Status fmi2SetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
  */
 fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2String value[])
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2SetString, "fmi2SetString", vr, nvr, value) != fmi2OK) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2SetString, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
     if (nvr > 0) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Value reference %u is not a String variable (strings are not supported).", vr[0]);
-        return fmi2Error;
+        return enterErrorState(myfmu2, "Value reference %u is not a String variable (strings are not supported).",
+                               vr[0]);
     }
 
     return fmi2OK;
@@ -825,20 +882,17 @@ fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  * Implementation notes:
  * - Looks up each value reference in the model's variable table
  * - Every variable (parameter, input, output, state) can be read
+ * - Outputs are recomputed first if a variable was set since the last
+ *   computation
  */
 fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Real value[])
 {
-    /* Validate component */
-    if (!c) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2GetReal, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2GetReal, "fmi2GetReal", vr, nvr, value) != fmi2OK) {
-        return fmi2Error;
-    }
+    refreshOutputs(myfmu2);
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {
@@ -849,7 +903,7 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
         value[k] = *variable;
     }
 
-    logEventMessage(myfmu2, "Values retrieved.");
+    logCallMessage(myfmu2, "Values retrieved.");
     return fmi2OK;
 }
 
@@ -858,17 +912,12 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
  */
 fmi2Status fmi2GetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Integer value[])
 {
-    /* Validate component */
-    if (!c) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2GetInteger, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2GetInteger, "fmi2GetInteger", vr, nvr, value) != fmi2OK) {
-        return fmi2Error;
-    }
+    refreshOutputs(myfmu2);
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {
@@ -879,7 +928,7 @@ fmi2Status fmi2GetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t
         value[k] = *variable;
     }
 
-    logEventMessage(myfmu2, "Values retrieved.");
+    logCallMessage(myfmu2, "Values retrieved.");
     return fmi2OK;
 }
 
@@ -888,17 +937,12 @@ fmi2Status fmi2GetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t
  */
 fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Boolean value[])
 {
-    /* Validate component */
-    if (!c) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2GetBoolean, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2GetBoolean, "fmi2GetBoolean", vr, nvr, value) != fmi2OK) {
-        return fmi2Error;
-    }
+    refreshOutputs(myfmu2);
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {
@@ -909,7 +953,7 @@ fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
         value[k] = *variable ? fmi2True : fmi2False;
     }
 
-    logEventMessage(myfmu2, "Values retrieved.");
+    logCallMessage(myfmu2, "Values retrieved.");
     return fmi2OK;
 }
 
@@ -921,22 +965,14 @@ fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
  */
 fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2String value[])
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state and arguments */
-    if (checkVariableAccess(myfmu2, STATE_fmi2GetString, "fmi2GetString", vr, nvr, value) != fmi2OK) {
+    myFMU2* myfmu2 = enterVariableAccess(c, STATE_fmi2GetString, __func__, vr, nvr, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
     if (nvr > 0) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Value reference %u is not a String variable (strings are not supported).", vr[0]);
-        return fmi2Error;
+        return enterErrorState(myfmu2, "Value reference %u is not a String variable (strings are not supported).",
+                               vr[0]);
     }
 
     return fmi2OK;
@@ -951,15 +987,20 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *
  * Implementation notes:
  * - Supports variable communication step sizes (not all tools do)
- * - Automatically subdivides large steps into increments of the model's maxStepSize
- * - Uses sub-stepping for numerical stability
  * - Validates internal clock matches environment clock
+ * - Refuses to step beyond the stop time of the experiment (if defined)
+ * - Inputs are held constant during the step
+ * - Fails if a state is not finite after the step (integration diverged)
  * - Computes outputs after integration via getOutputs()
  *
  * Sub-stepping algorithm:
- * - numberOfSteps = floor(communicationStepSize / maxStepSize)
- * - Perform numberOfSteps full-size steps
- * - Handle remainder with smaller final step (if numerically significant)
+ * - The communication step is divided into the smallest number of equal
+ *   sub-steps that are not larger than the model's maxStepSize:
+ *   numberOfSteps = ceil(communicationStepSize / maxStepSize)
+ * - SUBSTEP_TOLERANCE keeps rounding in the division from adding a step
+ *   (0.3 / 0.1 must give 3 steps, not 4)
+ * - The internal clock is set to the end of the step as seen by the
+ *   integration tool, so rounding errors do not accumulate over the steps
  */
 fmi2Status fmi2DoStep(
     fmi2Component c,
@@ -970,78 +1011,76 @@ fmi2Status fmi2DoStep(
     /* Unused parameter */
     (void)noSetFMUStatePriorToCurrentPoint;
 
-    /* Validate component */
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2DoStep, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2DoStep)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2DoStep.");
-        return fmi2Error;
-    }
+    modelInstance* model = myfmu2->model;
 
     /* Validate communicationStepSize */
-    if (communicationStepSize <= 0.0) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "communicationStepSize must be greater than zero.");
-        return fmi2Error;
+    if (!isfinite(communicationStepSize) || communicationStepSize <= 0.0) {
+        return enterErrorState(myfmu2, "communicationStepSize must be finite and greater than zero.");
     }
 
-    /* Validate time synchronization */
-    if (!areEqualReals(myfmu2->time, currentCommunicationPoint)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "FMU internal clock does not match environment clock.");
-        return fmi2Error;
+    /* Validate time synchronization (also fails if currentCommunicationPoint is not finite) */
+    if (!(fabs(myfmu2->time - currentCommunicationPoint) <= timeTolerance(myfmu2->time))) {
+        return enterErrorState(myfmu2, "FMU internal clock (%.16g) does not match environment clock (%.16g).",
+                               myfmu2->time, currentCommunicationPoint);
+    }
+
+    /* Validate stop time */
+    fmi2Real nextCommunicationPoint = currentCommunicationPoint + communicationStepSize;
+    if (myfmu2->stopTimeDefined &&
+        nextCommunicationPoint > myfmu2->stopTime + timeTolerance(myfmu2->stopTime)) {
+        return enterErrorState(myfmu2, "Step from %.16g to %.16g exceeds the stop time %.16g.",
+                               currentCommunicationPoint, nextCommunicationPoint, myfmu2->stopTime);
     }
 
     /* Calculate sub-stepping scheme */
-    fmi2Real maxStepSize = myfmu2->model->def->maxStepSize;
-    fmi2Integer numberOfSteps = (fmi2Integer)(communicationStepSize / maxStepSize);
-    fmi2Real stepRemainder = communicationStepSize - numberOfSteps * maxStepSize;
-    fmi2Real actualStepSize;
+    fmi2Real numberOfSteps = ceil(communicationStepSize / model->def->maxStepSize - SUBSTEP_TOLERANCE);
+    if (numberOfSteps < 1.0) {
+        numberOfSteps = 1.0;
+    }
+    if (numberOfSteps > MAX_NUMBER_OF_SUBSTEPS) {
+        return enterErrorState(myfmu2, "communicationStepSize %.16g needs too many integration steps.",
+                               communicationStepSize);
+    }
+    fmi2Real actualStepSize = communicationStepSize / numberOfSteps;
 
-    /* Perform full-size steps */
-    actualStepSize = maxStepSize;
-    for (fmi2Integer k = 0; k < numberOfSteps; k++) {
-        myfmu2->model->getStateDerivatives(myfmu2->model);
-        myfmu2->model->integrate(myfmu2->model, actualStepSize);
+    /* Perform sub-steps */
+    for (size_t k = 0; k < (size_t)numberOfSteps; k++) {
+        model->getStateDerivatives(model);
+        model->integrate(model, actualStepSize);
     }
 
-    /* Handle remainder step (if numerically significant) */
-    if (stepRemainder >= EPSILON) {
-        actualStepSize = stepRemainder;
-        myfmu2->model->getStateDerivatives(myfmu2->model);
-        myfmu2->model->integrate(myfmu2->model, actualStepSize);
+    /* Validate result */
+    for (size_t k = 0; k < model->def->numberOfStates; k++) {
+        if (!isfinite(model->states[k])) {
+            return enterErrorState(myfmu2, "State %zu is not finite after the step to %.16g.",
+                                   k, nextCommunicationPoint);
+        }
     }
 
     /* Update internal clock */
-    myfmu2->time += communicationStepSize;
+    myfmu2->time = nextCommunicationPoint;
 
     /* Compute outputs */
-    myfmu2->model->getOutputs(myfmu2->model);
+    model->getOutputs(model);
+    myfmu2->outputsAreStale = fmi2False;
 
-    logEventMessage(myfmu2, "FMU stepped.");
+    logCallMessage(myfmu2, "FMU stepped to %.16g.", nextCommunicationPoint);
     return fmi2OK;
 }
 
 /**
  * Cancel asynchronous step (not supported)
+ *
+ * fmi2DoStep never returns fmi2Pending, so there is never a step to cancel.
  */
 fmi2Status fmi2CancelStep(fmi2Component c)
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    logWarningMessage(myfmu2, "fmi2CancelStep is not supported.");
-    return fmi2Warning;
+    return notSupported(c, __func__);
 }
 
 /***************************************************
@@ -1056,17 +1095,8 @@ fmi2Status fmi2CancelStep(fmi2Component c)
  */
 fmi2Status fmi2Terminate(fmi2Component c)
 {
-    /* Validate component */
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2Terminate)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2Terminate.");
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2Terminate, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
@@ -1087,27 +1117,27 @@ fmi2Status fmi2Terminate(fmi2Component c)
  * cycle (SetupExperiment → EnterInit → ExitInit → DoStep).
  *
  * Implementation notes:
- * - Resets simulation time to 0.0
+ * - Resets the experiment (start time 0.0, no stop time)
  * - Resets all model variables to their start values (see resetModel())
- * - Preserves instance identity (name, callbacks, FMU type, log level)
- * - Can be called from any state except stateStartEnd
+ * - Preserves instance identity (name, callbacks, log level)
+ * - Can be called from any state and is the way out of the error state
  */
 fmi2Status fmi2Reset(fmi2Component c)
 {
-    /* Validate component */
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2Reset, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-
-    /* Reset simulation time */
-    myfmu2->startTime = 0.0;
-    myfmu2->stopTime  = 0.0;
-    myfmu2->time      = 0.0;
+    /* Reset experiment */
+    myfmu2->startTime       = 0.0;
+    myfmu2->stopTime        = 0.0;
+    myfmu2->stopTimeDefined = fmi2False;
+    myfmu2->time            = 0.0;
 
     /* Reset all model variables to their start values */
     resetModel(myfmu2->model);
+    myfmu2->outputsAreStale = fmi2True;
 
     /* Transition to post-instantiation state */
     myfmu2->state = stateInstantiated;
@@ -1117,164 +1147,383 @@ fmi2Status fmi2Reset(fmi2Component c)
 }
 
 /***************************************************
- * FMI 2.0 Status Queries (Not Supported)
+ * FMI 2.0 Status Queries
+ *
+ * These functions mainly serve asynchronous slaves and slaves that discard
+ * steps. This FMU steps synchronously and never discards a step, so there
+ * is little to report. A status kind that is not available is answered
+ * with fmi2Discard, as required by the standard.
  ***************************************************/
 
+/**
+ * Common part of the status queries
+ *
+ * Returns the FMU instance or NULL on failure (see enterFunction()).
+ */
+static myFMU2* enterStatusQuery(fmi2Component c, const char* functionName, const void* value)
+{
+    myFMU2* fmu = enterFunction(c, STATE_fmi2GetStatus, functionName);
+    if (!fmu) {
+        return NULL;
+    }
+
+    if (!value) {
+        enterErrorState(fmu, "%s: invalid value.", functionName);
+        return NULL;
+    }
+
+    return fmu;
+}
+
+/**
+ * Answer a status query for a kind of status the function does not provide
+ */
+static fmi2Status statusNotAvailable(const myFMU2* fmu, const char* functionName, fmi2StatusKind s)
+{
+    logWarningMessage(fmu, "%s: status kind %d is not available.", functionName, (int)s);
+    return fmi2Discard;
+}
+
+/**
+ * Status of the last fmi2DoStep
+ *
+ * Implementation notes:
+ * - fmi2DoStepStatus: steps are computed synchronously, so a step is always
+ *   finished when this function can be called
+ */
 fmi2Status fmi2GetStatus(fmi2Component c, const fmi2StatusKind s, fmi2Status* value)
 {
-    (void)s;
-    (void)value;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterStatusQuery(c, __func__, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetStatus is not supported.");
-    return fmi2Warning;
+    if (s != fmi2DoStepStatus) {
+        return statusNotAvailable(myfmu2, __func__, s);
+    }
+
+    *value = fmi2OK;
+    return fmi2OK;
 }
 
+/**
+ * Real-valued status
+ *
+ * Implementation notes:
+ * - fmi2LastSuccessfulTime: end of the last successful step, which is the
+ *   internal clock of the FMU
+ */
 fmi2Status fmi2GetRealStatus(fmi2Component c, const fmi2StatusKind s, fmi2Real* value)
 {
-    (void)s;
-    (void)value;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterStatusQuery(c, __func__, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetRealStatus is not supported.");
-    return fmi2Warning;
+    if (s != fmi2LastSuccessfulTime) {
+        return statusNotAvailable(myfmu2, __func__, s);
+    }
+
+    *value = myfmu2->time;
+    return fmi2OK;
 }
 
+/**
+ * Integer-valued status (FMI 2.0 defines no status kind of this type)
+ */
 fmi2Status fmi2GetIntegerStatus(fmi2Component c, const fmi2StatusKind s, fmi2Integer* value)
 {
-    (void)s;
-    (void)value;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterStatusQuery(c, __func__, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetIntegerStatus is not supported.");
-    return fmi2Warning;
+    return statusNotAvailable(myfmu2, __func__, s);
 }
 
+/**
+ * Boolean-valued status
+ *
+ * Implementation notes:
+ * - fmi2Terminated: the FMU never asks to stop the simulation
+ */
 fmi2Status fmi2GetBooleanStatus(fmi2Component c, const fmi2StatusKind s, fmi2Boolean* value)
 {
-    (void)s;
-    (void)value;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterStatusQuery(c, __func__, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetBooleanStatus is not supported.");
-    return fmi2Warning;
+    if (s != fmi2Terminated) {
+        return statusNotAvailable(myfmu2, __func__, s);
+    }
+
+    *value = fmi2False;
+    return fmi2OK;
 }
 
+/**
+ * String-valued status
+ *
+ * Implementation notes:
+ * - fmi2PendingStatus: no step is ever pending, the answer is an empty string
+ */
 fmi2Status fmi2GetStringStatus(fmi2Component c, const fmi2StatusKind s, fmi2String* value)
 {
-    (void)s;
-    (void)value;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterStatusQuery(c, __func__, value);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetStringStatus is not supported.");
-    return fmi2Warning;
+    if (s != fmi2PendingStatus) {
+        return statusNotAvailable(myfmu2, __func__, s);
+    }
+
+    *value = "";
+    return fmi2OK;
 }
 
 /***************************************************
- * FMI 2.0 FMU State Management (Not Supported)
+ * FMI 2.0 FMU State Management
+ *
+ * A snapshot (fmuSnapshot) is one block of memory without pointers. It is
+ * owned by the integration tool, which frees it with fmi2FreeFMUstate.
+ * Because of this layout the serialized FMU state is simply a copy of the
+ * snapshot's bytes. It can be read back by the same FMU binary, but not on
+ * another platform.
  ***************************************************/
 
+/**
+ * Size in bytes of a snapshot of the model
+ */
+static size_t snapshotSize(const myFMU2* fmu)
+{
+    return sizeof(fmuSnapshot) + modelDataSize(fmu->model->def);
+}
+
+/**
+ * Hash of the model's GUID (FNV-1a)
+ *
+ * Stored in every snapshot to recognize serialized states of another model.
+ */
+static uint32_t guidHash(const myFMU2* fmu)
+{
+    uint32_t hash = 2166136261u;
+
+    for (const char* c = fmu->model->def->guid; *c != '\0'; c++) {
+        hash ^= (unsigned char)*c;
+        hash *= 16777619u;
+    }
+
+    return hash;
+}
+
+/**
+ * Check that a block of memory is a snapshot of this model
+ */
+static fmi2Boolean snapshotIsValid(const myFMU2* fmu, const fmuSnapshot* snapshot)
+{
+    return snapshot &&
+           snapshot->magic == SNAPSHOT_MAGIC &&
+           snapshot->guidHash == guidHash(fmu) &&
+           (snapshot->state & STATE_anyButError) != 0;
+}
+
+/**
+ * Take a snapshot of the FMU
+ *
+ * Implementation notes:
+ * - If *FMUstate is NULL a new snapshot is allocated, otherwise the
+ *   existing one is overwritten (all snapshots of a model have the same size)
+ * - Cannot be called in the error state
+ */
 fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate)
 {
-    (void)FMUstate;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2GetFMUstate, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetFMUstate is not supported.");
-    return fmi2Warning;
+    if (!FMUstate) {
+        return enterErrorState(myfmu2, "fmi2GetFMUstate: invalid FMU state.");
+    }
+
+    fmuSnapshot* snapshot = *FMUstate;
+
+    if (!snapshot) {
+        /* calloc() also zeroes the padding bytes, so that equal snapshots
+         * serialize to equal bytes */
+        snapshot = calloc(1, snapshotSize(myfmu2));
+        if (!snapshot) {
+            return enterErrorState(myfmu2, "fmi2GetFMUstate: memory allocation failed.");
+        }
+    } else if (!snapshotIsValid(myfmu2, snapshot)) {
+        return enterErrorState(myfmu2, "fmi2GetFMUstate: invalid FMU state.");
+    }
+
+    snapshot->magic           = SNAPSHOT_MAGIC;
+    snapshot->guidHash        = guidHash(myfmu2);
+    snapshot->startTime       = myfmu2->startTime;
+    snapshot->stopTime        = myfmu2->stopTime;
+    snapshot->time            = myfmu2->time;
+    snapshot->stopTimeDefined = myfmu2->stopTimeDefined;
+    snapshot->outputsAreStale = myfmu2->outputsAreStale;
+    snapshot->state           = myfmu2->state;
+    saveModelData(myfmu2->model, snapshot->modelData);
+
+    *FMUstate = snapshot;
+
+    logEventMessage(myfmu2, "FMU state saved at time %.16g.", myfmu2->time);
+    return fmi2OK;
 }
 
+/**
+ * Set the FMU back to a snapshot
+ *
+ * Implementation notes:
+ * - Restores variables, clock, experiment and the state of the FMU state
+ *   machine
+ * - Can be called in the error state: this is the way to continue a
+ *   simulation after a failed step without starting over
+ */
 fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate)
 {
-    (void)FMUstate;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2SetFMUstate, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2SetFMUstate is not supported.");
-    return fmi2Warning;
+    const fmuSnapshot* snapshot = FMUstate;
+
+    if (!snapshotIsValid(myfmu2, snapshot)) {
+        return enterErrorState(myfmu2, "fmi2SetFMUstate: invalid FMU state.");
+    }
+
+    myfmu2->startTime       = snapshot->startTime;
+    myfmu2->stopTime        = snapshot->stopTime;
+    myfmu2->time            = snapshot->time;
+    myfmu2->stopTimeDefined = snapshot->stopTimeDefined;
+    myfmu2->outputsAreStale = snapshot->outputsAreStale;
+    myfmu2->state           = snapshot->state;
+    restoreModelData(myfmu2->model, snapshot->modelData);
+
+    logEventMessage(myfmu2, "FMU state restored to time %.16g.", myfmu2->time);
+    return fmi2OK;
 }
 
+/**
+ * Free a snapshot
+ *
+ * Implementation notes:
+ * - A NULL snapshot is ignored
+ * - Sets *FMUstate to NULL
+ * - Can be called in any state
+ */
 fmi2Status fmi2FreeFMUstate(fmi2Component c, fmi2FMUstate* FMUstate)
 {
-    (void)FMUstate;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2FreeFMUstate, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2FreeFMUstate is not supported.");
-    return fmi2Warning;
+    if (FMUstate && *FMUstate) {
+        free(*FMUstate);
+        *FMUstate = NULL;
+    }
+
+    return fmi2OK;
 }
 
+/**
+ * Number of bytes needed to serialize a snapshot
+ */
 fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate FMUstate, size_t* size)
 {
-    (void)FMUstate;
-    (void)size;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2SerializeFMUstate, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2SerializedFMUstateSize is not supported.");
-    return fmi2Warning;
+    if (!snapshotIsValid(myfmu2, FMUstate) || !size) {
+        return enterErrorState(myfmu2, "fmi2SerializedFMUstateSize: invalid FMU state or size.");
+    }
+
+    *size = snapshotSize(myfmu2);
+    return fmi2OK;
 }
 
+/**
+ * Copy a snapshot into a byte vector provided by the integration tool
+ */
 fmi2Status fmi2SerializeFMUstate(fmi2Component c, fmi2FMUstate FMUstate, fmi2Byte serializedState[], size_t size)
 {
-    (void)FMUstate;
-    (void)serializedState;
-    (void)size;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2SerializeFMUstate, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2SerializeFMUstate is not supported.");
-    return fmi2Warning;
+    if (!snapshotIsValid(myfmu2, FMUstate) || !serializedState) {
+        return enterErrorState(myfmu2, "fmi2SerializeFMUstate: invalid FMU state or byte vector.");
+    }
+
+    if (size < snapshotSize(myfmu2)) {
+        return enterErrorState(myfmu2, "fmi2SerializeFMUstate: byte vector has %zu bytes, %zu are needed.",
+                               size, snapshotSize(myfmu2));
+    }
+
+    memcpy(serializedState, FMUstate, snapshotSize(myfmu2));
+    return fmi2OK;
 }
 
+/**
+ * Create a snapshot from a byte vector written by fmi2SerializeFMUstate
+ *
+ * Implementation notes:
+ * - The bytes come from outside (e.g. a file), so size, marker, model and
+ *   state are verified before the bytes are accepted as a snapshot
+ * - The bytes are copied into the snapshot first because the byte vector
+ *   need not be aligned for an fmuSnapshot
+ * - If *FMUstate is NULL a new snapshot is allocated, otherwise the
+ *   existing one is overwritten
+ */
 fmi2Status fmi2DeSerializeFMUstate(fmi2Component c, const fmi2Byte serializedState[], size_t size, fmi2FMUstate* FMUstate)
 {
-    (void)serializedState;
-    (void)size;
-    (void)FMUstate;
-
-    if (!c) {
+    myFMU2* myfmu2 = enterFunction(c, STATE_fmi2SerializeFMUstate, __func__);
+    if (!myfmu2) {
         return fmi2Error;
     }
 
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2DeSerializeFMUstate is not supported.");
-    return fmi2Warning;
+    if (!serializedState || !FMUstate) {
+        return enterErrorState(myfmu2, "fmi2DeSerializeFMUstate: invalid byte vector or FMU state.");
+    }
+
+    if (size != snapshotSize(myfmu2)) {
+        return enterErrorState(myfmu2, "fmi2DeSerializeFMUstate: byte vector has %zu bytes, %zu are expected.",
+                               size, snapshotSize(myfmu2));
+    }
+
+    /* Verify the header before touching an existing snapshot */
+    fmuSnapshot header;
+    memcpy(&header, serializedState, sizeof(header));
+    if (!snapshotIsValid(myfmu2, &header)) {
+        return enterErrorState(myfmu2, "fmi2DeSerializeFMUstate: bytes are not an FMU state of this model.");
+    }
+
+    fmuSnapshot* snapshot = *FMUstate;
+
+    if (!snapshot) {
+        snapshot = malloc(size);
+        if (!snapshot) {
+            return enterErrorState(myfmu2, "fmi2DeSerializeFMUstate: memory allocation failed.");
+        }
+    } else if (!snapshotIsValid(myfmu2, snapshot)) {
+        return enterErrorState(myfmu2, "fmi2DeSerializeFMUstate: invalid FMU state.");
+    }
+
+    memcpy(snapshot, serializedState, size);
+    *FMUstate = snapshot;
+
+    return fmi2OK;
 }
 
 /***************************************************
@@ -1297,14 +1546,12 @@ fmi2Status fmi2GetDirectionalDerivative(
     (void)dvKnown;
     (void)dvUnknown;
 
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetDirectionalDerivative is not supported.");
-    return fmi2Warning;
+    return notSupported(c, __func__);
 }
+
+/***************************************************
+ * FMI 2.0 Input and Output Derivatives (Not Supported)
+ ***************************************************/
 
 fmi2Status fmi2SetRealInputDerivatives(
     fmi2Component c,
@@ -1318,13 +1565,7 @@ fmi2Status fmi2SetRealInputDerivatives(
     (void)order;
     (void)value;
 
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2SetRealInputDerivatives is not supported.");
-    return fmi2Warning;
+    return notSupported(c, __func__);
 }
 
 fmi2Status fmi2GetRealOutputDerivatives(
@@ -1339,13 +1580,7 @@ fmi2Status fmi2GetRealOutputDerivatives(
     (void)order;
     (void)value;
 
-    if (!c) {
-        return fmi2Error;
-    }
-
-    myFMU2* myfmu2 = (myFMU2*)c;
-    logWarningMessage(myfmu2, "fmi2GetRealOutputDerivatives is not supported.");
-    return fmi2Warning;
+    return notSupported(c, __func__);
 }
 
 /***************************************************

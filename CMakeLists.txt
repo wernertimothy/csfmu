@@ -106,6 +106,11 @@ set_target_properties(${LIB_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+# Math library (not part of the C library on Linux)
+if(UNIX)
+    target_link_libraries(${LIB_NAME} PRIVATE m)
+endif()
+
 # Windows-specific settings
 if(WIN32)
     target_compile_definitions(${LIB_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -126,6 +131,10 @@ target_include_directories(${LIB_NAME}_static PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/external/fmi2/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
 )
+
+if(UNIX)
+    target_link_libraries(${LIB_NAME}_static PUBLIC m)
+endif()
 
 #==============================================================================
 # 6. Model core static library for unit tests (no model, no FMI)

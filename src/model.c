@@ -144,6 +144,76 @@ void* modelVariableAddress(modelInstance* model, size_t index)
 }
 
 /**
+ * Copies one storage block and returns the position behind it.
+ *
+ * Blocks of size 0 are NULL and are skipped (memcpy() must not be called
+ * with NULL, not even for 0 bytes).
+ */
+static char* copyBlock(char* position, void* block, size_t size, bool save)
+{
+    if (size > 0) {
+        if (save) {
+            memcpy(position, block, size);
+        } else {
+            memcpy(block, position, size);
+        }
+    }
+    return position + size;
+}
+
+/**
+ * Copies all storage blocks to (save) or from (restore) a buffer.
+ *
+ * Using one function for both directions guarantees that the blocks are
+ * written and read in the same order.
+ */
+static void copyModelData(modelInstance* model, char* buffer, bool save)
+{
+    const modelDefinition* def = model->def;
+    size_t sizeOfStates = def->numberOfStates * sizeof(double);
+    char* position = buffer;
+
+    position = copyBlock(position, model->params, def->sizeOfParams, save);
+    position = copyBlock(position, model->inputs, def->sizeOfInputs, save);
+    position = copyBlock(position, model->outputs, def->sizeOfOutputs, save);
+    position = copyBlock(position, model->states, sizeOfStates, save);
+    copyBlock(position, model->stateDerivatives, sizeOfStates, save);
+}
+
+size_t modelDataSize(const modelDefinition* def)
+{
+    if (!def) {
+        return 0;
+    }
+
+    return def->sizeOfParams + def->sizeOfInputs + def->sizeOfOutputs +
+           2 * def->numberOfStates * sizeof(double);
+}
+
+/**
+ * Implementation notes for saveModelData():
+ * - The const is cast away only to share copyModelData() with
+ *   restoreModelData(); the model is not modified when saving
+ */
+void saveModelData(const modelInstance* model, void* buffer)
+{
+    if (!model || !buffer) {
+        return;
+    }
+
+    copyModelData((modelInstance*)model, buffer, true);
+}
+
+void restoreModelData(modelInstance* model, const void* buffer)
+{
+    if (!model || !buffer) {
+        return;
+    }
+
+    copyModelData(model, (char*)buffer, false);
+}
+
+/**
  * Implementation notes for freeModel():
  * - free(NULL) is safe, so blocks of size 0 need no special handling
  * - Order of freeing doesn't matter as there are no pointer dependencies

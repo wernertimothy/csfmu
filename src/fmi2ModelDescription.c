@@ -27,9 +27,11 @@
 #define CAN_HANDLE_VARIABLE_COMMUNICATION_STEP_SIZE "true"
 #define CAN_INTERPOLATE_INPUTS                      "false"
 #define MAX_OUTPUT_DERIVATIVE_ORDER                 "0"
-#define CAN_GET_AND_SET_FMU_STATE                   "false"
-#define CAN_SERIALIZE_FMU_STATE                     "false"
+#define CAN_GET_AND_SET_FMU_STATE                   "true"
+#define CAN_SERIALIZE_FMU_STATE                     "true"
 #define PROVIDES_DIRECTIONAL_DERIVATIVE             "false"
+/* The adapter allocates with calloc() and ignores the memory callbacks */
+#define CAN_NOT_USE_MEMORY_MANAGEMENT_FUNCTIONS     "true"
 
 /***************************************************
  * Helper Functions
@@ -443,17 +445,18 @@ static void writeModelDescription(FILE* file, const modelDefinition* def)
           " canSerializeFMUstate=\"" CAN_SERIALIZE_FMU_STATE "\""
           " providesDirectionalDerivative=\"" PROVIDES_DIRECTIONAL_DERIVATIVE "\""
           " canBeInstantiatedOnlyOncePerProcess=\"false\""
-          " canNotUseMemoryManagementFunctions=\"false\"/>\n\n", file);
+          " canNotUseMemoryManagementFunctions=\"" CAN_NOT_USE_MEMORY_MANAGEMENT_FUNCTIONS "\"/>\n\n", file);
 
     /* Unit definitions */
     writeUnitDefinitions(file, def);
 
-    /* Log categories (match the categories handled by fmi2SetDebugLogging) */
+    /* Log categories (must match LOG_CATEGORIES in fmi2Functions.c) */
     fputs("    <LogCategories>\n"
           "        <Category name=\"logAll\" description=\"All log messages\"/>\n"
-          "        <Category name=\"logEvents\" description=\"Event messages\"/>\n"
-          "        <Category name=\"logStatusWarning\" description=\"Warning messages\"/>\n"
-          "        <Category name=\"logStatusError\" description=\"Error messages\"/>\n"
+          "        <Category name=\"logEvents\" description=\"Lifecycle of the FMU\"/>\n"
+          "        <Category name=\"logStatusWarning\" description=\"A function returned fmi2Warning or fmi2Discard\"/>\n"
+          "        <Category name=\"logStatusError\" description=\"A function returned fmi2Error\"/>\n"
+          "        <Category name=\"logFmi2Call\" description=\"Successful calls of fmi2GetXXX, fmi2SetXXX and fmi2DoStep\"/>\n"
           "    </LogCategories>\n\n", file);
 
     /* Default experiment (only if the model suggests one) */

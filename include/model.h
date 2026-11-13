@@ -257,6 +257,44 @@ void resetModel(modelInstance* model);
 void* modelVariableAddress(modelInstance* model, size_t index);
 
 /**
+ * @brief Returns the number of bytes needed to store the data of a model.
+ *
+ * The data of a model are its parameter, input and output blocks, its
+ * states and its state derivatives.
+ *
+ * @param def Definition of the model
+ *
+ * @return Size in bytes of the buffer used by saveModelData() and
+ *         restoreModelData(), or 0 if def is NULL
+ */
+size_t modelDataSize(const modelDefinition* def);
+
+/**
+ * @brief Copies the data of a model instance into a buffer.
+ *
+ * Together with restoreModelData() this allows taking a snapshot of a model
+ * and returning to it later. The buffer is a plain copy of the storage
+ * blocks, so it is only valid for the same model definition on the same
+ * platform.
+ *
+ * @param model  Pointer to the model instance
+ * @param buffer Buffer of at least modelDataSize(model->def) bytes
+ *
+ * @see restoreModelData(), modelDataSize()
+ */
+void saveModelData(const modelInstance* model, void* buffer);
+
+/**
+ * @brief Copies data saved with saveModelData() back into a model instance.
+ *
+ * @param model  Pointer to the model instance
+ * @param buffer Buffer filled by saveModelData() for the same model definition
+ *
+ * @see saveModelData(), modelDataSize()
+ */
+void restoreModelData(modelInstance* model, const void* buffer);
+
+/**
  * @brief Deallocates a model instance and all its associated memory.
  *
  * Safely frees all dynamically allocated memory within the model instance
