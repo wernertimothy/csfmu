@@ -1,6 +1,17 @@
 #include "unity.h"
 #include "model.h"
 
+typedef struct { double a; int b; } Params;
+typedef struct { double u; } Inputs;
+typedef struct { double y; } Outputs;
+
+static const modelDefinition DEFINITION = {
+    .sizeOfParams   = sizeof(Params),
+    .sizeOfInputs   = sizeof(Inputs),
+    .sizeOfOutputs  = sizeof(Outputs),
+    .numberOfStates = 2,
+};
+
 void setUp(void) {}
 void tearDown(void) {}
 
@@ -10,7 +21,7 @@ void test_freeModel_handles_Null(void) {
 }
 
 void test_freeModel_deallocatesMemory(void) {
-    modelInstance* model = newModel(2,3,4,5);
+    modelInstance* model = newModel(&DEFINITION);
     TEST_ASSERT_NOT_NULL(model);
     freeModel(model);
     TEST_ASSERT_TRUE(1);
@@ -19,7 +30,7 @@ void test_freeModel_deallocatesMemory(void) {
 void test_freeModel_worksMultipleTimes(void) {
     modelInstance* model = NULL;
     for (int k=0; k<10; k++) {
-        model = newModel(k+1, k+2, k+3, k+4);
+        model = newModel(&DEFINITION);
         TEST_ASSERT_NOT_NULL(model);
         freeModel(model);
     }
@@ -31,6 +42,7 @@ int main(void) {
 
     RUN_TEST(test_freeModel_handles_Null);
     RUN_TEST(test_freeModel_deallocatesMemory);
+    RUN_TEST(test_freeModel_worksMultipleTimes);
 
     return UNITY_END();
 }

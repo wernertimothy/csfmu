@@ -18,6 +18,9 @@ This document provides a comprehensive API reference for FMI 2.0 functions imple
 - [Variable Access](#variable-access)
   - [fmi2SetReal](#fmi2setreal)
   - [fmi2GetReal](#fmi2getreal)
+  - [fmi2SetInteger / fmi2GetInteger](#fmi2setinteger--fmi2getinteger)
+  - [fmi2SetBoolean / fmi2GetBoolean](#fmi2setboolean--fmi2getboolean)
+  - [fmi2SetString / fmi2GetString](#fmi2setstring--fmi2getstring)
 - [Simulation](#simulation)
   - [fmi2DoStep](#fmi2dostep)
 - [Shutdown](#shutdown)
@@ -198,9 +201,10 @@ if (fmu == NULL) {
 - [`fmi2SetupExperiment`](#fmi2setupexperiment) - Next step after instantiation
 
 #### Notes
-- **GUID validation is mandatory** - the provided `fmuGUID` must exactly match the GUID in `config.h` (currently `{a1b2c3d4-e5f6-7890-abcd-ef1234567890}`)
+- **GUID validation is mandatory** - the provided `fmuGUID` must exactly match the `guid` of the model definition (`MODEL_DEFINITION` in the model's `variables.c`). The generated `modelDescription.xml` carries the same value
 - All callback functions in `fmi2CallbackFunctions` must be valid (non-NULL), especially `logger`, `allocateMemory`, `freeMemory`, and `componentEnvironment`
-- Internally allocates both `myFMU2` wrapper and `modelInstance` using `newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS)`
+- Internally allocates both `myFMU2` wrapper and `modelInstance` using `newModel(&MODEL_DEFINITION)`
+- **All variables hold their start values** after instantiation (parameters, inputs and states as declared in the model's variable table). Values set afterwards with `fmi2SetReal` etc. are kept through initialization
 - Returns an opaque `fmi2Component` pointer - integration tool should never access internals directly
 - If instantiation fails, logs error via the logger callback before returning NULL
 
@@ -443,7 +447,7 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c);
 ```
 
 #### Description
-Moves the FMU from the instantiated state into initialization mode. This function sets default initial values for states and parameters from the configuration, and assigns the state equation and integrator function pointers. After calling this function, the integration tool can override default values by calling `fmi2SetReal`, `fmi2SetInteger`, etc. before calling `fmi2ExitInitializationMode` to finalize initialization.
+Moves the FMU from the instantiated state into initialization mode. The function does not change any variable: all variables received their start values in `fmi2Instantiate` (or `fmi2Reset`), and values the integration tool has set since then are kept. The integration tool can continue to set parameters, inputs and states by calling `fmi2SetReal`, `fmi2SetInteger`, etc. before calling `fmi2ExitInitializationMode` to finalize initialization.
 
 #### Parameters
 | Name | Type | Description |
@@ -460,25 +464,27 @@ Moves the FMU from the instantiated state into initialization mode. This functio
 **Can be called in**: **Instantiated** state (after `fmi2SetupExperiment`, before first `fmi2ExitInitializationMode`)
 **State transitions**: Adds **Initialization Mode** state flag (FMU remains instantiated)
 
-#### Internal Initialization
+#### Where Initial Values Come From
 
-When this function is called, the following initializations occur:
-
-1. **States**: Initialized to `INITIAL_STATE` from `config.h` (default: `{0.0}`)
-2. **Parameters**: Initialized to `INITIAL_PARAMS` from `config.h` (default: `{0.15, 1.0}` for tau and k)
-3. **State equation**: Function pointer set to `MODEL_STATE_EQUATION` (default: `firstOrderSystem`)
-4. **Integrator**: Function pointer set to `INTEGRATOR_METHOD` (default: `eulerForward`)
-5. **Inputs**: Already zero-initialized by `calloc` in model creation
-6. **State derivatives**: Already zero-initialized, will be computed on first `fmi2DoStep`
+| Step | What happens to the variables |
+|------|-------------------------------|
+| `fmi2Instantiate` / `fmi2Reset` | Every variable is set to the start value declared in the model's variable table |
+| Instantiated state | Integration tool may set parameters, inputs and states |
+| `fmi2EnterInitializationMode` | Nothing (values are kept) |
+| Initialization mode | Integration tool may set parameters, inputs and states |
+| `fmi2ExitInitializationMode` | Outputs are computed from the initial values |
 
 #### Usage Example
 ```c
+/* value references of the first_order model (position in its variable table) */
+const fmi2ValueReference VR_tau = 0, VR_k = 1, VR_x = 4;
+
 fmi2Component fmu = fmi2Instantiate(/* ... */);
 
 // Setup the experiment
 fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
 
-// Enter initialization mode (sets defaults)
+// Enter initialization mode
 fmi2Status status = fmi2EnterInitializationMode(fmu);
 if (status != fmi2OK) {
     fprintf(stderr, "Failed to enter initialization mode\n");
@@ -487,13 +493,11 @@ if (status != fmi2OK) {
 
 // Override default initial state (optional)
 fmi2Real initialState = 5.0;
-fmi2ValueReference stateRef = 0;
-fmi2SetReal(fmu, &stateRef, 1, &initialState);
+fmi2SetReal(fmu, &VR_x, 1, &initialState);
 
 // Override default parameters (optional)
-fmi2Real tau = 0.2, k = 2.0;
-fmi2ValueReference paramRefs[] = {100, 101};  // Value references for parameters
-fmi2Real paramValues[] = {tau, k};
+fmi2ValueReference paramRefs[] = {VR_tau, VR_k};
+fmi2Real paramValues[] = {0.2, 2.0};
 fmi2SetReal(fmu, paramRefs, 2, paramValues);
 
 // Finalize initialization
@@ -507,13 +511,8 @@ fmi2ExitInitializationMode(fmu);
 - [`fmi2GetReal`](#fmi2getreal) - Can be called during initialization to read current values
 
 #### Notes
-- **Two-phase initialization**: This function sets defaults, integration tool can override them, then `fmi2ExitInitializationMode` finalizes
-- **State machine uses bitmasks**: The FMU remains in instantiated state while also being in initialization mode - flags are additive
-- **Defaults from config**: Initial states come from `INITIAL_STATE[]` array in `config.h`, parameters from `INITIAL_PARAMS[]`
-- **Function pointers enable flexibility**: Different models can use different integrators and state equations via configuration macros
-- **Arrays pre-zeroed**: Inputs and state derivatives were already zero-initialized by `calloc` in `newModel()` - no action needed here
-- **Must be instantiated first**: Returns `fmi2Error` if called before `fmi2Instantiate` or `fmi2SetupExperiment`
-- **Parameter structure**: Uses flexible `double* parameter` array rather than fixed struct - allows arbitrary parameter dimensions
+- **Start values are not applied here**: They are written once, in `fmi2Instantiate` and `fmi2Reset`. Applying them here would overwrite values the integration tool has set in the instantiated state (this is where fmpy applies `start_values`)
+- **Must be instantiated first**: Returns `fmi2Error` if not called in the instantiated state
 
 ---
 
@@ -527,7 +526,7 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c);
 ```
 
 #### Description
-Completes the initialization phase and transitions the FMU from initialization mode to initialized/step mode. After this function returns successfully, the FMU is ready to execute simulation steps via `fmi2DoStep`. This is the final step before beginning the simulation loop. No more initialization-time variable setting is allowed after this call.
+Completes the initialization phase and transitions the FMU from initialization mode to initialized/step mode. The outputs are computed from the initial states, inputs and parameters, so they are valid at the first communication point. After this function returns successfully, the FMU is ready to execute simulation steps via `fmi2DoStep`. This is the final step before beginning the simulation loop. No more initialization-time variable setting is allowed after this call.
 
 #### Parameters
 | Name | Type | Description |
@@ -591,7 +590,8 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 - [`fmi2SetReal`](#fmi2setreal) - Can be called during initialization before this
 
 #### Notes
-- **Simple for co-simulation**: This function is straightforward for co-simulation FMUs - just a state transition. Model exchange FMUs would need to solve initial equations here.
+- **Initial outputs**: Calls the model's output equation once, so that `fmi2GetReal` returns y(t0) = h(x0, u0) right after initialization
+- **States and fixed parameters are frozen**: After this call, states and parameters declared as `VAR_FIXED` can no longer be set
 - **No parameter validation**: The FMU trusts that the integration tool has set all required values during initialization mode
 - **Finalization point**: After this call, `fmi2EnterInitializationMode` cannot be called again without calling `fmi2Reset` first
 - **Ready for stepping**: Integration tool typically reads initial outputs immediately after this call, then begins the simulation loop
@@ -604,9 +604,41 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 
 Functions for setting and reading variable values during initialization and simulation.
 
+### Value References
+
+Every variable of the model is described by one entry in the model's variable table (`VARIABLES[]` in `src/models/<model_name>/variables.c`). **The value reference of a variable is the index of its entry in that table.** The `modelDescription.xml` is generated from the same table, so both always agree.
+
+All access functions below work the same way:
+
+1. The value reference is looked up in the variable table
+2. The type of the variable must match the function (`fmi2SetReal` only accepts Real variables, and so on)
+3. For setters, the variable must be settable in the current state:
+
+| Role | Can be set |
+|------|------------|
+| Input | Instantiated, Initialization Mode, Step Complete |
+| Parameter (`VAR_TUNABLE`, default) | Instantiated, Initialization Mode, Step Complete |
+| Parameter (`VAR_FIXED`) | Instantiated, Initialization Mode |
+| State | Instantiated, Initialization Mode |
+| Output | Never |
+
+Integration tools should always look up value references by variable name in the `modelDescription.xml` and never hardcode them.
+
+**Example for the `first_order` model:**
+
+| Value reference | Name | Role | Type |
+|-----------------|------|------|------|
+| 0 | `tau` | parameter | Real |
+| 1 | `k` | parameter | Real |
+| 2 | `u` | input | Real |
+| 3 | `y` | output | Real |
+| 4 | `x` | state | Real |
+
+---
+
 ### fmi2SetReal
 
-Sets real-valued variables (parameters, inputs).
+Sets real-valued variables (parameters, inputs, states).
 
 #### Signature
 ```c
@@ -617,7 +649,7 @@ fmi2Status fmi2SetReal(fmi2Component c,
 ```
 
 #### Description
-Sets one or more real-valued variables by their value references. Parameters can only be set during initialization mode, while inputs can be set during initialization or step mode. This is the primary mechanism for the integration tool to provide input signals and configure parameters.
+Sets one or more real-valued variables by their value references. This is the primary mechanism for the integration tool to provide input signals, configure parameters and set initial conditions.
 
 #### Parameters
 | Name | Type | Description |
@@ -631,72 +663,61 @@ Sets one or more real-valued variables by their value references. Parameters can
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | All variables set successfully |
-| `fmi2Error` | NULL component, invalid arrays, invalid VR, or attempting to set parameter outside initialization mode |
+| `fmi2Error` | NULL component, call not allowed in the current state, invalid arrays, unknown value reference, variable is not of type Real, variable is an output, or variable is a state or fixed parameter and the initialization has finished |
 
 #### FMI State Requirements
-**Can be called in**: **Initialization Mode** or **Step Mode** (after initialization)
-**State transitions**: None (setter only)
-
-#### Value Reference Mapping
-
-This FMU uses sequential value reference ranges:
-
-| VR Range | Variable Type | Settable When | Notes |
-|----------|---------------|---------------|-------|
-| 0 to `NUMBER_OF_PARAMS-1` | Parameters | Initialization mode only | Returns error if set after initialization |
-| `NUMBER_OF_PARAMS` to `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS-1` | Inputs | Initialization or step mode | Can be updated before each `fmi2DoStep` |
-| `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS` onward | Outputs | **Never** (read-only) | Returns error if attempted |
-
-**Example for default template** (2 params, 1 input, 1 output):
-- VR 0: Parameter `tau` (settable during init only)
-- VR 1: Parameter `k` (settable during init only)
-- VR 2: Input `u` (settable anytime)
-- VR 3: Output `y` (read-only, use `fmi2GetReal`)
+**Can be called in**: **Instantiated**, **Initialization Mode**, **Step Complete**
+**State transitions**: None on success. On error the FMU enters the error state
 
 #### Usage Example
 ```c
+/* value references of the first_order model (position in its variable table) */
+const fmi2ValueReference VR_tau = 0, VR_k = 1, VR_u = 2, VR_x = 4;
+
 fmi2Component fmu = fmi2Instantiate(/* ... */);
 fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
 fmi2EnterInitializationMode(fmu);
 
 // Set parameters during initialization
-fmi2ValueReference paramRefs[] = {0, 1};  // tau, k
+fmi2ValueReference paramRefs[] = {VR_tau, VR_k};
 fmi2Real paramValues[] = {0.2, 2.5};
 fmi2Status status = fmi2SetReal(fmu, paramRefs, 2, paramValues);
 if (status != fmi2OK) {
     fprintf(stderr, "Failed to set parameters\n");
 }
 
+// Set the initial condition of the state
+fmi2Real x0 = 1.0;
+fmi2SetReal(fmu, &VR_x, 1, &x0);
+
 fmi2ExitInitializationMode(fmu);
 
 // Set input during simulation
-fmi2ValueReference inputRef = 2;  // u
 fmi2Real inputValue = 1.0;
-fmi2SetReal(fmu, &inputRef, 1, &inputValue);
+fmi2SetReal(fmu, &VR_u, 1, &inputValue);
 
-// Attempt to set parameter after initialization (ERROR)
-fmi2Real newTau = 0.3;
-status = fmi2SetReal(fmu, &paramRefs[0], 1, &newTau);  // Returns fmi2Error
+// Attempt to set a state after initialization (ERROR)
+status = fmi2SetReal(fmu, &VR_x, 1, &x0);  // Returns fmi2Error
 ```
 
 #### Related Functions
 - [`fmi2GetReal`](#fmi2getreal) - Read real-valued variables
-- [`fmi2EnterInitializationMode`](#fmi2enterinitializationmode) - Enables parameter setting
+- [`fmi2SetInteger / fmi2GetInteger`](#fmi2setinteger--fmi2getinteger) - Same for integer variables
+- [`fmi2SetBoolean / fmi2GetBoolean`](#fmi2setboolean--fmi2getboolean) - Same for boolean variables
 - [`fmi2DoStep`](#fmi2dostep) - Use inputs set via this function
 
 #### Notes
 - **Bulk operations**: Arrays allow setting multiple variables in one call for efficiency
-- **Sequential VR mapping**: Value references directly map to array indices within each type range
-- **Parameter immutability**: Parameters become read-only after exiting initialization mode (per FMI standard)
-- **No state setting**: States are internal to the model and cannot be directly set via FMI API
+- **Model independent**: The function only uses the variable table of the model definition; see [Value References](#value-references)
+- **States are initial conditions**: A state can be set until `fmi2ExitInitializationMode`. Afterwards the states are owned by the integrator
 - **nvr=0 is valid**: Calling with empty arrays is a no-op, not an error
-- **Error handling**: Returns error on first invalid VR encountered (fail-fast pattern)
+- **Error handling**: Returns error on the first invalid value reference (fail-fast pattern). Variables earlier in the array have already been set
 
 ---
 
 ### fmi2GetReal
 
-Reads real-valued variables (parameters, inputs, outputs).
+Reads real-valued variables (parameters, inputs, outputs, states).
 
 #### Signature
 ```c
@@ -707,7 +728,7 @@ fmi2Status fmi2GetReal(fmi2Component c,
 ```
 
 #### Description
-Reads one or more real-valued variables by their value references. Can read parameters, inputs, and outputs. Integration tools typically use this after `fmi2DoStep` to read output values, or during initialization to verify parameter values.
+Reads one or more real-valued variables by their value references. Every real variable of the model can be read. Integration tools typically use this after `fmi2DoStep` to read output values.
 
 #### Parameters
 | Name | Type | Description |
@@ -721,47 +742,36 @@ Reads one or more real-valued variables by their value references. Can read para
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | All variables read successfully |
-| `fmi2Error` | NULL component, invalid arrays, or invalid VR |
+| `fmi2Error` | NULL component, call not allowed in the current state, invalid arrays, unknown value reference, or variable is not of type Real |
 
 #### FMI State Requirements
-**Can be called in**: **Initialization Mode** or **Step Mode** (after initialization)
-**State transitions**: None (getter only)
-
-#### Value Reference Mapping
-
-This FMU uses sequential value reference ranges:
-
-| VR Range | Variable Type | Example (Default Template) |
-|----------|---------------|----------------------------|
-| 0 to `NUMBER_OF_PARAMS-1` | Parameters | VR 0: `tau`, VR 1: `k` |
-| `NUMBER_OF_PARAMS` to `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS-1` | Inputs | VR 2: `u` |
-| `NUMBER_OF_PARAMS+NUMBER_OF_INPUTS` to `...+NUMBER_OF_OUTPUTS-1` | Outputs | VR 3: `y` |
-
-**Output values**: Outputs are computed by the model (see `modelDoTimeStep()` in `model.c`) and stored in `model->outputs[]` array.
+**Can be called in**: **Instantiated**, **Step Complete**, **Step Failed**, **Step Canceled**, **Terminated**, **Error**
+**State transitions**: None on success. On error the FMU enters the error state
 
 #### Usage Example
 ```c
+/* value references of the first_order model (position in its variable table) */
+const fmi2ValueReference VR_tau = 0, VR_k = 1, VR_u = 2, VR_y = 3;
+
 fmi2Component fmu = fmi2Instantiate(/* ... */);
-fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
-fmi2EnterInitializationMode(fmu);
 
 // Read back parameters to verify
-fmi2ValueReference paramRefs[] = {0, 1};
+fmi2ValueReference paramRefs[] = {VR_tau, VR_k};
 fmi2Real paramValues[2];
 fmi2GetReal(fmu, paramRefs, 2, paramValues);
 printf("tau=%.3f, k=%.3f\n", paramValues[0], paramValues[1]);
 
+fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 10.0);
+fmi2EnterInitializationMode(fmu);
 fmi2ExitInitializationMode(fmu);
 
 // Simulation loop: set input, step, read output
-fmi2ValueReference inputRef = 2;
-fmi2ValueReference outputRef = 3;
 fmi2Real input = 1.0, output;
 
 for (double t = 0.0; t < 10.0; t += 0.01) {
-    fmi2SetReal(fmu, &inputRef, 1, &input);
+    fmi2SetReal(fmu, &VR_u, 1, &input);
     fmi2DoStep(fmu, t, 0.01, fmi2True);
-    fmi2GetReal(fmu, &outputRef, 1, &output);
+    fmi2GetReal(fmu, &VR_y, 1, &output);
     printf("t=%.2f, u=%.2f, y=%.4f\n", t, input, output);
 }
 ```
@@ -772,11 +782,190 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 
 #### Notes
 - **Output array is written**: The `value[]` parameter is an output, caller must allocate space for `nvr` elements
-- **Outputs updated by model**: Outputs are computed during `fmi2DoStep` via `modelDoTimeStep()` function
-- **Sequential VR mapping**: Value references map to array indices within each type range
+- **Outputs are valid from the end of initialization**: They are computed in `fmi2ExitInitializationMode` and after every `fmi2DoStep`
+- **Model independent**: The function only uses the variable table of the model definition; see [Value References](#value-references)
 - **Bulk operations**: Read multiple variables in one call for efficiency
 - **nvr=0 is valid**: Calling with empty arrays is a no-op
-- **All variable types readable**: Unlike `fmi2SetReal`, this can read outputs as well as parameters and inputs
+- **All roles readable**: Unlike `fmi2SetReal`, this can read outputs as well
+
+---
+
+### fmi2SetInteger / fmi2GetInteger
+
+Sets and reads integer-valued variables.
+
+#### Signature
+```c
+fmi2Status fmi2SetInteger(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          const fmi2Integer value[]);
+
+fmi2Status fmi2GetInteger(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          fmi2Integer value[]);
+```
+
+#### Description
+The integer counterparts of `fmi2SetReal` and `fmi2GetReal`. A variable is an integer variable if its field in the model's struct is of type `int`.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `vr` | `const fmi2ValueReference[]` | Array of value references identifying the variables |
+| `nvr` | `size_t` | Number of value references (length of `vr` and `value` arrays) |
+| `value` | `fmi2Integer[]` | Values to set (`const`, for the setter) or **output array** (for the getter) |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | All variables set / read successfully |
+| `fmi2Error` | Same conditions as `fmi2SetReal` / `fmi2GetReal`; the variable must be of type Integer |
+
+#### FMI State Requirements
+**Can be called in**: Same states as [`fmi2SetReal`](#fmi2setreal) and [`fmi2GetReal`](#fmi2getreal)
+**State transitions**: None on success. On error the FMU enters the error state
+
+#### Usage Example
+```c
+/* value references of the typed_demo model (position in its variable table) */
+const fmi2ValueReference VR_level = 5, VR_boost = 6;
+
+// Double the ramp rate
+fmi2Integer boost = 2;
+fmi2SetInteger(fmu, &VR_boost, 1, &boost);
+
+fmi2DoStep(fmu, time, 0.01, fmi2True);
+
+fmi2Integer level;
+fmi2GetInteger(fmu, &VR_level, 1, &level);
+```
+
+#### Related Functions
+- [`fmi2SetReal`](#fmi2setreal) / [`fmi2GetReal`](#fmi2getreal) - Same for real variables
+- [`fmi2SetBoolean / fmi2GetBoolean`](#fmi2setboolean--fmi2getboolean) - Same for boolean variables
+
+#### Notes
+- **Same rules as for Real variables**: See [Value References](#value-references) for which variables can be set when
+- **Discrete in the model description**: Integer inputs and outputs are declared with `variability="discrete"`, as required by FMI 2.0
+
+---
+
+### fmi2SetBoolean / fmi2GetBoolean
+
+Sets and reads boolean-valued variables.
+
+#### Signature
+```c
+fmi2Status fmi2SetBoolean(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          const fmi2Boolean value[]);
+
+fmi2Status fmi2GetBoolean(fmi2Component c,
+                          const fmi2ValueReference vr[],
+                          size_t nvr,
+                          fmi2Boolean value[]);
+```
+
+#### Description
+The boolean counterparts of `fmi2SetReal` and `fmi2GetReal`. A variable is a boolean variable if its field in the model's struct is of type `bool`.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `vr` | `const fmi2ValueReference[]` | Array of value references identifying the variables |
+| `nvr` | `size_t` | Number of value references (length of `vr` and `value` arrays) |
+| `value` | `fmi2Boolean[]` | Values to set (`const`, for the setter) or **output array** (for the getter) |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | All variables set / read successfully |
+| `fmi2Error` | Same conditions as `fmi2SetReal` / `fmi2GetReal`; the variable must be of type Boolean |
+
+#### FMI State Requirements
+**Can be called in**: Same states as [`fmi2SetReal`](#fmi2setreal) and [`fmi2GetReal`](#fmi2getreal)
+**State transitions**: None on success. On error the FMU enters the error state
+
+#### Usage Example
+```c
+/* value references of the typed_demo model (position in its variable table) */
+const fmi2ValueReference VR_limit_reached = 0, VR_enable = 1;
+
+// Stop the ramp
+fmi2Boolean enable = fmi2False;
+fmi2SetBoolean(fmu, &VR_enable, 1, &enable);
+
+fmi2Boolean limitReached;
+fmi2GetBoolean(fmu, &VR_limit_reached, 1, &limitReached);
+if (limitReached) {
+    /* ... */
+}
+```
+
+#### Related Functions
+- [`fmi2SetReal`](#fmi2setreal) / [`fmi2GetReal`](#fmi2getreal) - Same for real variables
+- [`fmi2SetInteger / fmi2GetInteger`](#fmi2setinteger--fmi2getinteger) - Same for integer variables
+
+#### Notes
+- **Type conversion**: `fmi2Boolean` is an `int` (`fmi2True` = 1, `fmi2False` = 0), the model stores a C `bool`. Any non-zero value is stored as `true`; the getter returns exactly `fmi2True` or `fmi2False`
+- **Discrete in the model description**: Boolean inputs and outputs are declared with `variability="discrete"`, as required by FMI 2.0
+
+---
+
+### fmi2SetString / fmi2GetString
+
+String variables are not supported.
+
+#### Signature
+```c
+fmi2Status fmi2SetString(fmi2Component c,
+                         const fmi2ValueReference vr[],
+                         size_t nvr,
+                         const fmi2String value[]);
+
+fmi2Status fmi2GetString(fmi2Component c,
+                         const fmi2ValueReference vr[],
+                         size_t nvr,
+                         fmi2String value[]);
+```
+
+#### Description
+The template does not support string variables, so no value reference is valid for these functions. They exist because the FMI 2.0 standard requires every FMU to export them.
+
+#### Parameters
+| Name | Type | Description |
+|------|------|-------------|
+| `c` | `fmi2Component` | The FMU instance |
+| `vr` | `const fmi2ValueReference[]` | Array of value references |
+| `nvr` | `size_t` | Number of value references |
+| `value` | `fmi2String[]` | Values |
+
+#### Return Values
+| Status | Condition |
+|--------|-----------|
+| `fmi2OK` | `nvr` is 0 |
+| `fmi2Error` | `nvr` is greater than 0, NULL component, call not allowed in the current state, or invalid arrays |
+
+#### FMI State Requirements
+**Can be called in**: Same states as [`fmi2SetReal`](#fmi2setreal) and [`fmi2GetReal`](#fmi2getreal)
+**State transitions**: None on success. On error the FMU enters the error state
+
+#### Usage Example
+```c
+// There are no string variables: only the empty call succeeds
+fmi2Status status = fmi2GetString(fmu, NULL, 0, NULL);  // fmi2OK
+```
+
+#### Related Functions
+- [`fmi2SetReal`](#fmi2setreal) / [`fmi2GetReal`](#fmi2getreal) - Access to real variables
+
+#### Notes
+- **Fails loudly**: A call with a value reference returns `fmi2Error` instead of reporting success without doing anything
 
 ---
 
@@ -823,12 +1012,12 @@ The implementation uses **adaptive sub-stepping** to maintain numerical accuracy
 
 1. **Calculate sub-steps**:
    ```c
-   numberOfSteps = floor(communicationStepSize / MAX_SOLVER_STEPSIZE)
-   stepRemainder = communicationStepSize - (numberOfSteps * MAX_SOLVER_STEPSIZE)
+   numberOfSteps = floor(communicationStepSize / maxStepSize)
+   stepRemainder = communicationStepSize - (numberOfSteps * maxStepSize)
    ```
 
 2. **Execute full steps**:
-   - Take `numberOfSteps` steps of size `MAX_SOLVER_STEPSIZE`
+   - Take `numberOfSteps` steps of size `maxStepSize`
    - Each step: compute derivatives → integrate states
 
 3. **Handle remainder**:
@@ -839,7 +1028,7 @@ The implementation uses **adaptive sub-stepping** to maintain numerical accuracy
    - Advance internal clock by `communicationStepSize`
    - Compute outputs from final state
 
-**Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `MAX_SOLVER_STEPSIZE = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
+**Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
 
 #### Time Consistency Validation
 
@@ -890,7 +1079,7 @@ fmi2FreeInstance(fmu);
 
 #### Sub-Stepping Example
 
-**Scenario**: Integration tool requests 0.025 s step, but `MAX_SOLVER_STEPSIZE = 0.01 s`
+**Scenario**: Integration tool requests 0.025 s step, but `maxStepSize = 0.01 s`
 
 **Execution**:
 1. Calculate: `numberOfSteps = 2`, `stepRemainder = 0.005 s`
@@ -913,7 +1102,7 @@ fmi2FreeInstance(fmu);
 - **Sub-stepping is transparent**: Integration tool only sees communication steps, internal sub-stepping is hidden
 - **Zero-order hold assumption**: Inputs are assumed constant during each communication step (FMI standard)
 - **Outputs computed once**: After all sub-steps complete, not after each internal step
-- **MAX_SOLVER_STEPSIZE configurable**: Defined in `model_config.h` (default: 1e-3 s)
+- **maxStepSize configurable**: Field of the model definition in the model's `variables.c`
 - **EPSILON = 1e-9 s**: Threshold for "numerically insignificant" - balances precision vs performance
 - **Integer loop counter**: Avoids floating-point accumulation errors in sub-step counting
 - **Time consistency enforced**: Returns error if `currentCommunicationPoint` doesn't match internal clock
@@ -922,9 +1111,9 @@ fmi2FreeInstance(fmu);
 
 #### Configuration
 
-Adjust in `model_config.h`:
+Adjust in the model definition (`src/models/<model_name>/variables.c`):
 ```c
-#define MAX_SOLVER_STEPSIZE 1e-3  // Maximum stable integration step (1 ms default)
+    .maxStepSize = 1e-3,  // Maximum stable integration step
 ```
 
 Smaller values → more stable but slower
@@ -1084,7 +1273,7 @@ fmi2Status fmi2Reset(fmi2Component c);
 ```
 
 #### Description
-Resets the FMU back to its post-instantiation state without freeing and reallocating memory. All mutable simulation state (time, model arrays, function pointers) is cleared, while the instance identity (name, callbacks, FMU type, log level) is preserved. After a successful reset, the caller must repeat the full initialization cycle (`fmi2SetupExperiment` → `fmi2EnterInitializationMode` → `fmi2ExitInitializationMode`) before stepping again.
+Resets the FMU back to its post-instantiation state without freeing and reallocating memory. The simulation time is cleared and all model variables are set back to their start values, while the instance identity (name, callbacks, FMU type, log level) is preserved. After a successful reset, the caller must repeat the full initialization cycle (`fmi2SetupExperiment` → `fmi2EnterInitializationMode` → `fmi2ExitInitializationMode`) before stepping again.
 
 This function is the preferred alternative to destroying and recreating the FMU when running repeated simulations (e.g., parameter sweeps or optimization loops), since it avoids the overhead of memory reallocation.
 
@@ -1107,12 +1296,10 @@ This function is the preferred alternative to destroying and recreating the FMU 
 | Category | Behavior |
 |----------|----------|
 | Simulation time | `startTime`, `stopTime`, `time` → `0.0` |
-| Model states | All zeroed |
+| Parameters, inputs, states | Back to the start values of the model's variable table |
+| Outputs | All zeroed (computed again in `fmi2ExitInitializationMode`) |
 | State derivatives | All zeroed |
-| Inputs | All zeroed |
-| Outputs | All zeroed |
-| Parameters | All zeroed (re-applied from `INITIAL_PARAMS` during `fmi2EnterInitializationMode`) |
-| Function pointers | Set to `NULL` (re-bound during `fmi2EnterInitializationMode`) |
+| Function pointers | Re-bound from the model definition |
 | FMU state machine | → `stateInstantiated` |
 
 #### What Is Preserved
@@ -1143,7 +1330,7 @@ fmi2Reset(fmu);
 fmi2SetupExperiment(fmu, fmi2False, 0.0, 0.0, fmi2True, 2.0);
 fmi2EnterInitializationMode(fmu);
 // Override a parameter before exiting init mode
-fmi2ValueReference paramRef = 0;
+fmi2ValueReference paramRef = 0;  // tau (first_order)
 fmi2Real newTau = 0.5;
 fmi2SetReal(fmu, &paramRef, 1, &newTau);
 fmi2ExitInitializationMode(fmu);
@@ -1193,8 +1380,8 @@ fmi2FreeInstance(fmu);
 
 #### Notes
 - **Soft re-instantiation**: Avoids the cost of `fmi2FreeInstance` + `fmi2Instantiate` by reusing existing memory allocations
-- **Function pointers cleared to NULL**: This is intentional — calling `fmi2DoStep` on a reset-but-uninitialized FMU will crash immediately (NULL dereference) rather than silently computing with stale equation bindings
-- **Parameters are zeroed, not restored**: Initial parameter values from `INITIAL_PARAMS` are re-applied during `fmi2EnterInitializationMode`, not during Reset. This matches the FMI spec: Reset returns to the post-Instantiate state, where parameters have not yet been set
+- **Same state as after instantiation**: Reset and `fmi2Instantiate` share one function (`resetModel()`), so the variables are guaranteed to be identical in both cases. Values set before the reset are discarded
+- **Stepping still requires initialization**: `fmi2DoStep` on a reset-but-uninitialized FMU is rejected by the state machine
 - **Error state recovery**: Reset can be called from error states, providing a way to recover without destroying the instance
 - **Log level preserved**: The logging configuration survives a reset, which is useful for debugging repeated runs
 

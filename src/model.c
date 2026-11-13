@@ -1,92 +1,151 @@
-/**************************************************************************************************
-*                                                                                                 *
-* This file is part of fmuTemplate.                                                               *
-*                                                                                                 *
-* fmuTemplate -- A template for Co-Simulation FMUs written in C.                                  *
-* Copyright (C) 2025 Timothy Werner                                                               *
-*                                                                                                 *
-* SPDX-License-Identifier: MIT                                                                    *
-*                                                                                                 *
-**************************************************************************************************/
-
 #include <stdlib.h>
+#include <string.h>
 #include "model.h"
 
 /**
- * Implementation notes for newModel():
- * - Uses malloc() for modelInstance and modelInfo to avoid zero-initialization overhead
- * - Uses calloc() for all arrays to ensure zero-initialization of data
- * - On any allocation failure, calls freeModel() to clean up partial allocations
- * - Function pointers initialized to NULL; caller must set them before use
- * - Memory allocation order: instance -> info -> parameters -> inputs -> outputs -> states -> derivatives
+ * Allocates a zero-initialized block of the given size.
+ *
+ * A block of size 0 is valid (e.g. a model without inputs) and is
+ * represented by NULL. The return value tells whether the allocation
+ * succeeded, since NULL alone cannot distinguish the two cases.
  */
-modelInstance* newModel(size_t nx, size_t nu, size_t ny, size_t np)
+static bool allocateBlock(void** block, size_t size)
 {
-    modelInstance* model = malloc(sizeof(modelInstance));
+    if (size == 0) {
+        *block = NULL;
+        return true;
+    }
+
+    *block = calloc(1, size);
+    return *block != NULL;
+}
+
+/**
+ * Implementation notes for newModel():
+ * - Uses calloc() for the instance so that freeModel() can clean up a
+ *   partially allocated instance (unallocated blocks are NULL)
+ * - Blocks of size 0 are not allocated and stay NULL
+ * - Start values and function pointers are set by resetModel()
+ */
+modelInstance* newModel(const modelDefinition* def)
+{
+    if (!def) {
+        return NULL;
+    }
+
+    modelInstance* model = calloc(1, sizeof(modelInstance));
     if (!model) {
         return NULL;
     }
 
-    /* Allocate model metadata */
-    model->info = malloc(sizeof(modelInfo));
-    if (!model->info) {
-        free(model);
-        return NULL;
-    }
+    model->def = def;
 
-    /* Initialize metadata with system dimensions */
-    model->info->numberOfParameter = np;
-    model->info->numberOfInputs = nu;
-    model->info->numberOfOutputs = ny;
-    model->info->numberOfStates = nx;
-
-    /* Allocate and zero-initialize parameter array */
-    model->parameter = calloc(model->info->numberOfParameter, sizeof(double));
-    if (!model->parameter) {
+    /* Allocate and zero-initialize all storage blocks */
+    size_t sizeOfStates = def->numberOfStates * sizeof(double);
+    if (!allocateBlock(&model->params, def->sizeOfParams) ||
+        !allocateBlock(&model->inputs, def->sizeOfInputs) ||
+        !allocateBlock(&model->outputs, def->sizeOfOutputs) ||
+        !allocateBlock((void**)&model->states, sizeOfStates) ||
+        !allocateBlock((void**)&model->stateDerivatives, sizeOfStates)) {
         freeModel(model);
         return NULL;
     }
 
-    /* Allocate and zero-initialize input array */
-    model->inputs = calloc(model->info->numberOfInputs, sizeof(double));
-    if (!model->inputs) {
-        freeModel(model);
-        return NULL;
-    }
-
-    /* Allocate and zero-initialize output array */
-    model->outputs = calloc(model->info->numberOfOutputs, sizeof(double));
-    if (!model->outputs) {
-        freeModel(model);
-        return NULL;
-    }
-
-    /* Allocate and zero-initialize state array */
-    model->states = calloc(model->info->numberOfStates, sizeof(double));
-    if (!model->states) {
-        freeModel(model);
-        return NULL;
-    }
-
-    /* Allocate and zero-initialize state derivative array */
-    model->stateDerivatives = calloc(model->info->numberOfStates, sizeof(double));
-    if (!model->stateDerivatives) {
-        freeModel(model);
-        return NULL;
-    }
-
-    /* Initialize function pointers to NULL - caller must set these */
-    model->getStateDerivatives = NULL;
-    model->getOutputs = NULL;
-    model->integrate = NULL;
+    /* Apply start values and bind function pointers */
+    resetModel(model);
 
     return model;
 }
 
 /**
+ * Implementation notes for resetModel():
+ * - memset() on a NULL block is avoided by checking the block size
+ * - Start values are stored as double in the variable table and converted
+ *   to the variable's type here
+ */
+void resetModel(modelInstance* model)
+{
+    if (!model) {
+        return;
+    }
+
+    const modelDefinition* def = model->def;
+    size_t sizeOfStates = def->numberOfStates * sizeof(double);
+
+    /* Zero all storage blocks */
+    if (def->sizeOfParams > 0) {
+        memset(model->params, 0, def->sizeOfParams);
+    }
+    if (def->sizeOfInputs > 0) {
+        memset(model->inputs, 0, def->sizeOfInputs);
+    }
+    if (def->sizeOfOutputs > 0) {
+        memset(model->outputs, 0, def->sizeOfOutputs);
+    }
+    if (sizeOfStates > 0) {
+        memset(model->states, 0, sizeOfStates);
+        memset(model->stateDerivatives, 0, sizeOfStates);
+    }
+
+    /* Write the start value of every published variable */
+    for (size_t k = 0; k < def->numberOfVariables; k++) {
+        const modelVariable* variable = &def->variables[k];
+        void* address = modelVariableAddress(model, k);
+
+        switch (variable->type) {
+            case VAR_REAL:
+                *(double*)address = variable->start;
+                break;
+            case VAR_INTEGER:
+                *(int*)address = (int)variable->start;
+                break;
+            case VAR_BOOLEAN:
+                *(bool*)address = (variable->start != 0.0);
+                break;
+        }
+    }
+
+    /* Bind function pointers */
+    model->getStateDerivatives = def->getStateDerivatives;
+    model->integrate = def->integrate;
+    model->getOutputs = def->getOutputs;
+}
+
+/**
+ * Implementation notes for modelVariableAddress():
+ * - The variable's role selects the storage block
+ * - Pointer arithmetic is done on char* because the offset is in bytes
+ */
+void* modelVariableAddress(modelInstance* model, size_t index)
+{
+    if (!model || index >= model->def->numberOfVariables) {
+        return NULL;
+    }
+
+    const modelVariable* variable = &model->def->variables[index];
+    char* block = NULL;
+
+    switch (variable->role) {
+        case VAR_PARAMETER:
+            block = model->params;
+            break;
+        case VAR_INPUT:
+            block = model->inputs;
+            break;
+        case VAR_OUTPUT:
+            block = model->outputs;
+            break;
+        case VAR_STATE:
+            block = (char*)model->states;
+            break;
+    }
+
+    return block + variable->offset;
+}
+
+/**
  * Implementation notes for freeModel():
- * - NULL checks before free() are redundant (C standard guarantees free(NULL) is safe)
- *   but included here for defensive programming and clarity
+ * - free(NULL) is safe, so blocks of size 0 need no special handling
  * - Order of freeing doesn't matter as there are no pointer dependencies
  * - Always frees the model instance itself last
  */
@@ -97,8 +156,7 @@ void freeModel(modelInstance* model)
     }
 
     /* Free all dynamically allocated members */
-    free(model->info);
-    free(model->parameter);
+    free(model->params);
     free(model->inputs);
     free(model->outputs);
     free(model->states);

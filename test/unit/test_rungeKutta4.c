@@ -5,6 +5,14 @@
 
 #define TOLERANCE 1e-10
 
+/* Minimal model definitions: the integrators only need the number of states */
+static const modelDefinition ONE_STATE    = { .numberOfStates = 1 };
+static const modelDefinition TWO_STATES   = { .numberOfStates = 2 };
+
+/* Model with one state and one parameter (decay rate k) */
+typedef struct { double k; } Params;
+static const modelDefinition ONE_STATE_ONE_PARAM = { .numberOfStates = 1, .sizeOfParams = sizeof(Params) };
+
 static modelInstance* model;
 
 /* Always returns the pre-set stateDerivatives unchanged */
@@ -14,7 +22,7 @@ static void constantDerivative(modelInstance* m) {
 
 /* Simple derivative: dx/dt = -k * x (exponential decay) */
 static void exponentialDecay(modelInstance* m) {
-    double k = m->parameter[0];
+    double k = ((const Params*)m->params)->k;
     m->stateDerivatives[0] = -k * m->states[0];
 }
 
@@ -32,7 +40,7 @@ void tearDown(void) {
 }
 
 void test_rungeKutta4_singleStateWithConstantDerivative(void) {
-    model = newModel(1, 0, 0, 0);
+    model = newModel(&ONE_STATE);
     model->stateDerivatives[0] = 2.0;
     model->getStateDerivatives = constantDerivative;
 
@@ -42,7 +50,7 @@ void test_rungeKutta4_singleStateWithConstantDerivative(void) {
 }
 
 void test_rungeKutta4_zeroStepSize(void) {
-    model = newModel(1, 0, 0, 0);
+    model = newModel(&ONE_STATE);
     model->states[0] = 5.0;
     model->stateDerivatives[0] = 1.0;
     model->getStateDerivatives = constantDerivative;
@@ -52,7 +60,7 @@ void test_rungeKutta4_zeroStepSize(void) {
 }
 
 void test_rungeKutta4_multipleStates(void) {
-    model = newModel(2, 0, 0, 0);
+    model = newModel(&TWO_STATES);
     model->states[0] = 1.0;    /* x1(0) = 1 */
     model->states[1] = 0.0;    /* x2(0) = 0 */
     model->getStateDerivatives = harmonicOscillator;
@@ -69,9 +77,9 @@ void test_rungeKutta4_multipleStates(void) {
 }
 
 void test_rungeKutta4_exponentialDecay(void) {
-    model = newModel(1, 0, 0, 1);
+    model = newModel(&ONE_STATE_ONE_PARAM);
     model->states[0] = 1.0;
-    model->parameter[0] = 1.0;  /* k = 1.0 */
+    ((Params*)model->params)->k = 1.0;  /* k = 1.0 */
     model->getStateDerivatives = exponentialDecay;
 
     double dt = 0.1;
@@ -97,9 +105,9 @@ void test_rungeKutta4_orderOfAccuracy(void) {
     double stepSizes[2] = {0.2, 0.1};
 
     for (int run = 0; run < 2; run++) {
-        modelInstance* m = newModel(1, 0, 0, 1);
+        modelInstance* m = newModel(&ONE_STATE_ONE_PARAM);
         m->states[0] = 1.0;
-        m->parameter[0] = 1.0;
+        ((Params*)m->params)->k = 1.0;
         m->getStateDerivatives = exponentialDecay;
 
         double dt = stepSizes[run];
@@ -119,14 +127,14 @@ void test_rungeKutta4_orderOfAccuracy(void) {
     TEST_ASSERT_DOUBLE_WITHIN(2.0, 16.0, ratio);
 
     /* Set model so tearDown doesn't double-free */
-    model = newModel(1, 0, 0, 0);
+    model = newModel(&ONE_STATE);
 }
 
 void test_rungeKutta4_statesRestoredAfterStep(void) {
     /* Verify that after a step, states contain the final result (not intermediate) */
-    model = newModel(1, 0, 0, 1);
+    model = newModel(&ONE_STATE_ONE_PARAM);
     model->states[0] = 1.0;
-    model->parameter[0] = 1.0;
+    ((Params*)model->params)->k = 1.0;
     model->getStateDerivatives = exponentialDecay;
 
     model->getStateDerivatives(model);

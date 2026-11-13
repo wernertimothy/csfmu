@@ -1,14 +1,3 @@
-/**************************************************************************************************
-*                                                                                                 *
-* This file is part of fmuTemplate.                                                               *
-*                                                                                                 *
-* fmuTemplate -- A template for Co-Simulation FMUs written in C.                                  *
-* Copyright (C) 2025 Timothy Werner                                                               *
-*                                                                                                 *
-* SPDX-License-Identifier: MIT                                                                    *
-*                                                                                                 *
-**************************************************************************************************/
-
 #include "integrator.h"
 #include "model.h"
 #include <string.h>
@@ -25,7 +14,7 @@
 void eulerForward(modelInstance* model, double stepSize)
 {
     /* Integrate all states using explicit Euler formula */
-    for (size_t k = 0; k < model->info->numberOfStates; k++) {
+    for (size_t k = 0; k < model->def->numberOfStates; k++) {
         model->states[k] += model->stateDerivatives[k] * stepSize;
     }
 }
@@ -46,7 +35,7 @@ void eulerForward(modelInstance* model, double stepSize)
  */
 void rungeKutta4(modelInstance* model, double stepSize)
 {
-    size_t nx = model->info->numberOfStates;
+    size_t nx = model->def->numberOfStates;
     double k1[nx], k2[nx], k3[nx], k4[nx], stateBackup[nx];
 
     /* k1 = f(x) — reuse already-computed derivatives */

@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "model.h"
-#include "integrator.h"
+#include "first_order/variables.h"
 
 /**
  * This is an example of how to use the model to run a basic simulation
@@ -17,28 +17,25 @@
 int main() {
 
     /* begin model config */
-    
-    /* dimensions */
-    size_t nx = 1;       ///> number of states
-    size_t nu = 1;       ///> number of inputs
-    size_t ny = 1;       ///> number of output
-    size_t np = 2;       ///> number of parameter
-    
+
     /* parameter */
     double tau = 0.15;   ///> PT1 time constant
     double k   = 1.0;    ///> PT1 gain
     double x0  = 0.0;    ///> initial condition
-    
-    /* instantiate model */
-    modelInstance* model  = newModel(nx, nu, ny, np);
-    
+
+    /* instantiate model (all variables hold their start values) */
+    modelInstance* model = newModel(&MODEL_DEFINITION);
+
+    /* access the model variables by name */
+    Params*  params  = model->params;
+    Inputs*  inputs  = model->inputs;
+    Outputs* outputs = model->outputs;
+    States*  states  = (States*)model->states;
+
     /* initialize model*/
-    model->getStateDerivatives = firstOrderSystem;  ///> system equations
-    model->getOutputs          = firstOrderOutputs; ///> y = x
-    model->integrate           = eulerForward;      ///> numeric integrator
-    model->parameter[0]        = tau;              
-    model->parameter[1]        = k;               
-    model->states[0]           = x0;
+    params->tau = tau;
+    params->k   = k;
+    states->x   = x0;
     model->getOutputs(model);
     
     /* begin  simulation */
@@ -51,10 +48,10 @@ int main() {
     int N = (int) T/dt;
     for (int k=0; k<N; k++) {
         /* log current state */
-        printf("t = %.2f, y = %.2f\n", time, model->outputs[0]);
+        printf("t = %.2f, y = %.2f\n", time, outputs->y);
 
         /* set model inputs */
-        model->inputs[0] = 1.0;
+        inputs->u = 1.0;
 
         /* step in time */
         model->getStateDerivatives(model);
@@ -65,7 +62,7 @@ int main() {
         model->getOutputs(model);
     }
     /* log current state */
-    printf("t = %.2f, y = %.2f\n", time, model->outputs[0]);
+    printf("t = %.2f, y = %.2f\n", time, outputs->y);
 
 
     /* free model memory */

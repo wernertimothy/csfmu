@@ -1,15 +1,4 @@
-/**************************************************************************************************
-*                                                                                                 *
-* This file is part of fmuTemplate.                                                               *
-*                                                                                                 *
-* fmuTemplate -- A template for Co-Simulation FMUs written in C.                                  *
-* Copyright (C) 2025 Timothy Werner                                                               *
-*                                                                                                 *
-* SPDX-License-Identifier: MIT                                                                    *
-*                                                                                                 *
-**************************************************************************************************/
-
-#include "model.h"
+#include "variables.h"
 #include <cmath>
 
 /**
@@ -28,22 +17,22 @@
  */
 class PendulumOnCart {
 public:
-    PendulumOnCart(double* states, double* inputs, double* params)
-        : x_dot(states[1]),
-          theta(states[2]), theta_dot(states[3]),
-          F(inputs[0]),
-          M(params[0]), m(params[1]), l(params[2]), g(params[3]) {}
+    PendulumOnCart(const States& states, const Inputs& inputs, const Params& params)
+        : x_dot(states.x_dot),
+          theta(states.theta), theta_dot(states.theta_dot),
+          F(inputs.F),
+          M(params.M), m(params.m), l(params.l), g(params.g) {}
 
-    void derivatives(double* dx) const {
+    void derivatives(States& dx) const {
         double sinTh = std::sin(theta);
         double cosTh = std::cos(theta);
         double denom = M + m * sinTh * sinTh;
 
-        dx[0] = x_dot;
-        dx[1] = (F + m * sinTh * (l * theta_dot * theta_dot + g * cosTh)) / denom;
-        dx[2] = theta_dot;
-        dx[3] = (-F * cosTh - m * l * theta_dot * theta_dot * cosTh * sinTh
-                 - (M + m) * g * sinTh) / (l * denom);
+        dx.x         = x_dot;
+        dx.x_dot     = (F + m * sinTh * (l * theta_dot * theta_dot + g * cosTh)) / denom;
+        dx.theta     = theta_dot;
+        dx.theta_dot = (-F * cosTh - m * l * theta_dot * theta_dot * cosTh * sinTh
+                        - (M + m) * g * sinTh) / (l * denom);
     }
 
 private:
@@ -60,20 +49,30 @@ extern "C" {
  * Computes the four state derivatives for the inverted pendulum system.
  */
 void pendulumOnCartSystem(modelInstance* model) {
-    PendulumOnCart p(model->states, model->inputs, model->parameter);
-    p.derivatives(model->stateDerivatives);
+    /* View the storage blocks through the structs from variables.h.
+     * C++ needs explicit casts where C converts void* implicitly. */
+    const States& states = *reinterpret_cast<const States*>(model->states);
+    const Inputs& inputs = *static_cast<const Inputs*>(model->inputs);
+    const Params& params = *static_cast<const Params*>(model->params);
+    States&       dx     = *reinterpret_cast<States*>(model->stateDerivatives);
+
+    PendulumOnCart p(states, inputs, params);
+    p.derivatives(dx);
 }
 
 /**
  * Pendulum on cart output equation: y = h(x, u)
  *
  * Outputs:
- *   y[0] = cart position (x)
- *   y[1] = pendulum angle (theta)
+ *   x     = cart position
+ *   theta = pendulum angle
  */
 void pendulumOnCartOutputs(modelInstance* model) {
-    model->outputs[0] = model->states[0];  /* cart position */
-    model->outputs[1] = model->states[2];  /* pendulum angle */
+    const States& states  = *reinterpret_cast<const States*>(model->states);
+    Outputs&      outputs = *static_cast<Outputs*>(model->outputs);
+
+    outputs.x     = states.x;      /* cart position */
+    outputs.theta = states.theta;  /* pendulum angle */
 }
 
 }  /* extern "C" */

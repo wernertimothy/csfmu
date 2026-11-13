@@ -74,8 +74,10 @@ int main() {
     /* begin simulation */
     double y = 0.0;
     double u = 1.0;
-    const fmi2ValueReference VR_y = 3;
+    /* value reference = position of the variable in the VARIABLES table of
+     * src/models/first_order/variables.c (see also build/modelDescription.xml) */
     const fmi2ValueReference VR_u = 2;
+    const fmi2ValueReference VR_y = 3;
 
     /* deactivate logging */
     fmuStatus = fmi2SetDebugLogging(fmu, fmi2False, 0, NULL);

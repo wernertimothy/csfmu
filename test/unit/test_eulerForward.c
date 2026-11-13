@@ -5,6 +5,10 @@
 
 #define TOLERANCE 1e-10
 
+/* Minimal model definitions: the integrators only need the number of states */
+static const modelDefinition ONE_STATE    = { .numberOfStates = 1 };
+static const modelDefinition THREE_STATES = { .numberOfStates = 3 };
+
 static modelInstance* model;
 
 void setUp(void) {
@@ -15,28 +19,28 @@ void tearDown(void) {
 }
 
 void test_eulerForward_singleStateWithConstantDerivative(void) {
-    model = newModel(1,0,0,0);
+    model = newModel(&ONE_STATE);
     model->stateDerivatives[0] = 2.0;
     eulerForward(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.2, model->states[0]);
 }
 
 void test_eulerForward_singleStateWithZeroDerivative(void) {
-    model = newModel(1,0,0,0);
+    model = newModel(&ONE_STATE);
     model->states[0] = 2.0;
     eulerForward(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 2.0, model->states[0]);
 }
 
 void test_eulerForward_singleStateWithNegativeDerivative(void) {
-    model = newModel(1,0,0,0);
+    model = newModel(&ONE_STATE);
     model->stateDerivatives[0] = -2.0;
     eulerForward(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, -0.2, model->states[0]);
 }
 
 void test_eulerForward_zeroStepSize(void) {
-    model = newModel(1,0,0,0);
+    model = newModel(&ONE_STATE);
     model->states[0] = 5.0;
     model->stateDerivatives[0] = 1.0;
     eulerForward(model, 0.0);
@@ -44,7 +48,7 @@ void test_eulerForward_zeroStepSize(void) {
 }
 
 void test_eulerForward_multipleStates(void) {
-      modelInstance* m = newModel(3, 0, 0, 0);
+      modelInstance* m = newModel(&THREE_STATES);
       m->states[0] = 1.0;
       m->states[1] = 2.0;
       m->states[2] = 3.0;
@@ -60,7 +64,7 @@ void test_eulerForward_multipleStates(void) {
 }
 
 void test_eulerForward_variableStepSize(void) {
-    model = newModel(1,0,0,0);
+    model = newModel(&ONE_STATE);
     model->states[0] = 1.0;
     model->stateDerivatives[0] = 2.0;
 
@@ -71,7 +75,7 @@ void test_eulerForward_variableStepSize(void) {
 }
 
 void test_eulerForward_multipleSteps(void) {
-    modelInstance* m = newModel(1, 0, 0, 0);
+    modelInstance* m = newModel(&ONE_STATE);
     m->states[0] = 0.0;
     m->stateDerivatives[0] = 1.0;
 
@@ -90,7 +94,7 @@ void test_eulerForward_multipleSteps(void) {
 
 void test_eulerForward_exponentialDecay(void) {
     // Setup: dx/dt = -1.0 * x  (k = 1.0)
-    modelInstance* m = newModel(1, 0, 0, 0);
+    modelInstance* m = newModel(&ONE_STATE);
     m->states[0] = 1.0;  // Initial condition
 
     double k = 1.0;

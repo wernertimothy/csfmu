@@ -45,10 +45,6 @@ endif()
 # Library name matches the model name (produces first_order.dylib/.so/.dll)
 set(LIB_NAME "${MODEL}")
 
-# Normalize model name to uppercase for preprocessor define
-string(TOUPPER ${MODEL} MODEL_UPPER)
-set(MODEL_DEFINE "MODEL_${MODEL_UPPER}")
-
 # Output directory for packaged FMU (User can override with -DFMU_OUTPUT_DIR=<path>)
 set(FMU_OUTPUT_DIR "${CMAKE_BINARY_DIR}" CACHE PATH "Directory where the packaged .fmu file is placed")
 
@@ -61,7 +57,13 @@ set(FMU_SOURCES
     src/fmi2Functions.c
 )
 
-# Model (FMU-agnostic)
+# Model core (FMU-agnostic and model-agnostic)
+set(CORE_SOURCES
+    src/model.c
+    src/integrator.c
+)
+
+# Selected model (FMU-agnostic)
 # Auto-detect C or C++ model equations
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/equations.cpp")
     set(MODEL_EQUATIONS "src/models/${MODEL}/equations.cpp")
@@ -71,9 +73,14 @@ else()
     message(FATAL_ERROR "No equations.c or equations.cpp found for model '${MODEL}'")
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/variables.c")
+    message(FATAL_ERROR "No variables.c found for model '${MODEL}'")
+endif()
+
+# The model is selected at link time: variables.c defines MODEL_DEFINITION
 set(MODEL_SOURCES
-    src/model.c
-    src/integrator.c
+    ${CORE_SOURCES}
+    src/models/${MODEL}/variables.c
     ${MODEL_EQUATIONS}
 )
 
@@ -91,10 +98,6 @@ target_include_directories(${LIB_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/external/fmi2/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
-)
-
-target_compile_definitions(${LIB_NAME} PRIVATE
-    ${MODEL_DEFINE}
 )
 
 # Set the output name to match FMI requirements
@@ -124,19 +127,55 @@ target_include_directories(${LIB_NAME}_static PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
 )
 
-target_compile_definitions(${LIB_NAME}_static PRIVATE
-    ${MODEL_DEFINE}
+#==============================================================================
+# 6. Model core static library for unit tests (no model, no FMI)
+#==============================================================================
+
+add_library(model_core STATIC
+    ${CORE_SOURCES}
+)
+
+target_include_directories(model_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 #==============================================================================
-# 6. Subdirectories
+# 7. Subdirectories
 #==============================================================================
 
 add_subdirectory(examples)
 add_subdirectory(test/unit)
 
 #==============================================================================
-# 7. FMU packaging
+# 8. modelDescription.xml generation
+#==============================================================================
+
+# The generator is linked against the selected model and writes the
+# modelDescription.xml from its MODEL_DEFINITION. It runs on the build
+# machine, so cross-compiling is not supported.
+add_executable(generate_model_description
+    src/fmi2ModelDescription.c
+)
+
+target_link_libraries(generate_model_description PRIVATE ${LIB_NAME}_static)
+
+set(MODEL_DESCRIPTION_XML "${CMAKE_BINARY_DIR}/modelDescription.xml")
+
+add_custom_command(
+    OUTPUT ${MODEL_DESCRIPTION_XML}
+    COMMAND generate_model_description ${MODEL_DESCRIPTION_XML}
+    DEPENDS generate_model_description
+    COMMENT "Generating modelDescription.xml for model '${MODEL}' ..."
+    VERBATIM
+)
+
+add_custom_target(model_description DEPENDS ${MODEL_DESCRIPTION_XML})
+
+# The FMU can only be packaged once the modelDescription.xml exists
+add_dependencies(${LIB_NAME} model_description)
+
+#==============================================================================
+# 9. FMU packaging
 #==============================================================================
 
 # Install shared library to FMU binaries direction
@@ -166,7 +205,7 @@ add_custom_command(
     COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package_fmu.py
         $<TARGET_FILE:${LIB_NAME}>
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/modelDescription.xml
+        ${MODEL_DESCRIPTION_XML}
         ${FMU_OUTPUT_DIR}
         ${LIB_NAME}
     COMMENT "Packaging FMU to ${FMU_OUTPUT_DIR}/${LIB_NAME}.fmu ..."

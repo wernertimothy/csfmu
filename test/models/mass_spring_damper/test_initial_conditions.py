@@ -3,14 +3,14 @@ import fmpy
 from pathlib import Path
 
 
-def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path) -> None:
+def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial parameter values match modelDescription.xml for mass_spring_damper model.
 
     Expected:
-        - m (VR=0): 1.0 (mass)
-        - k (VR=1): 1.0 (spring stiffness)
-        - d (VR=2): 1.0 (damping coefficient)
+        - m: 1.0 (mass)
+        - k: 1.0 (spring stiffness)
+        - d: 1.0 (damping coefficient)
     """
     model_description = fmpy.read_model_description(path_to_fmu)
 
@@ -31,7 +31,7 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path) -> No
     fmu.enterInitializationMode()
     fmu.exitInitializationMode()
 
-    params = fmu.getReal([0, 1, 2])
+    params = fmu.getReal([vr("m"), vr("k"), vr("d")])
 
     assert abs(params[0] - 1.0) < 1e-9, f"Expected m = 1.0, got {params[0]}"
     assert abs(params[1] - 1.0) < 1e-9, f"Expected k = 1.0, got {params[1]}"
@@ -41,12 +41,12 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path) -> No
     fmu.freeInstance()
 
 
-def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
+def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial input values match modelDescription.xml for mass_spring_damper model.
 
     Expected:
-        - u (VR=3): 0.0 (external force)
+        - u: 0.0 (external force)
     """
     model_description = fmpy.read_model_description(path_to_fmu)
 
@@ -67,7 +67,7 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
     fmu.enterInitializationMode()
     fmu.exitInitializationMode()
 
-    u_initial = fmu.getReal([3])[0]
+    u_initial = fmu.getReal([vr("u")])[0]
 
     assert abs(u_initial - 0.0) < 1e-9, f"Expected u = 0.0, got {u_initial}"
 
@@ -75,13 +75,13 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
     fmu.freeInstance()
 
 
-def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
+def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial output values for mass_spring_damper model.
 
     Expected:
-        - x (VR=4): 0.0 (position starts at equilibrium)
-        - v (VR=5): 0.0 (velocity starts at zero)
+        - x: 0.0 (position starts at equilibrium)
+        - v: 0.0 (velocity starts at zero)
     """
     model_description = fmpy.read_model_description(path_to_fmu)
 
@@ -102,7 +102,7 @@ def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
     fmu.enterInitializationMode()
     fmu.exitInitializationMode()
 
-    outputs = fmu.getReal([4, 5])
+    outputs = fmu.getReal([vr("x"), vr("v")])
 
     assert abs(outputs[0] - 0.0) < 1e-9, f"Expected x = 0.0, got {outputs[0]}"
     assert abs(outputs[1] - 0.0) < 1e-9, f"Expected v = 0.0, got {outputs[1]}"

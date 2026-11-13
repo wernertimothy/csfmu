@@ -21,13 +21,22 @@ The Project is structured as follows.
 
 **Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. Each model also has a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
 
-## Core principal of fmuTemplate
+## Core principle of fmuTemplate
 
 This template is offering an expandable library of models with minimum restrictive implementation specifications alongside a model independent fmi implementation.
 
-The current model implementation restrictions are:
-* all model parameter, inputs, ouputs, states and state derivatives have double precision and are thus of type **fmi2Real**.
-* the order of **ModelVariables** in the `modelDescription.xml` is fixed to allow a model independent impementation of **fmi2GetReal** and **fmi2SetReal**.
+The two sides are kept apart by one idea: **a model describes its variables once, in a plain C table.**
+
+* The **model** knows nothing about FMI. It declares its parameters, inputs, outputs and states as ordinary C structs and lists them in a table (name, start value, unit, ...).
+* The **FMI implementation** knows nothing about the model. It finds every variable through that table.
+* The **`modelDescription.xml`** is generated from the same table during the build. You never write it by hand, and you never deal with value references.
+
+As a consequence there are no ordering rules: variables can be declared in any order and can be of type `double`, `int` or `bool`.
+
+The model implementation restrictions that remain are:
+* the model is described by **dx = f(t,x,u)** and **y = h(t,x,u)**.
+* continuous states are of type `double` (the numerical integrators work on a vector of doubles).
+* string variables are not supported.
 
 ## How to Build the FMU
 
@@ -52,13 +61,73 @@ Second, add the following files and fill them with life:
 
 | File | Content |
 |------|-------------|
-|**equations.c** or **equations.cpp** | The state and output equations, that describe your model (C or C++) |
-| **model_config.h** | Mappings, that connect your model with the FMI, as well as the configuration of the solver, model dimensions, initial states, etc. |
-| **modelDescription.xml** | FMI specific meta data about your FMU
+| **variables.h** | The variables of your model as C structs, and the declarations of your equations |
+| **variables.c** | The table of published variables and the model definition (always a C file) |
+| **equations.c** or **equations.cpp** | The state and output equations, that describe your model (C or C++) |
+
+That is all. You do not have to touch any other file of the project: the model is picked up by `-DMODEL=lorenz_attractor`.
 
 The build system auto-detects whether your model uses C or C++ based on the file extension. If `equations.cpp` exists it will be compiled with the C++ compiler; otherwise `equations.c` is used.
 
 Let's take a look at these files one by one in detail.
+
+---
+
+### `variables.h`
+
+This header declares the storage of your model as four plain structs. The struct names are fixed, the fields are up to you:
+
+| Struct | Content | Allowed field types |
+|--------|---------|---------------------|
+| `Params` | Model parameters | `double`, `int`, `bool` |
+| `Inputs` | Input signals | `double`, `int`, `bool` |
+| `Outputs` | Output signals | `double`, `int`, `bool` |
+| `States` | Continuous states | `double` only |
+
+Leave out a struct your model does not need (the Lorenz attractor has no inputs).
+
+```c
+#ifndef LORENZ_ATTRACTOR_VARIABLES_H
+#define LORENZ_ATTRACTOR_VARIABLES_H
+
+#include "model.h"
+
+/* parameters */
+typedef struct {
+    double sigma;  /* Prandtl number */
+    double rho;    /* Rayleigh number */
+    double beta;   /* geometric factor */
+} Params;
+
+/* outputs */
+typedef struct {
+    double x;
+    double y;
+    double z;
+} Outputs;
+
+/* continuous states (doubles only) */
+typedef struct {
+    double x;
+    double y;
+    double z;
+} States;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* state equation */
+void lorenzAttractor(modelInstance* model);
+/* output equation */
+void lorenzAttractorOutputs(modelInstance* model);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+```
 
 ---
 
@@ -75,32 +144,32 @@ The signature of the function is
 ```c
 void whateverTheName(modelInstance* model);
 ```
-and it should calculate all state derivatives and write them to
-```c
-model->stateDerivatives[k]
-```
-for all **k** in **model->info.numberOfStates**.
+The model instance gives you access to the storage of your model:
+
+| Member | Type | Content |
+|--------|------|---------|
+| `model->params` | `void*` | your `Params` struct |
+| `model->inputs` | `void*` | your `Inputs` struct |
+| `model->outputs` | `void*` | your `Outputs` struct |
+| `model->states` | `double*` | the state vector |
+| `model->stateDerivatives` | `double*` | the state derivatives, same layout as the states |
+
+The state vector is an array of doubles, because that is what the numerical integrators work on. Your `States` struct consists only of doubles, so it can be used as a view on that array that gives every entry a name. This is the one place where a cast is needed.
 
 Here is an exampe implemenation of the **lorenz_attractor**
 
 ```c
+#include "variables.h"
+
 void lorenzAttractor(modelInstance* model) {
-  /* get parameter for readability */
-  double sigma = model->parameter[0];
-  double rho   = model->parameter[1];
-  double beta  = model->parameter[2];
-  /* get states readability */
-  double x1 = model->states[0];
-  double x2 = model->states[1];
-  double x3 = model->states[2];
+  const Params* p  = model->params;
+  const States* x  = (const States*)model->states;
+  States*       dx = (States*)model->stateDerivatives;
+
   /* lorenz attractor state equtions */
-  double dx1 = sigma*(x2-x1);
-  double dx2 = x1*(rho-x3)-x2;
-  double dx3 = x1*x2-beta*x3;
-  /* write back to model */
-  model->stateDerivatives[0] = dx1;
-  model->stateDerivatives[1] = dx2;
-  model->stateDerivatives[2] = dx3;
+  dx->x = p->sigma * (x->y - x->x);
+  dx->y = x->x * (p->rho - x->z) - x->y;
+  dx->z = x->x * x->y - p->beta * x->z;
 }
 ```
 
@@ -111,19 +180,18 @@ The equation can have any name.
 ```c
 void whateverAnothername(modelInstance* model);
 ```
-and it should calculate all outputs and write them to
-```c
-model->outputs[k]
-```
-for all **k** in **model->info->numberOfOutputs**.
+and it should calculate all outputs and write them to your `Outputs` struct.
 
 Here is an example implementation that defines all three states of the lorenz attractor as outputs.
 
 ```c
 void lorenzAttractorOutputs(modelInstance* model) {
-  for (int k=0; k<model.info->numberOfStates; k++) {
-    model->outputs[k] = model->states[k];
-  }
+  const States* x   = (const States*)model->states;
+  Outputs*      out = model->outputs;
+
+  out->x = x->x;
+  out->y = x->y;
+  out->z = x->z;
 }
 ```
 
@@ -131,33 +199,33 @@ void lorenzAttractorOutputs(modelInstance* model) {
 
 You can also implement your equations in C++ by naming the file `equations.cpp`. This lets you use classes, the C++ standard library, templates, and other C++ features inside your model.
 
-The only requirement is that the two functions assigned to the model's function pointers must have **C linkage** (via `extern "C"`). Everything else can be pure C++.
+The only requirement is that the two equation functions must have **C linkage** (via `extern "C"`). Everything else can be pure C++.
 
 Here is the `pendulum_on_cart` model as an example:
 
 ```cpp
 // equations.cpp
-#include "model.h"
+#include "variables.h"
 #include <cmath>
 
 class PendulumOnCart {
 public:
-    PendulumOnCart(double* states, double* inputs, double* params)
-        : x_dot(states[1]),
-          theta(states[2]), theta_dot(states[3]),
-          F(inputs[0]),
-          M(params[0]), m(params[1]), l(params[2]), g(params[3]) {}
+    PendulumOnCart(const States& states, const Inputs& inputs, const Params& params)
+        : x_dot(states.x_dot),
+          theta(states.theta), theta_dot(states.theta_dot),
+          F(inputs.F),
+          M(params.M), m(params.m), l(params.l), g(params.g) {}
 
-    void derivatives(double* dx) const {
+    void derivatives(States& dx) const {
         double sinTh = std::sin(theta);
         double cosTh = std::cos(theta);
         double denom = M + m * sinTh * sinTh;
 
-        dx[0] = x_dot;
-        dx[1] = (F + m * sinTh * (l * theta_dot * theta_dot + g * cosTh)) / denom;
-        dx[2] = theta_dot;
-        dx[3] = (-F * cosTh - m * l * theta_dot * theta_dot * cosTh * sinTh
-                 - (M + m) * g * sinTh) / (l * denom);
+        dx.x         = x_dot;
+        dx.x_dot     = (F + m * sinTh * (l * theta_dot * theta_dot + g * cosTh)) / denom;
+        dx.theta     = theta_dot;
+        dx.theta_dot = (-F * cosTh - m * l * theta_dot * theta_dot * cosTh * sinTh
+                        - (M + m) * g * sinTh) / (l * denom);
     }
 
 private:
@@ -169,13 +237,21 @@ private:
 extern "C" {
 
 void pendulumOnCartSystem(modelInstance* model) {
-    PendulumOnCart p(model->states, model->inputs, model->parameter);
-    p.derivatives(model->stateDerivatives);
+    const States& states = *reinterpret_cast<const States*>(model->states);
+    const Inputs& inputs = *static_cast<const Inputs*>(model->inputs);
+    const Params& params = *static_cast<const Params*>(model->params);
+    States&       dx     = *reinterpret_cast<States*>(model->stateDerivatives);
+
+    PendulumOnCart p(states, inputs, params);
+    p.derivatives(dx);
 }
 
 void pendulumOnCartOutputs(modelInstance* model) {
-    model->outputs[0] = model->states[0];
-    model->outputs[1] = model->states[2];
+    const States& states  = *reinterpret_cast<const States*>(model->states);
+    Outputs&      outputs = *static_cast<Outputs*>(model->outputs);
+
+    outputs.x     = states.x;
+    outputs.theta = states.theta;
 }
 
 }  // extern "C"
@@ -184,336 +260,186 @@ void pendulumOnCartOutputs(modelInstance* model) {
 Key points for C++ models:
 - Only the wrapper functions need `extern "C"` — internal classes and helpers do not
 - The `model.h` and `integrator.h` headers already have `extern "C"` guards, so they can be `#include`d from `.cpp` files directly
-- The `model_config.h` forward declarations are included inside the `extern "C"` block in `model.h`, so no additional guards are needed there
+- C++ does not convert `void*` implicitly, so the storage blocks need explicit casts
+- `variables.c` stays a C file (see below), also for C++ models
 
 ---
 
-### `model_config.h`
+### `variables.c`
 
-This file is the compile-time glue between your model equations and the FMU infrastructure. It uses C preprocessor macros and definitions to configure your specific model without requiring any changes to the core FMU code via compile-time polymorphism.
+This file is the **single source of truth** about your model. It contains two things: the table of published variables, and the model definition.
 
-#### How It Works in the Architecture
+#### The variable table
 
-When you build with -DMODEL=lorenz_attractor, CMake:
-1. Converts the model name to uppercase: LORENZ_ATTRACTOR
-2. Creates a preprocessor definition: MODEL_LORENZ_ATTRACTOR
-3. This triggers conditional compilation in `include/model.h`:
-   ```c
-   #if defined(MODEL_LORENZ_ATTRACTOR)
-       #include "lorenz_attractor/model_config.h"
-   #endif
-   ```
+Every variable you want to be visible from outside gets one entry. The entry starts with a macro that names the struct field:
 
-#### A Note on the Include Guard
+| Macro | Declares a field of | Role |
+|-------|---------------------|------|
+| `PARAM(field)` | `Params` | parameter |
+| `INPUT(field)` | `Inputs` | input |
+| `OUTPUT(field)` | `Outputs` | output |
+| `STATE(field)` | `States` | continuous state |
 
-You'll notice that all `model_config.h` files share the same `#ifndef MODEL_CONFIG_H` include guard. This is intentional — it's part of the compile-time polymorphism design. Since CMake selects exactly one model per build (`-DMODEL=<name>`), only one `model_config.h` is ever included. They all represent the same configuration slot, so they share the same guard. You do **not** need unique guards per model.
+The macro derives the **name**, the **type** and the **storage location** from the struct field itself, so these can never get out of sync with your structs. A field with an unsupported type does not compile.
 
-#### Required Definitions
+After the macro you can add optional properties:
 
-Your `model_config.h` must provide the following definitions. Here's the complete specification using the **Lorenz attractor** as an example:
-
-| Name | Description | Example (Lorenz Attractor) |
-|------|-------------|----------------------------|
-| State equation function | Forward declaration of the function that computes state derivatives | void lorenzAttractor(modelInstance* model); |
-| Output equation function | Forward declaration of the function that computes outputs | void lorenzAttractorOutputs(modelInstance* model); |
-| GUID | Globally unique identifier for this FMU (use a UUID generator) | "{8c4e8905-3735-4ba7-ab72-cf5f62a3ef77}" |
-| MODELNAME | Human-readable name for the FMU | "lorenzAttractor" |
-| NUMBER_OF_PARAMS | Number of model parameters | 3 |
-| NUMBER_OF_INPUTS | Number of input signals | 0 |
-| NUMBER_OF_OUTPUTS | Number of output signals | 3 |
-| NUMBER_OF_STATES | Number of state variables | 3 |
-| INITIAL_STATE | Initial values for all state variables | {1.0, 1.0, 1.0} |
-| INITIAL_PARAMS | Default parameter values (σ, ρ, β) | {10.0, 28.0, 8.0/3.0} |
-| INTEGRATOR_METHOD | Numerical integration method to use | eulerForward |
-| MAX_SOLVER_STEPSIZE | Maximum internal step size for stability | 1e-4 |
-| MODEL_STATE_EQUATION | Maps to your state equation function | lorenzAttractor |
-| MODEL_OUTPUT_EQUATION | Maps to your output equation function | lorenzAttractorOutputs |
-| LOG_INFO | Category name for info messages | "INFO" |
-| LOG_ERROR | Category name for error messages | "ERROR" |
-| LOG_WARNING | Category name for warning messages | "WARNING" |
-
-#### Complete Example
-
-Here's what the complete `src/models/lorenz_attractor/model_config.h` would look like:
+| Property | Meaning | Example |
+|----------|---------|---------|
+| `.start` | Start value (default 0). For `bool` use 0 or 1 | `.start = 10.0` |
+| `.unit` | Unit name (real variables) | `.unit = "s"` |
+| `.description` | Human readable description | `.description = "Prandtl number"` |
+| `.min`, `.max` | Bounds | `.min = SOME(0.0)` |
+| `.nominal` | Nominal value (real variables) | `.nominal = 1.0` |
+| `.variability` | Parameters only: `VAR_TUNABLE` (default) or `VAR_FIXED` | `.variability = VAR_FIXED` |
 
 ```c
-#ifndef MODEL_CONFIG_H
-#define MODEL_CONFIG_H
+#include "variables.h"
+#include "integrator.h"
 
-/* Forward declarations of model equations */
-void lorenzAttractor(modelInstance* model);
-void lorenzAttractorOutputs(modelInstance* model);
-
-/* Model identity */
-#define GUID "{8c4e8905-3735-4ba7-ab72-cf5f62a3ef77}"
-#define MODELNAME "lorenzAttractor"
-
-/* System dimensions */
-#define NUMBER_OF_PARAMS  3  /* sigma, rho, beta */
-#define NUMBER_OF_INPUTS  0  /* No external inputs */
-#define NUMBER_OF_OUTPUTS 3  /* x, y, z */
-#define NUMBER_OF_STATES  3  /* x, y, z */
-
-/* Initial conditions: slightly perturbed from origin */
-static const double INITIAL_STATE[NUMBER_OF_STATES] = {1.0, 1.0, 1.0};
-
-/* Classic Lorenz parameters (chaotic regime) */
-static const double INITIAL_PARAMS[NUMBER_OF_PARAMS] = {
-    10.0,      /* sigma (Prandtl number) */
-    28.0,      /* rho (Rayleigh number) */
-    8.0/3.0    /* beta (geometric factor) */
+/* published variables (order is free) */
+static const modelVariable VARIABLES[] = {
+    { PARAM(sigma), .start = 10.0,      .min = SOME(0.0), .description = "Prandtl number" },
+    { PARAM(rho),   .start = 28.0,      .min = SOME(0.0), .description = "Rayleigh number" },
+    { PARAM(beta),  .start = 8.0 / 3.0, .min = SOME(0.0), .description = "Geometric factor" },
+    { OUTPUT(x) },
+    { OUTPUT(y) },
+    { OUTPUT(z) },
+    { STATE_AS(x, "state_x"), .start = 1.0 },
+    { STATE_AS(y, "state_y"), .start = 1.0 },
+    { STATE_AS(z, "state_z"), .start = 1.0 },
 };
-
-/* Solver configuration */
-#define INTEGRATOR_METHOD eulerForward
-#define MAX_SOLVER_STEPSIZE 1e-4
-
-/* Function mapping */
-#define MODEL_STATE_EQUATION lorenzAttractor
-#define MODEL_OUTPUT_EQUATION lorenzAttractorOutputs
-
-/* Logging categories */
-#define LOG_INFO      "INFO"
-#define LOG_ERROR     "ERROR"
-#define LOG_WARNING   "WARNING"
-
-#endif
 ```
 
-#### Key Design Points
+Things to know:
 
-1. **Array sizes must match dimensions**: The size of `INITIAL_STATE` must equal `NUMBER_OF_STATES`, and `INITIAL_PARAMS` must equal `NUMBER_OF_PARAMS`.
+1. **The order of the entries is free.** Group them however you find readable.
+2. **Names must be unique.** By default a variable is published under its field name. Here `Outputs` and `States` both have a field `x`, so the states are published under a different name with `STATE_AS(field, "name")`. The same exists as `PARAM_AS`, `INPUT_AS` and `OUTPUT_AS`.
+3. **Every state must be listed.** All fields of `States` have to appear in the table. The start value of a state is its initial condition.
+4. **Other fields are optional.** A field of `Params`, `Inputs` or `Outputs` that is not listed stays internal to your model and starts at zero.
 
-2. **Function names are mapped via macros**: The core FMU code calls `MODEL_STATE_EQUATION(model)`, which expands to `lorenzAttractor(model)` at compile time.
+If you get one of these wrong, the build stops with a message that tells you what to fix.
 
-3. **No runtime overhead**: All configuration is resolved during compilation - no function pointers or lookup tables needed.
+#### The model definition
 
-4. **Solver step size matters**: For stiff systems like the Lorenz attractor, choose `MAX_SOLVER_STEPSIZE` small enough to maintain numerical stability. The FMU will automatically subdivide larger simulation steps.
+The second part of the file ties everything together in one constant, which must be named `MODEL_DEFINITION`:
+
+```c
+const modelDefinition MODEL_DEFINITION = {
+    /* model identifier */
+    .name        = "lorenz_attractor",
+    .guid        = "{8c4e8905-3735-4ba7-ab72-cf5f62a3ef77}",
+    .description = "Lorenz attractor",
+    .version     = "1.0.0",
+
+    /* variables */
+    .variables         = VARIABLES,
+    .numberOfVariables = ARRAY_LEN(VARIABLES),
+
+    /* system dimensions */
+    .sizeOfParams   = sizeof(Params),
+    .sizeOfOutputs  = sizeof(Outputs),
+    .numberOfStates = NUMBER_OF_DOUBLES(States),
+
+    /* model equations */
+    .getStateDerivatives = lorenzAttractor,
+    .getOutputs          = lorenzAttractorOutputs,
+
+    /* method for numerical integration */
+    .integrate   = eulerForward,
+    .maxStepSize = 1e-4,
+
+    /* suggested simulation settings */
+    .defaultExperiment = { .startTime = 0.0, .stopTime = 30.0, .stepSize = 0.01 },
+};
+```
+
+| Field | Description |
+|-------|-------------|
+| `name` | Name of the model. Must match the folder name (it becomes the name of the FMU binary) |
+| `guid` | Globally unique identifier for this FMU (use a UUID generator). Change it when the interface of your model changes |
+| `description`, `version` | Optional meta data |
+| `variables`, `numberOfVariables` | The variable table |
+| `units`, `numberOfUnits` | Optional table that defines your units in SI base units (see below) |
+| `sizeOfParams`, `sizeOfInputs`, `sizeOfOutputs` | `sizeof` of the respective struct. Leave out what your model does not have |
+| `numberOfStates` | Number of states, `NUMBER_OF_DOUBLES(States)` |
+| `getStateDerivatives`, `getOutputs` | Your two equations |
+| `integrate` | Numerical integration method to use, see `include/integrator.h` |
+| `maxStepSize` | Maximum internal step size for stability |
+| `defaultExperiment` | Optional suggested simulation settings |
+
+**Solver step size matters**: For systems like the Lorenz attractor, choose `maxStepSize` small enough to maintain numerical stability. The FMU will automatically subdivide larger simulation steps.
+
+#### Units (optional)
+
+If your variables have units, you can define them in terms of the SI base units (`kg`, `m`, `s`, `A`, `K`, `mol`, `cd`, `rad`). Give the exponent of each base unit; leave out the ones that are zero.
+
+```c
+static const modelUnit UNITS[] = {
+    { .name = "kg",  .kg = 1 },
+    { .name = "N",   .kg = 1, .m = 1, .s = -2 },
+    { .name = "N/m", .kg = 1, .s = -2 },
+};
+```
+
+and reference the table in the model definition with `.units = UNITS, .numberOfUnits = ARRAY_LEN(UNITS)`. See `src/models/mass_spring_damper/variables.c` for a complete example.
+
+#### Integer and Boolean variables
+
+A variable is an integer or a boolean simply because its struct field is an `int` or a `bool`:
+
+```c
+typedef struct {
+    bool enable;  /* ramp runs while true */
+    int  boost;   /* multiplier of the ramp rate */
+} Inputs;
+
+static const modelVariable VARIABLES[] = {
+    { INPUT(enable), .start = 1 },
+    { INPUT(boost),  .start = 1, .min = SOME(0) },
+    ...
+};
+```
+
+See `src/models/typed_demo` for a model that uses all three types in all roles.
+
+#### Why is this a C file?
+
+The variable table uses two features of C that C++ does not offer in the same way (designated initializers in any order and `_Generic`). The file contains no logic, so there is nothing to gain from C++ here. A model with `equations.cpp` therefore still has a `variables.c`; see `src/models/pendulum_on_cart`.
 
 ---
 
-### `modelDescription.xml`
+### What happened to `modelDescription.xml`?
 
-This XML file is the **FMU's public interface** - it tells integration tools everything they need to know about your model: its variables, capabilities, and metadata. It must be placed in the root of the FMU archive and follow the FMI 2.0 standard schema.
+Every FMU contains a `modelDescription.xml`: the **FMU's public interface**. It tells integration tools everything they need to know about your model: its variables, capabilities, and metadata.
 
-#### Critical Ordering Requirement
+You do not write this file. During the build, a small program (`src/fmi2ModelDescription.c`) is linked with your model, reads its `MODEL_DEFINITION` and writes the file to `build/modelDescription.xml`, from where it is packaged into the FMU. This is how each role is translated:
 
-**IMPORTANT**: Due to fmuTemplate's generic variable access implementation, the `ModelVariables` section **must follow a strict ordering**:
+| Role | causality | variability | initial |
+|------|-----------|-------------|---------|
+| parameter | `parameter` | `tunable` or `fixed` | `exact` |
+| input | `input` | `continuous` (real) or `discrete` (integer, boolean) | |
+| output | `output` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
+| state | `local` | `continuous` | `exact` |
 
-1. **All parameters** (in order: VR 0, 1, 2, ..., NUMBER_OF_PARAMS-1)
-2. **All inputs** (in order: VR NUMBER_OF_PARAMS, ..., NUMBER_OF_PARAMS + NUMBER_OF_INPUTS-1)
-3. **All outputs** (in order: VR NUMBER_OF_PARAMS + NUMBER_OF_INPUTS, ...)
+The **value reference** of a variable is simply its position in your variable table. The FMI implementation uses the same rule to find a variable, which is why the two can never disagree. When you use the FMU, always address variables **by name** and let your tool look up the value reference:
 
-This ordering allows the **fmi2GetReal** and **fmi2SetReal** implementations to use simple arithmetic to map value references to array indices:
-
-```c
-/* In fmi2GetReal: */
-if (VR < NUMBER_OF_PARAMS) {
-    value[k] = model->parameter[VR];
-}
-else if (VR < NUMBER_OF_PARAMS + NUMBER_OF_INPUTS) {
-    value[k] = model->inputs[VR - NUMBER_OF_PARAMS];
-}
-else if (VR < NUMBER_OF_PARAMS + NUMBER_OF_INPUTS + NUMBER_OF_OUTPUTS) {
-    value[k] = model->outputs[VR - NUMBER_OF_PARAMS - NUMBER_OF_INPUTS];
-}
+```python
+result = simulate_fmu("build/lorenz_attractor.fmu",
+                      start_values={"rho": 20.0, "state_x": 2.0},
+                      output=["x", "y", "z"])
 ```
 
-**Breaking this ordering will cause incorrect variable access!**
-
-#### File Structure Overview
-
-The `modelDescription.xml` consists of several major sections:
-
-| Section | Purpose | Required |
-|---------|---------|----------|
-| `<fmiModelDescription>` | Root element with FMU metadata (name, GUID, version) | Yes |
-| `<CoSimulation>` | Declares co-simulation capabilities and limitations | Yes |
-| `<UnitDefinitions>` | Defines physical units used by variables | Optional |
-| `<LogCategories>` | Declares available logging categories | Optional |
-| `<DefaultExperiment>` | Suggests default simulation settings | Optional |
-| `<ModelVariables>` | **The heart of the file** - declares all exposed variables | Yes |
-| `<ModelStructure>` | Declares variable dependencies for advanced tools | Optional |
-
-#### Detailed Breakdown (Lorenz Attractor Example)
-
-##### 1. Root Element & Metadata
-
-```xml
-<fmiModelDescription
-    fmiVersion="2.0"
-    modelName="lorenz_attractor"
-    guid="{8c4e8905-3735-4ba7-ab72-cf5f62a3ef77}"
-    description="Lorenz attractor chaotic system"
-    author="Your Name"
-    version="1.0.0"
-    generationTool="fmuTemplate"
-    generationDateAndTime="2025-02-04T12:00:00Z"
-    numberOfEventIndicators="0">
-```
-
-- `guid`: Must match the `GUID` in `model_config.h`
-- `modelName`: Should match your model folder name
-- `numberOfEventIndicators`: Set to `"0"` for continuous systems
-
-##### 2. Co-Simulation Capabilities
-
-```xml
-<CoSimulation
-    modelIdentifier="your_model_name"
-    needsExecutionTool="false"
-    canHandleVariableCommunicationStepSize="true"
-    canInterpolateInputs="false"
-    maxOutputDerivativeOrder="0"
-    canGetAndSetFMUstate="false"
-    canSerializeFMUstate="false"
-    providesDirectionalDerivative="false">
-</CoSimulation>
-```
-
-These flags declare what the FMU can do. For fmuTemplate:
-- `canHandleVariableCommunicationStepSize="true"`: Supports different step sizes
-- Most advanced features set to `"false"` (state serialization, derivatives, etc.)
-
-##### 3. Unit Definitions (Optional)
-
-```xml
-<UnitDefinitions>
-    <Unit name="s">
-        <BaseUnit s="1"/>
-    </Unit>
-    <Unit name="1">
-        <BaseUnit/>  <!-- Dimensionless -->
-    </Unit>
-</UnitDefinitions>
-```
-
-Define physical units for your variables. Common base units: `s` (seconds), `m` (meters), `kg`, etc.
-
-##### 4. Default Experiment (Optional)
-
-```xml
-<DefaultExperiment
-    startTime="0.0"
-    stopTime="100.0"
-    tolerance="1e-6"
-    stepSize="0.01"/>
-```
-
-Suggests default simulation settings. Integration tools may override these.
-
-##### 5. Model Variables (CRITICAL)
-
-This is where you declare all parameters, inputs, and outputs **in the required order**:
-
-**Parameters (σ, ρ, β) - VR 0, 1, 2:**
-
-```xml
-<ScalarVariable
-    name="sigma"
-    valueReference="0"
-    description="Prandtl number"
-    causality="parameter"
-    variability="tunable"
-    initial="exact">
-    <Real start="10.0" unit="1" min="0.0" nominal="10.0"/>
-</ScalarVariable>
-
-<ScalarVariable
-    name="rho"
-    valueReference="1"
-    description="Rayleigh number"
-    causality="parameter"
-    variability="tunable"
-    initial="exact">
-    <Real start="28.0" unit="1" min="0.0" nominal="28.0"/>
-</ScalarVariable>
-
-<ScalarVariable
-    name="beta"
-    valueReference="2"
-    description="Geometric factor"
-    causality="parameter"
-    variability="tunable"
-    initial="exact">
-    <Real start="2.667" unit="1" min="0.0" nominal="2.667"/>
-</ScalarVariable>
-```
-
-**Inputs - VR starts at NUMBER_OF_PARAMS:**
-
-The Lorenz attractor has no inputs, so this section would be empty. If you had inputs, they'd start at VR 3.
-
-**Outputs (x, y, z) - VR 3, 4, 5:**
-
-```xml
-<ScalarVariable
-    name="x"
-    valueReference="3"
-    description="First state of Lorenz system"
-    causality="output"
-    variability="continuous"
-    initial="calculated">
-    <Real unit="1"/>
-</ScalarVariable>
-
-<ScalarVariable
-    name="y"
-    valueReference="4"
-    description="Second state of Lorenz system"
-    causality="output"
-    variability="continuous"
-    initial="calculated">
-    <Real unit="1"/>
-</ScalarVariable>
-
-<ScalarVariable
-    name="z"
-    valueReference="5"
-    description="Third state of Lorenz system"
-    causality="output"
-    variability="continuous"
-    initial="calculated">
-    <Real unit="1"/>
-</ScalarVariable>
-```
-
-**Key attributes:**
-- `causality`: `"parameter"`, `"input"`, or `"output"`
-- `variability`:
-  - `"tunable"` for parameters that can change during initialization
-  - `"continuous"` for time-varying signals
-- `initial`:
-  - `"exact"` for parameters (value set by `start` attribute)
-  - `"calculated"` for outputs (computed by model)
-- `start`: Initial/default value
-
-##### 6. Model Structure (Optional)
-
-```xml
-<ModelStructure>
-    <Outputs>
-        <Unknown index="4" dependencies=""/>  <!-- x -->
-        <Unknown index="5" dependencies=""/>  <!-- y -->
-        <Unknown index="6" dependencies=""/>  <!-- z -->
-    </Outputs>
-</ModelStructure>
-```
-
-**NOTE**: Indices are **1-based** and refer to position in `ModelVariables` (parameter σ is index 1, not 0).
-
-The `dependencies` attribute can list which inputs each output depends on. Empty means "depends on everything" or "unknown dependencies".
+Since the states are published, initial conditions can be set from outside like any other start value. Parameters marked `VAR_FIXED` and states can be set until the initialization is finished; inputs and tunable parameters also between steps.
 
 #### Quick Checklist
 
 Before building your FMU, verify:
 
-- [ ] `guid` matches `model_config.h`
-- [ ] `modelName` matches your model folder name
-- [ ] Variables are ordered: **all parameters, then all inputs, then all outputs**
-- [ ] Value references are sequential starting from 0
-- [ ] Number of variables matches dimensions in `model_config.h`
-- [ ] All `start` values make sense for your model
+- [ ] `.name` matches your model folder name
+- [ ] `.guid` is a new, unique identifier
+- [ ] Every field of `States` is listed in the variable table
+- [ ] All `.start` values make sense for your model
 
 ---
 
@@ -536,7 +462,7 @@ Here is a minimal example of the **explicit midpoint method** (2nd-order Runge-K
 ```c
 void midpoint(modelInstance* model, double stepSize)
 {
-    size_t nx = model->info->numberOfStates;
+    size_t nx = model->def->numberOfStates;
     double k1[nx], stateBackup[nx];
 
     /* k1 = f(x) — reuse pre-computed derivatives */
@@ -556,10 +482,10 @@ void midpoint(modelInstance* model, double stepSize)
 }
 ```
 
-Then, set **INTEGRATOR_METHOD** in your model's `model_config.h` to use it:
+Then, select it in the model definition in your model's `variables.c`:
 
 ```c
-#define INTEGRATOR_METHOD midpoint
+    .integrate = midpoint,
 ```
 
 See **eulerForward** and **rungeKutta4** in `src/integrator.c` for reference implementations.

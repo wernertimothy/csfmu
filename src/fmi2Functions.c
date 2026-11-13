@@ -1,14 +1,3 @@
-/**************************************************************************************************
-*                                                                                                 *
-* This file is part of fmuTemplate.                                                               *
-*                                                                                                 *
-* fmuTemplate -- A template for Co-Simulation FMUs written in C.                                  *
-* Copyright (C) 2025 Timothy Werner                                                               *
-*                                                                                                 *
-* SPDX-License-Identifier: MIT                                                                    *
-*                                                                                                 *
-**************************************************************************************************/
-
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -21,6 +10,11 @@
 
 /* Buffer size for formatted log messages */
 #define LOG_BUFFER_SIZE 512
+
+/* Category names passed to the integration tool's logger */
+#define LOG_INFO    "INFO"
+#define LOG_ERROR   "ERROR"
+#define LOG_WARNING "WARNING"
 
 /***************************************************
  * FMI2 Function State Validation Bitmasks
@@ -39,6 +33,15 @@
 #define STATE_fmi2SetReal (stateInstantiated | stateInitializationMode | stateStepComplete)
 #define STATE_fmi2GetReal (stateInstantiated | stateStepComplete | stateStepFailed | \
                            stateStepCanceled | stateTerminated | stateError)
+/* Integer, Boolean and String variables follow the same rules as Real variables */
+#define STATE_fmi2SetInteger STATE_fmi2SetReal
+#define STATE_fmi2SetBoolean STATE_fmi2SetReal
+#define STATE_fmi2SetString  STATE_fmi2SetReal
+#define STATE_fmi2GetInteger STATE_fmi2GetReal
+#define STATE_fmi2GetBoolean STATE_fmi2GetReal
+#define STATE_fmi2GetString  STATE_fmi2GetReal
+/* Fixed parameters and states may only be set before the simulation starts */
+#define STATE_setBeforeSimulation (stateInstantiated | stateInitializationMode)
 #define STATE_fmi2DoStep (stateStepComplete)
 #define STATE_fmi2Terminate (stateStepComplete | stateStepFailed)
 
@@ -243,10 +246,11 @@ const char* fmi2GetVersion(void)
  *
  * Implementation notes:
  * - Validates required callbacks (logger, allocateMemory, freeMemory) before allocation
- * - Validates GUID matches compile-time model GUID
+ * - Validates GUID matches the GUID of the model definition
  * - Uses integration tool's allocator for all memory
  * - Zero-initializes structure to prevent undefined behavior
- * - Creates model instance with compile-time dimensions
+ * - Creates model instance from MODEL_DEFINITION; all variables hold
+ *   their start values afterwards
  * - On any failure, cleans up partial allocations via fmi2FreeInstance
  */
 fmi2Component fmi2Instantiate(
@@ -276,7 +280,7 @@ fmi2Component fmi2Instantiate(
     }
 
     /* Validate GUID */
-    if (strcmp(fmuGUID, GUID) != 0) {
+    if (!fmuGUID || strcmp(fmuGUID, MODEL_DEFINITION.guid) != 0) {
         functions->logger(functions->componentEnvironment, instanceName,
                          fmi2Error, LOG_ERROR,
                          "GUID mismatch");
@@ -320,7 +324,7 @@ fmi2Component fmi2Instantiate(
     }
 
     /* Create model instance */
-    myfmu2->model = newModel(NUMBER_OF_STATES, NUMBER_OF_INPUTS, NUMBER_OF_OUTPUTS, NUMBER_OF_PARAMS);
+    myfmu2->model = newModel(&MODEL_DEFINITION);
     if (!myfmu2->model) {
         fmi2FreeInstance((fmi2Component)myfmu2);
         return NULL;
@@ -517,14 +521,12 @@ fmi2Status fmi2SetDebugLogging(
 /**
  * Enter initialization mode
  *
- * Sets default initial values for states, parameters, and function pointers
- * from compile-time configuration. Integration tool can override these by
- * calling fmi2SetReal/etc before fmi2ExitInitializationMode.
- *
  * Implementation notes:
- * - Copies INITIAL_PARAMS and INITIAL_STATE from model_config.h
- * - Binds function pointers from model_config.h macros
- * - State is now open for parameter/state overrides
+ * - Does not touch any variable: start values were written by
+ *   fmi2Instantiate (or fmi2Reset), so values the integration tool has set
+ *   since then are kept
+ * - The integration tool can keep overriding parameters and states until
+ *   fmi2ExitInitializationMode
  */
 fmi2Status fmi2EnterInitializationMode(fmi2Component c)
 {
@@ -542,17 +544,6 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c)
         return fmi2Error;
     }
 
-    /* Set default parameter values */
-    memcpy(myfmu2->model->parameter, INITIAL_PARAMS, NUMBER_OF_PARAMS * sizeof(double));
-
-    /* Set default initial states */
-    memcpy(myfmu2->model->states, INITIAL_STATE, NUMBER_OF_STATES * sizeof(double));
-
-    /* Bind function pointers */
-    myfmu2->model->getStateDerivatives = MODEL_STATE_EQUATION;
-    myfmu2->model->integrate = INTEGRATOR_METHOD;
-    myfmu2->model->getOutputs = MODEL_OUTPUT_EQUATION;
-
     /* Update state */
     myfmu2->state = stateInitializationMode;
 
@@ -564,6 +555,10 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c)
  * Exit initialization mode and finalize setup
  *
  * Transitions to step mode, ready for simulation.
+ *
+ * Implementation notes:
+ * - Computes the outputs from the initial states, inputs and parameters,
+ *   so that outputs are valid at the first communication point
  */
 fmi2Status fmi2ExitInitializationMode(fmi2Component c)
 {
@@ -581,6 +576,9 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
         return fmi2Error;
     }
 
+    /* Compute initial outputs */
+    myfmu2->model->getOutputs(myfmu2->model);
+
     /* Transition state */
     myfmu2->state = stateStepComplete;
 
@@ -590,17 +588,117 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
 
 /***************************************************
  * FMI 2.0 Getting and Setting Variables
+ *
+ * The value reference of a variable is its index in the variable table of
+ * the model definition (the same mapping is used to generate
+ * modelDescription.xml). The table tells type, role and storage location,
+ * so none of the functions below knows anything about the model.
  ***************************************************/
 
 /**
- * Set real-valued variables (parameters or inputs)
+ * Name of a variable type for log messages
+ */
+static const char* typeName(varType type)
+{
+    switch (type) {
+        case VAR_REAL:    return "Real";
+        case VAR_INTEGER: return "Integer";
+        case VAR_BOOLEAN: return "Boolean";
+    }
+    return "unknown";
+}
+
+/**
+ * Common checks at the start of every fmi2GetXXX / fmi2SetXXX function
+ *
+ * Validates the FMU state and the argument arrays. On failure the error is
+ * logged and the FMU enters the error state.
+ */
+static fmi2Status checkVariableAccess(
+    myFMU2* fmu,
+    unsigned int allowedStates,
+    const char* functionName,
+    const fmi2ValueReference vr[],
+    size_t nvr,
+    const void* value)
+{
+    /* Validate state */
+    if (!stateIsAllowed(fmu->state, allowedStates)) {
+        fmu->state |= stateError;
+        logErrorMessage(fmu, "Illegal call sequence for %s.", functionName);
+        return fmi2Error;
+    }
+
+    /* Validate value reference */
+    if (nvr > 0 && (!vr || !value)) {
+        fmu->state |= stateError;
+        logErrorMessage(fmu, "Invalid value reference or value.");
+        return fmi2Error;
+    }
+
+    return fmi2OK;
+}
+
+/**
+ * Map a value reference to the storage of a model variable
+ *
+ * Checks that the value reference exists, that the variable has the
+ * expected type and, for write access, that the variable may be set in the
+ * current FMU state:
+ * - Outputs can never be set
+ * - States and fixed parameters can only be set before the simulation
+ *   starts (until fmi2ExitInitializationMode)
+ * - Inputs and tunable parameters can be set whenever setting is allowed
+ *
+ * Returns NULL on failure. The error is logged and the FMU enters the
+ * error state.
+ */
+static void* resolveVariable(myFMU2* fmu, fmi2ValueReference vr, varType expectedType, fmi2Boolean forWrite)
+{
+    const modelDefinition* def = fmu->model->def;
+
+    if (vr >= def->numberOfVariables) {
+        fmu->state |= stateError;
+        logErrorMessage(fmu, "Value reference %u does not exist.", vr);
+        return NULL;
+    }
+
+    const modelVariable* variable = &def->variables[vr];
+
+    if (variable->type != expectedType) {
+        fmu->state |= stateError;
+        logErrorMessage(fmu, "Variable '%s' (value reference %u) is of type %s, not %s.",
+                        variable->name, vr, typeName(variable->type), typeName(expectedType));
+        return NULL;
+    }
+
+    if (forWrite) {
+        if (variable->role == VAR_OUTPUT) {
+            fmu->state |= stateError;
+            logErrorMessage(fmu, "Variable '%s' is an output and cannot be set.", variable->name);
+            return NULL;
+        }
+
+        fmi2Boolean onlyBeforeSimulation =
+            variable->role == VAR_STATE ||
+            (variable->role == VAR_PARAMETER && variable->variability == VAR_FIXED);
+
+        if (onlyBeforeSimulation && !stateIsAllowed(fmu->state, STATE_setBeforeSimulation)) {
+            fmu->state |= stateError;
+            logErrorMessage(fmu, "Variable '%s' can only be set before the simulation starts.", variable->name);
+            return NULL;
+        }
+    }
+
+    return modelVariableAddress(fmu->model, vr);
+}
+
+/**
+ * Set real-valued variables
  *
  * Implementation notes:
- * - Uses value reference arithmetic to determine variable type
- * - VR [0, NUMBER_OF_PARAMS) → parameters
- * - VR [NUMBER_OF_PARAMS, NUMBER_OF_PARAMS+NUMBER_OF_INPUTS) → inputs
- * - Parameters can only be set during initialization mode
- * - Inputs can be set anytime after instantiation
+ * - Looks up each value reference in the model's variable table
+ * - See resolveVariable() for which variables can be set when
  */
 fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Real value[])
 {
@@ -611,37 +709,18 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
 
     myFMU2* myfmu2 = (myFMU2*)c;
 
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2SetReal)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2SetReal.");
-        return fmi2Error;
-    }
-
-    /* Validate value reference */
-    if (nvr > 0 && (!vr || !value)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Invalid value reference or value.");
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2SetReal, "fmi2SetReal", vr, nvr, value) != fmi2OK) {
         return fmi2Error;
     }
 
     /* Set values */
     for (size_t k = 0; k < nvr; k++) {
-        fmi2ValueReference VR = vr[k];
-
-        /* Parameters (can only be set during initialization) */
-        if (VR < NUMBER_OF_PARAMS) {
-            myfmu2->model->parameter[VR] = value[k];
-        }
-        /* Inputs (can be set anytime after instantiation) */
-        else if (VR < NUMBER_OF_PARAMS + NUMBER_OF_INPUTS) {
-            size_t inputIndex = VR - NUMBER_OF_PARAMS;
-            myfmu2->model->inputs[inputIndex] = value[k];
-        } else {
-            myfmu2->state |= stateError;
-            logErrorMessage(myfmu2, "The value reference appears to be out of scope for setting a value.");
+        double* variable = resolveVariable(myfmu2, vr[k], VAR_REAL, fmi2True);
+        if (!variable) {
             return fmi2Error;
         }
+        *variable = value[k];
     }
 
     logEventMessage(myfmu2, "Values set.");
@@ -649,50 +728,103 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
 }
 
 /**
- * Set integer-valued variables (not implemented - stub)
+ * Set integer-valued variables
  */
 fmi2Status fmi2SetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Integer value[])
 {
-    (void)c;
-    (void)vr;
-    (void)nvr;
-    (void)value;
+    /* Validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2SetInteger, "fmi2SetInteger", vr, nvr, value) != fmi2OK) {
+        return fmi2Error;
+    }
+
+    /* Set values */
+    for (size_t k = 0; k < nvr; k++) {
+        int* variable = resolveVariable(myfmu2, vr[k], VAR_INTEGER, fmi2True);
+        if (!variable) {
+            return fmi2Error;
+        }
+        *variable = value[k];
+    }
+
+    logEventMessage(myfmu2, "Values set.");
     return fmi2OK;
 }
 
 /**
- * Set boolean-valued variables (not implemented - stub)
+ * Set boolean-valued variables
+ *
+ * Implementation notes:
+ * - fmi2Boolean is an int (fmi2True / fmi2False), the model stores a bool
  */
 fmi2Status fmi2SetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Boolean value[])
 {
-    (void)c;
-    (void)vr;
-    (void)nvr;
-    (void)value;
+    /* Validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2SetBoolean, "fmi2SetBoolean", vr, nvr, value) != fmi2OK) {
+        return fmi2Error;
+    }
+
+    /* Set values */
+    for (size_t k = 0; k < nvr; k++) {
+        bool* variable = resolveVariable(myfmu2, vr[k], VAR_BOOLEAN, fmi2True);
+        if (!variable) {
+            return fmi2Error;
+        }
+        *variable = (value[k] != fmi2False);
+    }
+
+    logEventMessage(myfmu2, "Values set.");
     return fmi2OK;
 }
 
 /**
- * Set string-valued variables (not implemented - stub)
+ * Set string-valued variables
+ *
+ * The template does not support string variables, so every value
+ * reference is invalid for this function.
  */
 fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2String value[])
 {
-    (void)c;
-    (void)vr;
-    (void)nvr;
-    (void)value;
+    /* Validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2SetString, "fmi2SetString", vr, nvr, value) != fmi2OK) {
+        return fmi2Error;
+    }
+
+    if (nvr > 0) {
+        myfmu2->state |= stateError;
+        logErrorMessage(myfmu2, "Value reference %u is not a String variable (strings are not supported).", vr[0]);
+        return fmi2Error;
+    }
+
     return fmi2OK;
 }
 
 /**
- * Get real-valued variables (parameters, inputs, or outputs)
+ * Get real-valued variables
  *
  * Implementation notes:
- * - Uses value reference arithmetic to determine variable type
- * - VR [0, NUMBER_OF_PARAMS) → parameters
- * - VR [NUMBER_OF_PARAMS, NUMBER_OF_PARAMS+NUMBER_OF_INPUTS) → inputs
- * - VR [NUMBER_OF_PARAMS+NUMBER_OF_INPUTS, ...) → outputs
- * - This ordering must match modelDescription.xml
+ * - Looks up each value reference in the model's variable table
+ * - Every variable (parameter, input, output, state) can be read
  */
 fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Real value[])
 {
@@ -703,42 +835,18 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
 
     myFMU2* myfmu2 = (myFMU2*)c;
 
-    /* Validate state */
-    if (!stateIsAllowed(myfmu2->state, STATE_fmi2GetReal)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Illegal call sequence for fmi2GetReal.");
-        return fmi2Error;
-    }
-
-    /* Validate value reference */
-    if (nvr > 0 && (!vr || !value)) {
-        myfmu2->state |= stateError;
-        logErrorMessage(myfmu2, "Invalid value reference or value.");
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2GetReal, "fmi2GetReal", vr, nvr, value) != fmi2OK) {
         return fmi2Error;
     }
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {
-        fmi2ValueReference VR = vr[k];
-
-        /* Parameters */
-        if (VR < NUMBER_OF_PARAMS) {
-            value[k] = myfmu2->model->parameter[VR];
-        }
-        /* Inputs */
-        else if (VR < NUMBER_OF_PARAMS + NUMBER_OF_INPUTS) {
-            size_t inputIndex = VR - NUMBER_OF_PARAMS;
-            value[k] = myfmu2->model->inputs[inputIndex];
-        }
-        /* Outputs */
-        else if (VR < NUMBER_OF_PARAMS + NUMBER_OF_INPUTS + NUMBER_OF_OUTPUTS) {
-            size_t outputIndex = VR - NUMBER_OF_PARAMS - NUMBER_OF_INPUTS;
-            value[k] = myfmu2->model->outputs[outputIndex];
-        } else {
-            myfmu2->state |= stateError;
-            logErrorMessage(myfmu2, "The value reference appears to be out of scope for getting values.");
+        const double* variable = resolveVariable(myfmu2, vr[k], VAR_REAL, fmi2False);
+        if (!variable) {
             return fmi2Error;
         }
+        value[k] = *variable;
     }
 
     logEventMessage(myfmu2, "Values retrieved.");
@@ -746,38 +854,91 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
 }
 
 /**
- * Get integer-valued variables (not implemented - stub)
+ * Get integer-valued variables
  */
 fmi2Status fmi2GetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Integer value[])
 {
-    (void)c;
-    (void)vr;
-    (void)nvr;
-    (void)value;
+    /* Validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2GetInteger, "fmi2GetInteger", vr, nvr, value) != fmi2OK) {
+        return fmi2Error;
+    }
+
+    /* Get values */
+    for (size_t k = 0; k < nvr; k++) {
+        const int* variable = resolveVariable(myfmu2, vr[k], VAR_INTEGER, fmi2False);
+        if (!variable) {
+            return fmi2Error;
+        }
+        value[k] = *variable;
+    }
+
+    logEventMessage(myfmu2, "Values retrieved.");
     return fmi2OK;
 }
 
 /**
- * Get boolean-valued variables (not implemented - stub)
+ * Get boolean-valued variables
  */
 fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Boolean value[])
 {
-    (void)c;
-    (void)vr;
-    (void)nvr;
-    (void)value;
+    /* Validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2GetBoolean, "fmi2GetBoolean", vr, nvr, value) != fmi2OK) {
+        return fmi2Error;
+    }
+
+    /* Get values */
+    for (size_t k = 0; k < nvr; k++) {
+        const bool* variable = resolveVariable(myfmu2, vr[k], VAR_BOOLEAN, fmi2False);
+        if (!variable) {
+            return fmi2Error;
+        }
+        value[k] = *variable ? fmi2True : fmi2False;
+    }
+
+    logEventMessage(myfmu2, "Values retrieved.");
     return fmi2OK;
 }
 
 /**
- * Get string-valued variables (not implemented - stub)
+ * Get string-valued variables
+ *
+ * The template does not support string variables, so every value
+ * reference is invalid for this function.
  */
 fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2String value[])
 {
-    (void)c;
-    (void)vr;
-    (void)nvr;
-    (void)value;
+    /* Validate component */
+    if (!c) {
+        return fmi2Error;
+    }
+
+    myFMU2* myfmu2 = (myFMU2*)c;
+
+    /* Validate state and arguments */
+    if (checkVariableAccess(myfmu2, STATE_fmi2GetString, "fmi2GetString", vr, nvr, value) != fmi2OK) {
+        return fmi2Error;
+    }
+
+    if (nvr > 0) {
+        myfmu2->state |= stateError;
+        logErrorMessage(myfmu2, "Value reference %u is not a String variable (strings are not supported).", vr[0]);
+        return fmi2Error;
+    }
+
     return fmi2OK;
 }
 
@@ -790,13 +951,13 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *
  * Implementation notes:
  * - Supports variable communication step sizes (not all tools do)
- * - Automatically subdivides large steps into MAX_SOLVER_STEPSIZE increments
+ * - Automatically subdivides large steps into increments of the model's maxStepSize
  * - Uses sub-stepping for numerical stability
  * - Validates internal clock matches environment clock
  * - Computes outputs after integration via getOutputs()
  *
  * Sub-stepping algorithm:
- * - numberOfSteps = floor(communicationStepSize / MAX_SOLVER_STEPSIZE)
+ * - numberOfSteps = floor(communicationStepSize / maxStepSize)
  * - Perform numberOfSteps full-size steps
  * - Handle remainder with smaller final step (if numerically significant)
  */
@@ -838,12 +999,13 @@ fmi2Status fmi2DoStep(
     }
 
     /* Calculate sub-stepping scheme */
-    fmi2Integer numberOfSteps = (fmi2Integer)(communicationStepSize / MAX_SOLVER_STEPSIZE);
-    fmi2Real stepRemainder = communicationStepSize - numberOfSteps * MAX_SOLVER_STEPSIZE;
+    fmi2Real maxStepSize = myfmu2->model->def->maxStepSize;
+    fmi2Integer numberOfSteps = (fmi2Integer)(communicationStepSize / maxStepSize);
+    fmi2Real stepRemainder = communicationStepSize - numberOfSteps * maxStepSize;
     fmi2Real actualStepSize;
 
     /* Perform full-size steps */
-    actualStepSize = MAX_SOLVER_STEPSIZE;
+    actualStepSize = maxStepSize;
     for (fmi2Integer k = 0; k < numberOfSteps; k++) {
         myfmu2->model->getStateDerivatives(myfmu2->model);
         myfmu2->model->integrate(myfmu2->model, actualStepSize);
@@ -926,8 +1088,7 @@ fmi2Status fmi2Terminate(fmi2Component c)
  *
  * Implementation notes:
  * - Resets simulation time to 0.0
- * - Zeros all model arrays (states, derivatives, inputs, outputs, parameters)
- * - Clears function pointers (re-bound during EnterInitializationMode)
+ * - Resets all model variables to their start values (see resetModel())
  * - Preserves instance identity (name, callbacks, FMU type, log level)
  * - Can be called from any state except stateStartEnd
  */
@@ -945,18 +1106,8 @@ fmi2Status fmi2Reset(fmi2Component c)
     myfmu2->stopTime  = 0.0;
     myfmu2->time      = 0.0;
 
-    /* Reset model arrays to zero */
-    modelInstance* model = myfmu2->model;
-    memset(model->states,           0, model->info->numberOfStates    * sizeof(double));
-    memset(model->stateDerivatives, 0, model->info->numberOfStates    * sizeof(double));
-    memset(model->inputs,           0, model->info->numberOfInputs    * sizeof(double));
-    memset(model->outputs,          0, model->info->numberOfOutputs   * sizeof(double));
-    memset(model->parameter,        0, model->info->numberOfParameter * sizeof(double));
-
-    /* Clear function pointers (re-bound in fmi2EnterInitializationMode) */
-    model->getStateDerivatives = NULL;
-    model->integrate           = NULL;
-    model->getOutputs          = NULL;
+    /* Reset all model variables to their start values */
+    resetModel(myfmu2->model);
 
     /* Transition to post-instantiation state */
     myfmu2->state = stateInstantiated;

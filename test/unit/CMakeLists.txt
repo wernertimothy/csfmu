@@ -12,8 +12,7 @@ target_compile_definitions(unity PUBLIC UNITY_INCLUDE_DOUBLE)
 
 # newModel
 add_executable(test_newModel test_newModel.c)
-target_compile_definitions(test_newModel PRIVATE ${MODEL_DEFINE})
-target_link_libraries(test_newModel PRIVATE ${LIB_NAME}_static unity)
+target_link_libraries(test_newModel PRIVATE model_core unity)
 target_include_directories(test_newModel PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/unity/src 
@@ -21,8 +20,7 @@ target_include_directories(test_newModel PRIVATE
 
 # freeModel
 add_executable(test_freeModel test_freeModel.c)
-target_compile_definitions(test_freeModel PRIVATE ${MODEL_DEFINE})
-target_link_libraries(test_freeModel PRIVATE ${LIB_NAME}_static unity)
+target_link_libraries(test_freeModel PRIVATE model_core unity)
 target_include_directories(test_freeModel PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/unity/src 
@@ -30,8 +28,7 @@ target_include_directories(test_freeModel PRIVATE
 
 # eulerForward
 add_executable(test_eulerForward test_eulerForward.c)
-target_compile_definitions(test_eulerForward PRIVATE ${MODEL_DEFINE})
-target_link_libraries(test_eulerForward PRIVATE ${LIB_NAME}_static unity m)
+target_link_libraries(test_eulerForward PRIVATE model_core unity m)
 target_include_directories(test_eulerForward PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/unity/src
@@ -39,8 +36,7 @@ target_include_directories(test_eulerForward PRIVATE
 
 # rungeKutta4
 add_executable(test_rungeKutta4 test_rungeKutta4.c)
-target_compile_definitions(test_rungeKutta4 PRIVATE ${MODEL_DEFINE})
-target_link_libraries(test_rungeKutta4 PRIVATE ${LIB_NAME}_static unity m)
+target_link_libraries(test_rungeKutta4 PRIVATE model_core unity m)
 target_include_directories(test_rungeKutta4 PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/unity/src

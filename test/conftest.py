@@ -1,4 +1,5 @@
 import os
+import fmpy
 import pytest
 from pathlib import Path
 
@@ -22,3 +23,59 @@ def path_to_fmu(path_to_project_root : Path) -> Path:
     path_to_fmu = Path(fmu_dir) / f"{model_name}.fmu"
     assert path_to_fmu.is_file(), f"FMU not found at {path_to_fmu}"
     return path_to_fmu
+
+
+@pytest.fixture(scope="session")
+def model_description(path_to_fmu : Path):
+    """ Return the parsed modelDescription.xml of the FMU. """
+    return fmpy.read_model_description(path_to_fmu)
+
+@pytest.fixture(scope="session")
+def vr(model_description):
+    """ Return a function that maps a variable name to its value reference.
+
+    Value references are assigned by the build (index in the model's variable
+    table), so tests must never hardcode them.
+    """
+    value_references = {v.name: v.valueReference for v in model_description.modelVariables}
+
+    def value_reference_of(name : str) -> int:
+        assert name in value_references, f"FMU has no variable named '{name}'"
+        return value_references[name]
+
+    return value_reference_of
+
+@pytest.fixture
+def new_fmu(path_to_project_root : Path, path_to_fmu : Path, model_description):
+    """ Return a function that creates an instantiated FMU.
+
+    All instances created by a test are freed after the test, also if the
+    test left the FMU in an error state.
+    """
+    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
+    instances = []
+
+    def instantiate(instance_name : str = "test_instance"):
+        fmu = fmpy.fmi2.FMU2Slave(
+            guid=model_description.guid,
+            unzipDirectory=unzipdir,
+            modelIdentifier=model_description.coSimulation.modelIdentifier,
+            instanceName=instance_name
+        )
+        fmu.instantiate()
+        instances.append(fmu)
+        return fmu
+
+    yield instantiate
+
+    for fmu in instances:
+        fmu.freeInstance()
+
+@pytest.fixture
+def initialized_fmu(new_fmu):
+    """ Return an FMU that has completed initialization with default values. """
+    fmu = new_fmu()
+    fmu.setupExperiment(startTime=0.0)
+    fmu.enterInitializationMode()
+    fmu.exitInitializationMode()
+    return fmu

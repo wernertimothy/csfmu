@@ -9,7 +9,8 @@ fmuTemplate provides a minimal, self-contained implementation of the FMI Co-Simu
 Key features:
 - **Plug-and-play model interface**: Add your model without modifying the FMU code
 - **FMU-agnostic design**: Models can be tested and simulated independently
-- **Compile-time model selection**: Choose your model via CMake build options
+- **Declare variables once**: Parameters, inputs, outputs and states are plain C struct fields (`double`, `int` or `bool`), in any order; the `modelDescription.xml` is generated
+- **Build-time model selection**: Choose your model via CMake build options
 - **Extensible architecture**: It's easy to add new models and integrators or extend the fmi implementation.
 
 ## Quickstart
@@ -19,7 +20,7 @@ Let's build your first FMU.
 ### Prerequisites
 - CMake (3.10+)
 - C compiler (GCC, Clang, or MSVC)
-- Python 3.7+ with pip (for testing)
+- uv for testing
 
 ### Build Your First FMU
 
@@ -45,11 +46,8 @@ from there
 
 **Linux / macOS:**
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip3 install --upgrade pip
-pip3 install -r requirements.txt
-pytest
+uv sync
+uv run pytest
 ```
 
 ### What just Happened?

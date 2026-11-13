@@ -3,13 +3,13 @@ import fmpy
 from pathlib import Path
 
 
-def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path) -> None:
+def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial parameter values match modelDescription.xml for first_order model.
 
     Expected:
-        - tau (VR=0): 0.15 (time constant)
-        - k (VR=1): 1.0 (static gain)
+        - tau: 0.15 (time constant)
+        - k: 1.0 (static gain)
     """
     # Read model description
     model_description = fmpy.read_model_description(path_to_fmu)
@@ -35,8 +35,8 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path) -> No
     fmu.enterInitializationMode()
     fmu.exitInitializationMode()
 
-    # Get parameter values (tau=VR0, k=VR1)
-    params = fmu.getReal([0, 1])
+    # Get parameter values
+    params = fmu.getReal([vr("tau"), vr("k")])
     tau = params[0]
     k = params[1]
 
@@ -49,12 +49,12 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path) -> No
     fmu.freeInstance()
 
 
-def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
+def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial input values match modelDescription.xml for first_order model.
 
     Expected:
-        - u (VR=2): 0.0 (input signal)
+        - u: 0.0 (input signal)
     """
     # Read model description
     model_description = fmpy.read_model_description(path_to_fmu)
@@ -80,8 +80,8 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
     fmu.enterInitializationMode()
     fmu.exitInitializationMode()
 
-    # Get input value (u=VR2)
-    u_initial = fmu.getReal([2])[0]
+    # Get input value
+    u_initial = fmu.getReal([vr("u")])[0]
 
     # Verify initial value
     assert abs(u_initial - 0.0) < 1e-9, f"Expected u = 0.0, got {u_initial}"
@@ -91,12 +91,12 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
     fmu.freeInstance()
 
 
-def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
+def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial output values for first_order model.
 
     Expected:
-        - y (VR=3): 0.0 (output equals state x, which starts at 0)
+        - y: 0.0 (output equals state x, which starts at 0)
     """
     # Read model description
     model_description = fmpy.read_model_description(path_to_fmu)
@@ -122,8 +122,8 @@ def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
     fmu.enterInitializationMode()
     fmu.exitInitializationMode()
 
-    # Get output value (y=VR3)
-    y_initial = fmu.getReal([3])[0]
+    # Get output value
+    y_initial = fmu.getReal([vr("y")])[0]
 
     # Verify initial value: y(0) = x(0) = 0
     assert abs(y_initial - 0.0) < 1e-9, f"Expected y = 0.0, got {y_initial}"
@@ -131,3 +131,23 @@ def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path) -> None:
     # Cleanup
     fmu.terminate()
     fmu.freeInstance()
+
+
+def test_initial_output_reflects_initial_state(new_fmu, model_description, vr) -> None:
+    """
+    Verify the output is computed from the initial state at the end of initialization.
+
+    The state x is set before initialization; y = x must hold at t = 0.
+    """
+    if model_description.modelName != "first_order":
+        pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
+
+    fmu = new_fmu()
+    fmu.setReal([vr("x")], [0.7])
+    fmu.setupExperiment(startTime=0.0)
+    fmu.enterInitializationMode()
+    fmu.exitInitializationMode()
+
+    y_initial = fmu.getReal([vr("y")])[0]
+
+    assert abs(y_initial - 0.7) < 1e-12, f"Expected y = 0.7, got {y_initial}"
