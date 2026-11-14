@@ -44,7 +44,7 @@ int main() {
     double time = 0.0;   ///> current time of simulation
     
     /* begin fmu config */
-    fmi2String instanceName        = "fmuTemplate";
+    fmi2String instanceName        = "csfmu";
     fmi2Type   fmuType             = fmi2CoSimulation;
     fmi2String fmuGUID             = "{a1b2c3d4-e5f6-7890-abcd-ef1234567890}";
     fmi2String fmuResourceLocation = "";

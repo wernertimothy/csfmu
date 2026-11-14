@@ -1,4 +1,4 @@
-# Getting started with fmuTemplate
+# Getting started with csfmu
 
 **Welcome.**
 
@@ -21,7 +21,7 @@ The Project is structured as follows.
 
 **Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. Each model also has a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
 
-## Core principle of fmuTemplate
+## Core principle of csfmu
 
 This template is offering an expandable library of models with minimum restrictive implementation specifications alongside a model independent fmi implementation.
 

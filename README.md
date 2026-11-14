@@ -1,10 +1,10 @@
-# fmuTemplate
+# csfmu
 
 **A template for synchronous Co-Simulation FMUs written in C.**
 
 ---
 
-fmuTemplate provides a minimal, self-contained implementation of the FMI Co-Simulation interface in C, designed for a fast and easy integration of your custom models.
+csfmu provides a minimal, self-contained implementation of the FMI Co-Simulation interface in C, designed for a fast and easy integration of your custom models.
 
 Key features:
 - **Plug-and-play model interface**: Add your model without modifying the FMU code
@@ -26,8 +26,8 @@ Let's build your first FMU.
 
 **Linux / macOS:**
 ```bash
-git clone https://github.com/wernertimothy/fmuTemplate.git
-cd fmuTemplate
+git clone https://github.com/wernertimothy/csfmu.git
+cd csfmu
 mkdir -p build && cd build
 cmake -DMODEL=first_order ..
 cmake --build .
@@ -80,7 +80,7 @@ Make sure to pay their page a visit, if you haven't done so already.
 
 And although most of the code was written by a real human beeing, it was heavily supervised by [Claude Code](https://code.claude.com/docs/en/overview), which accelerated the learning curve regarding both FMU and C code significantly. 
 
-[getting started]: docs/fmuTemplate_gettingStarted.md
-[Co-Sim FMUs]: docs/fmuTemplate_coSimFMUs.md
-[fmi2]: docs/fmuTemplate_fmi2Reference.md
-[fmi3]: docs/fmuTemplate_fmi3Reference.md
+[getting started]: docs/csfmu_gettingStarted.md
+[Co-Sim FMUs]: docs/csfmu_coSimFMUs.md
+[fmi2]: docs/csfmu_fmi2Reference.md
+[fmi3]: docs/csfmu_fmi3Reference.md

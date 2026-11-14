@@ -74,7 +74,7 @@ wheels = [
 ]
 
 [[package]]
-name = "fmu-template"
+name = "csfmu"
 version = "0.1.0"
 source = { virtual = "." }
 
