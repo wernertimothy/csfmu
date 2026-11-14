@@ -24,6 +24,23 @@ Let's build your first FMU.
 
 ### Build Your First FMU
 
+The quickest way is the `csfmu` project manager:
+
+```bash
+git clone https://github.com/wernertimothy/csfmu.git
+cd csfmu
+uv sync
+uv run csfmu build first_order
+uv run csfmu test first_order
+```
+
+`csfmu list` shows all models and `csfmu clean` removes the `build/` folder.
+Each model is built in `build/<model>/`, the FMU is placed at `build/<model>.fmu`.
+`csfmu test` builds the FMU first if it doesn't exist yet.
+If you omit the model (or it doesn't exist), csfmu lists the models and lets you pick one.
+
+Alternatively, build with CMake directly.
+
 **Linux / macOS:**
 ```bash
 git clone https://github.com/wernertimothy/csfmu.git

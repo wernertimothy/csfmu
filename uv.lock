@@ -47,6 +47,25 @@ wheels = [
 ]
 
 [[package]]
+name = "csfmu"
+version = "0.1.0"
+source = { editable = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "fmpy" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fmpy", specifier = ">=0.3.20" },
+    { name = "pytest", specifier = ">=8.0" },
+]
+
+[[package]]
 name = "fastjsonschema"
 version = "2.22.3"
 source = { registry = "https://pypi.org/simple" }
@@ -71,25 +90,6 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/4c/5e085b9b0c823eb298af2e50edf98c8d8d9af3f04edbb8e972a8dabc97fb/fmpy-0.3.32-py3-none-any.whl", hash = "sha256:b379deb9417b842028003a288d00c1c5f138d1580e1ff12cc6c42a98719cecf0", size = 6357420, upload-time = "2026-09-09T13:03:28.567Z" },
-]
-
-[[package]]
-name = "csfmu"
-version = "0.1.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "fmpy" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "fmpy", specifier = ">=0.3.20" },
-    { name = "pytest", specifier = ">=8.0" },
 ]
 
 [[package]]

@@ -50,6 +50,12 @@ cmake -DMODEL=first_order -DFMU_OUTPUT_DIR=../fmus ..
 cmake --build .
 ```
 
+Or let the project manager do it, which builds in `build/first_order/` and places the FMU at `build/first_order.fmu`:
+
+```bash
+uv run csfmu build first_order
+```
+
 ## How to add your own Model
 
 Start by picking an apropreate **name** for you model.
