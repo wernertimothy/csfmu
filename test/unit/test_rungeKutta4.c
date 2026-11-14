@@ -34,6 +34,7 @@ static void harmonicOscillator(modelInstance* m) {
 }
 
 void setUp(void) {
+    model = NULL;
 }
 
 void tearDown(void) {
@@ -137,9 +138,6 @@ void test_rungeKutta4_orderOfAccuracy(void) {
     /* Error ratio should be ~16 for a 4th-order method (2^4) */
     double ratio = errors[0] / errors[1];
     TEST_ASSERT_DOUBLE_WITHIN(2.0, 16.0, ratio);
-
-    /* Set model so tearDown doesn't double-free */
-    model = newModel(&ONE_STATE);
 }
 
 void test_rungeKutta4_statesRestoredAfterStep(void) {

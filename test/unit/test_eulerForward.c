@@ -12,6 +12,7 @@ static const modelDefinition THREE_STATES = { .numberOfStates = 3 };
 static modelInstance* model;
 
 void setUp(void) {
+    model = NULL;
 }
 
 void tearDown(void) {
@@ -48,19 +49,19 @@ void test_eulerForward_zeroStepSize(void) {
 }
 
 void test_eulerForward_multipleStates(void) {
-      modelInstance* m = newModel(&THREE_STATES);
-      m->states[0] = 1.0;
-      m->states[1] = 2.0;
-      m->states[2] = 3.0;
-      m->stateDerivatives[0] = 1.0;
-      m->stateDerivatives[1] = 2.0;
-      m->stateDerivatives[2] = 3.0;
+      model = newModel(&THREE_STATES);
+      model->states[0] = 1.0;
+      model->states[1] = 2.0;
+      model->states[2] = 3.0;
+      model->stateDerivatives[0] = 1.0;
+      model->stateDerivatives[1] = 2.0;
+      model->stateDerivatives[2] = 3.0;
 
-      eulerForward(m, 0.1);
+      eulerForward(model, 0.1);
 
-      TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 1.1, m->states[0]);
-      TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 2.2, m->states[1]);
-      TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 3.3, m->states[2]);
+      TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 1.1, model->states[0]);
+      TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 2.2, model->states[1]);
+      TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 3.3, model->states[2]);
 }
 
 void test_eulerForward_variableStepSize(void) {
@@ -75,27 +76,27 @@ void test_eulerForward_variableStepSize(void) {
 }
 
 void test_eulerForward_multipleSteps(void) {
-    modelInstance* m = newModel(&ONE_STATE);
-    m->states[0] = 0.0;
-    m->stateDerivatives[0] = 1.0;
+    model = newModel(&ONE_STATE);
+    model->states[0] = 0.0;
+    model->stateDerivatives[0] = 1.0;
 
     // Step 1
-    eulerForward(m, 0.1);
-    TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.1, m->states[0]);
+    eulerForward(model, 0.1);
+    TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.1, model->states[0]);
 
     // Step 2
-    eulerForward(m, 0.1);
-    TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.2, m->states[0]);
+    eulerForward(model, 0.1);
+    TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.2, model->states[0]);
 
     // Step 3
-    eulerForward(m, 0.1);
-    TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.3, m->states[0]);
+    eulerForward(model, 0.1);
+    TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.3, model->states[0]);
 }
 
 void test_eulerForward_exponentialDecay(void) {
     // Setup: dx/dt = -1.0 * x  (k = 1.0)
-    modelInstance* m = newModel(&ONE_STATE);
-    m->states[0] = 1.0;  // Initial condition
+    model = newModel(&ONE_STATE);
+    model->states[0] = 1.0;  // Initial condition
 
     double k = 1.0;
     double dt = 0.01;     // Small step for accuracy
@@ -104,17 +105,17 @@ void test_eulerForward_exponentialDecay(void) {
 
     for (int i = 0; i < steps; i++) {
         // Compute derivative manually: dx/dt = -k*x
-        m->stateDerivatives[0] = -k * m->states[0];
+        model->stateDerivatives[0] = -k * model->states[0];
 
         // Integrate
-        eulerForward(m, dt);
+        eulerForward(model, dt);
     }
 
     // Analytical solution: x(1) = 1.0 * exp(-1.0 * 1.0) ≈ 0.36788
     double analytical = exp(-k * T);
 
     // Euler forward has discretization error, so use loose tolerance
-    TEST_ASSERT_DOUBLE_WITHIN(0.01, analytical, m->states[0]);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, analytical, model->states[0]);
 }
 
 // ============ Test Runner ============
