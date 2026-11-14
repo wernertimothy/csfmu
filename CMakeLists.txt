@@ -101,10 +101,22 @@ target_include_directories(${LIB_NAME} PUBLIC
 )
 
 # Set the output name to match FMI requirements
+# Only the fmi2* functions are exported (marked by FMI2_Export in the FMI
+# header). Everything else is hidden, otherwise two FMUs of this template
+# loaded into one process could bind to each other's MODEL_DEFINITION.
 set_target_properties(${LIB_NAME} PROPERTIES
     PREFIX ""
     POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
 )
+
+# Bind the library's own calls to fmi2* functions to itself (ELF only), so
+# they cannot be redirected to another FMU loaded with RTLD_GLOBAL
+if(UNIX AND NOT APPLE)
+    set_property(TARGET ${LIB_NAME} APPEND_STRING PROPERTY LINK_FLAGS " -Wl,-Bsymbolic-functions")
+endif()
 
 # Math library (not part of the C library on Linux)
 if(UNIX)
@@ -114,7 +126,6 @@ endif()
 # Windows-specific settings
 if(WIN32)
     target_compile_definitions(${LIB_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
-    set_target_properties(${LIB_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
 #==============================================================================

@@ -224,6 +224,7 @@ if (fmu == NULL) {
 - Internally allocates both `myFMU2` wrapper and `modelInstance` using `newModel(&MODEL_DEFINITION)`
 - **All variables hold their start values** after instantiation (parameters, inputs and states as declared in the model's variable table). Values set afterwards with `fmi2SetReal` etc. are kept through initialization
 - Returns an opaque `fmi2Component` pointer - integration tool should never access internals directly
+- **Only the `fmi2*` functions are exported** from the binary. `MODEL_DEFINITION` and all other internals are hidden, so several FMUs built from this template can be loaded into one process
 - If instantiation fails, logs error via the logger callback before returning NULL (independent of `loggingOn`, category `logStatusError`)
 
 ---
