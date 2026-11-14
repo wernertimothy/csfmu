@@ -3,7 +3,7 @@
 # 1. Project Setup
 #==============================================================================
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.21)
 project(csfmu VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
@@ -115,7 +115,7 @@ set_target_properties(${LIB_NAME} PROPERTIES
 # Bind the library's own calls to fmi2* functions to itself (ELF only), so
 # they cannot be redirected to another FMU loaded with RTLD_GLOBAL
 if(UNIX AND NOT APPLE)
-    set_property(TARGET ${LIB_NAME} APPEND_STRING PROPERTY LINK_FLAGS " -Wl,-Bsymbolic-functions")
+    target_link_options(${LIB_NAME} PRIVATE -Wl,-Bsymbolic-functions)
 endif()
 
 # Math library (not part of the C library on Linux)

@@ -18,7 +18,7 @@ Key features:
 Let's build your first FMU.
 
 ### Prerequisites
-- CMake (3.10+)
+- CMake (3.21+)
 - C compiler (GCC, Clang, or MSVC)
 - uv for testing
 
