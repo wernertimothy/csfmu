@@ -30,13 +30,22 @@ void eulerForward(modelInstance* model, double stepSize)
  * - Fourth-order accuracy: global error is O(h^4)
  * - Reuses pre-computed derivatives (model->stateDerivatives) as k1
  * - Temporarily modifies model->states for intermediate evaluations
- * - Uses C99 variable-length arrays for temporary storage
+ * - Uses model->scratch for temporary storage (5 vectors of length nx)
+ * - A model without states has no storage at all, so it returns early
  * - Modifies model->states in-place with the final result
  */
 void rungeKutta4(modelInstance* model, double stepSize)
 {
     size_t nx = model->def->numberOfStates;
-    double k1[nx], k2[nx], k3[nx], k4[nx], stateBackup[nx];
+    if (nx == 0) {
+        return;
+    }
+
+    double* k1 = model->scratch;
+    double* k2 = k1 + nx;
+    double* k3 = k2 + nx;
+    double* k4 = k3 + nx;
+    double* stateBackup = k4 + nx;
 
     /* k1 = f(x) — reuse already-computed derivatives */
     memcpy(k1, model->stateDerivatives, nx * sizeof(double));

@@ -65,8 +65,8 @@ void eulerForward(modelInstance* model, double stepSize);
  *              be set before calling.
  * @param stepSize Integration time step (dt). Must be positive.
  *
- * @note Uses C99 variable-length arrays for temporary storage. Suitable for
- *       systems with moderate state counts (typical in FMU applications).
+ * @note Uses model->scratch for temporary storage, so no memory is allocated
+ *       and the stack usage does not depend on the number of states.
  * @note model->stateDerivatives must be computed before calling (same contract
  *       as eulerForward).
  *

@@ -460,6 +460,7 @@ The contract is:
 * **model->stateDerivatives** contains the derivatives at the current state (pre-computed before the call)
 * The function must update **model->states** in-place with the result of the integration step
 * If your method needs intermediate derivative evaluations (like multi-stage methods), call **model->getStateDerivatives(model)** internally after temporarily modifying **model->states**
+* For intermediate results use **model->scratch**. It holds `MODEL_SCRATCH_VECTORS` (5) vectors of length nx and is allocated once per instance. Do not use variable-length arrays (`double k1[nx]`): MSVC does not support them
 
 First, add your implementation to `src/integrator.c` and its declaration to `include/integrator.h`.
 
@@ -469,7 +470,12 @@ Here is a minimal example of the **explicit midpoint method** (2nd-order Runge-K
 void midpoint(modelInstance* model, double stepSize)
 {
     size_t nx = model->def->numberOfStates;
-    double k1[nx], stateBackup[nx];
+    if (nx == 0) {
+        return;
+    }
+
+    double* k1 = model->scratch;
+    double* stateBackup = k1 + nx;
 
     /* k1 = f(x) — reuse pre-computed derivatives */
     memcpy(k1, model->stateDerivatives, nx * sizeof(double));

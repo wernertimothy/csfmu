@@ -36,7 +36,7 @@ target_include_directories(test_modelData PRIVATE
 
 # eulerForward
 add_executable(test_eulerForward test_eulerForward.c)
-target_link_libraries(test_eulerForward PRIVATE model_core unity m)
+target_link_libraries(test_eulerForward PRIVATE model_core unity)
 target_include_directories(test_eulerForward PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/unity/src
@@ -44,11 +44,17 @@ target_include_directories(test_eulerForward PRIVATE
 
 # rungeKutta4
 add_executable(test_rungeKutta4 test_rungeKutta4.c)
-target_link_libraries(test_rungeKutta4 PRIVATE model_core unity m)
+target_link_libraries(test_rungeKutta4 PRIVATE model_core unity)
 target_include_directories(test_rungeKutta4 PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/unity/src
 )
+
+# Math library (not part of the C library on Linux, does not exist for MSVC)
+if(UNIX)
+    target_link_libraries(test_eulerForward PRIVATE m)
+    target_link_libraries(test_rungeKutta4 PRIVATE m)
+endif()
 
 #==============================================================================
 # 3. Register tests

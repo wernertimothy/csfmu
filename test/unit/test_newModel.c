@@ -40,6 +40,9 @@ static const modelDefinition DEFINITION = {
 /* A model without parameters, inputs and outputs */
 static const modelDefinition ONLY_STATES = { .numberOfStates = 2 };
 
+/* A model without states */
+static const modelDefinition NO_STATES = { .sizeOfParams = sizeof(Params) };
+
 static modelInstance* model;
 
 void setUp(void) {
@@ -57,6 +60,7 @@ void test_newModel_allocatesMemory(void) {
     TEST_ASSERT_NOT_NULL(model->outputs);
     TEST_ASSERT_NOT_NULL(model->states);
     TEST_ASSERT_NOT_NULL(model->stateDerivatives);
+    TEST_ASSERT_NOT_NULL(model->scratch);
 }
 
 void test_newModel_returnsNullWithoutDefinition(void) {
@@ -112,6 +116,18 @@ void test_newModel_handlesEmptyBlocks(void) {
     TEST_ASSERT_NULL(m->inputs);
     TEST_ASSERT_NULL(m->outputs);
     TEST_ASSERT_NOT_NULL(m->states);
+
+    freeModel(m);
+}
+
+void test_newModel_handlesModelWithoutStates(void) {
+    modelInstance* m = newModel(&NO_STATES);
+
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(m->params);
+    TEST_ASSERT_NULL(m->states);
+    TEST_ASSERT_NULL(m->stateDerivatives);
+    TEST_ASSERT_NULL(m->scratch);
 
     freeModel(m);
 }
@@ -198,6 +214,7 @@ int main(void) {
     RUN_TEST(test_newModel_zeroesEverythingWithoutStartValue);
     RUN_TEST(test_newModel_statesAreAVectorOfDoubles);
     RUN_TEST(test_newModel_handlesEmptyBlocks);
+    RUN_TEST(test_newModel_handlesModelWithoutStates);
     RUN_TEST(test_resetModel_restoresStartValues);
     RUN_TEST(test_resetModel_handlesNull);
     RUN_TEST(test_variableMacros_deriveNameTypeAndRole);

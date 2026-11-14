@@ -38,6 +38,15 @@ extern "C" {
 typedef struct modelInstance modelInstance;
 
 /**
+ * @brief Number of vectors of length nx an integrator may use as work memory.
+ *
+ * The work memory is allocated once by newModel() (see modelInstance.scratch),
+ * so integrators need neither the stack nor malloc() for their intermediate
+ * results.
+ */
+#define MODEL_SCRATCH_VECTORS 5
+
+/**
  * @brief Function pointer type for computing state derivatives.
  *
  * Model-specific implementations compute dx/dt = f(t, x, u) and store
@@ -190,6 +199,8 @@ typedef struct {
  * - A pointer to the model definition
  * - Storage blocks for parameters, inputs and outputs (model-specific structs)
  * - State and state derivative vectors
+ * - Work memory for the integrator (content is undefined between calls; it is
+ *   neither reset by resetModel() nor part of saveModelData())
  * - Function pointers for model equations and integration
  *
  * Memory layout is managed by newModel() and freeModel().
@@ -205,6 +216,7 @@ struct modelInstance {
     void* outputs;                           /**< Output block [def->sizeOfOutputs bytes] */
     double* states;                          /**< Array of current state values [nx] */
     double* stateDerivatives;                /**< Array of computed state derivatives [nx] */
+    double* scratch;                         /**< Work memory for the integrator [MODEL_SCRATCH_VECTORS * nx] */
     stateDerivativesFn getStateDerivatives;  /**< Function to compute dx/dt = f(t,x,u) */
     integrateFn integrate;                   /**< Function to perform time integration */
     outputsFn getOutputs;                    /**< Function to compute y = h(t,x,u) */

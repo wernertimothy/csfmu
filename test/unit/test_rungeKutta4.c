@@ -8,6 +8,7 @@
 /* Minimal model definitions: the integrators only need the number of states */
 static const modelDefinition ONE_STATE    = { .numberOfStates = 1 };
 static const modelDefinition TWO_STATES   = { .numberOfStates = 2 };
+static const modelDefinition NO_STATES    = { .numberOfStates = 0 };
 
 /* Model with one state and one parameter (decay rate k) */
 typedef struct { double k; } Params;
@@ -57,6 +58,17 @@ void test_rungeKutta4_zeroStepSize(void) {
 
     rungeKutta4(model, 0.0);
     TEST_ASSERT_EQUAL_DOUBLE(5.0, model->states[0]);
+}
+
+void test_rungeKutta4_modelWithoutStates(void) {
+    /* A model without states has no state storage; the step must do nothing */
+    model = newModel(&NO_STATES);
+    model->getStateDerivatives = constantDerivative;
+
+    rungeKutta4(model, 0.1);
+
+    TEST_ASSERT_NULL(model->states);
+    TEST_ASSERT_NULL(model->stateDerivatives);
 }
 
 void test_rungeKutta4_multipleStates(void) {
@@ -155,6 +167,7 @@ int main(void) {
 
     // Edge cases
     RUN_TEST(test_rungeKutta4_zeroStepSize);
+    RUN_TEST(test_rungeKutta4_modelWithoutStates);
 
     // Multiple states
     RUN_TEST(test_rungeKutta4_multipleStates);

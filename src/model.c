@@ -46,7 +46,8 @@ modelInstance* newModel(const modelDefinition* def)
         !allocateBlock(&model->inputs, def->sizeOfInputs) ||
         !allocateBlock(&model->outputs, def->sizeOfOutputs) ||
         !allocateBlock((void**)&model->states, sizeOfStates) ||
-        !allocateBlock((void**)&model->stateDerivatives, sizeOfStates)) {
+        !allocateBlock((void**)&model->stateDerivatives, sizeOfStates) ||
+        !allocateBlock((void**)&model->scratch, MODEL_SCRATCH_VECTORS * sizeOfStates)) {
         freeModel(model);
         return NULL;
     }
@@ -231,6 +232,7 @@ void freeModel(modelInstance* model)
     free(model->outputs);
     free(model->states);
     free(model->stateDerivatives);
+    free(model->scratch);
 
     /* Free the model instance itself */
     free(model);
