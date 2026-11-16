@@ -3,7 +3,7 @@ import fmpy
 from pathlib import Path
 
 
-def test_fmu_complete_lifecycle(path_to_project_root: Path, path_to_fmu: Path) -> None:
+def test_fmu_complete_lifecycle(unzipdir: Path, path_to_fmu: Path) -> None:
     """
     Test complete FMU lifecycle with all model-agnostic FMI functions.
 
@@ -14,9 +14,6 @@ def test_fmu_complete_lifecycle(path_to_project_root: Path, path_to_fmu: Path) -
     """
     # Read model description
     model_description = fmpy.read_model_description(path_to_fmu)
-
-    # Extract FMU
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
 
     # Create FMU instance
     fmu = fmpy.fmi2.FMU2Slave(

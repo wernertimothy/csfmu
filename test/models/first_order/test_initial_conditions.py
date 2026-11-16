@@ -3,7 +3,7 @@ import fmpy
 from pathlib import Path
 
 
-def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
+def test_initial_parameters(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial parameter values match modelDescription.xml for first_order model.
 
@@ -17,9 +17,6 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -
     # Skip if not first_order model
     if model_description.modelName != "first_order":
         pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
-
-    # Extract FMU
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
 
     # Create FMU instance
     fmu = fmpy.fmi2.FMU2Slave(
@@ -49,7 +46,7 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -
     fmu.freeInstance()
 
 
-def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
+def test_initial_inputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial input values match modelDescription.xml for first_order model.
 
@@ -62,9 +59,6 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> No
     # Skip if not first_order model
     if model_description.modelName != "first_order":
         pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
-
-    # Extract FMU
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
 
     # Create FMU instance
     fmu = fmpy.fmi2.FMU2Slave(
@@ -91,7 +85,7 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> No
     fmu.freeInstance()
 
 
-def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
+def test_initial_outputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial output values for first_order model.
 
@@ -104,9 +98,6 @@ def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> N
     # Skip if not first_order model
     if model_description.modelName != "first_order":
         pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
-
-    # Extract FMU
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
 
     # Create FMU instance
     fmu = fmpy.fmi2.FMU2Slave(

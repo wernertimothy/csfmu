@@ -2,19 +2,17 @@ import shutil
 import subprocess
 import sys
 import pytest
-import fmpy
 from pathlib import Path
 
 
 @pytest.mark.skipif(sys.platform == "win32" or shutil.which("nm") is None, reason="requires nm")
-def test_only_fmi2_functions_are_exported(path_to_project_root : Path, path_to_fmu : Path, model_description) -> None:
+def test_only_fmi2_functions_are_exported(unzipdir : Path, model_description) -> None:
     """
     Static test: Verify the FMU binary exports nothing but the fmi2* functions.
 
     Exported internals (MODEL_DEFINITION, newModel, ...) would let two FMUs of
     this template collide when an importer loads them into one process.
     """
-    unzipdir = Path(fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work")))
     model_identifier = model_description.coSimulation.modelIdentifier
     binaries = [path for path in unzipdir.glob(f"binaries/*/{model_identifier}.*") if path.suffix in (".so", ".dylib")]
     assert binaries, f"No binary for '{model_identifier}' found in {unzipdir / 'binaries'}"

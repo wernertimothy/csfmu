@@ -125,9 +125,8 @@ def test_clock_does_not_drift_at_large_times(new_fmu) -> None:
         time += 0.001
 
 
-def test_model_exchange_is_rejected(path_to_project_root, path_to_fmu, model_description) -> None:
+def test_model_exchange_is_rejected(unzipdir, model_description) -> None:
     """The FMU is Co-Simulation only: instantiating it as Model Exchange fails."""
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
     fmu = fmpy.fmi2.FMU2Model(
         guid=model_description.guid,
         unzipDirectory=unzipdir,
@@ -135,8 +134,12 @@ def test_model_exchange_is_rejected(path_to_project_root, path_to_fmu, model_des
         instanceName="me_instance",
     )
 
-    with pytest.raises(Exception):
-        fmu.instantiate()
+    # The library must be unloaded here, since there is no instance to free
+    try:
+        with pytest.raises(Exception):
+            fmu.instantiate()
+    finally:
+        fmu.freeLibrary()
 
 
 def test_unsupported_functions_fail(initialized_fmu, model_description) -> None:

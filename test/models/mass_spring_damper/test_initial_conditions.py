@@ -3,7 +3,7 @@ import fmpy
 from pathlib import Path
 
 
-def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
+def test_initial_parameters(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial parameter values match modelDescription.xml for mass_spring_damper model.
 
@@ -16,8 +16,6 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -
 
     if model_description.modelName != "mass_spring_damper":
         pytest.skip(f"Test specific to mass_spring_damper model, got {model_description.modelName}")
-
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
 
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
@@ -41,7 +39,7 @@ def test_initial_parameters(path_to_project_root: Path, path_to_fmu: Path, vr) -
     fmu.freeInstance()
 
 
-def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
+def test_initial_inputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial input values match modelDescription.xml for mass_spring_damper model.
 
@@ -52,8 +50,6 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> No
 
     if model_description.modelName != "mass_spring_damper":
         pytest.skip(f"Test specific to mass_spring_damper model, got {model_description.modelName}")
-
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
 
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
@@ -75,7 +71,7 @@ def test_initial_inputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> No
     fmu.freeInstance()
 
 
-def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> None:
+def test_initial_outputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     """
     Verify initial output values for mass_spring_damper model.
 
@@ -87,8 +83,6 @@ def test_initial_outputs(path_to_project_root: Path, path_to_fmu: Path, vr) -> N
 
     if model_description.modelName != "mass_spring_damper":
         pytest.skip(f"Test specific to mass_spring_damper model, got {model_description.modelName}")
-
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
 
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,

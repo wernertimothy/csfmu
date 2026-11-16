@@ -26,6 +26,17 @@ def path_to_fmu(path_to_project_root : Path) -> Path:
 
 
 @pytest.fixture(scope="session")
+def unzipdir(path_to_fmu : Path, tmp_path_factory) -> Path:
+    """ Return a path object to the extracted FMU.
+
+    The FMU is extracted once per test session. Extracting it again would
+    overwrite the binary, which must not happen while it is loaded: Windows
+    refuses it and Linux crashes.
+    """
+    return Path(fmpy.extract(path_to_fmu, tmp_path_factory.mktemp("fmu")))
+
+
+@pytest.fixture(scope="session")
 def model_description(path_to_fmu : Path):
     """ Return the parsed modelDescription.xml of the FMU. """
     return fmpy.read_model_description(path_to_fmu)
@@ -46,13 +57,12 @@ def vr(model_description):
     return value_reference_of
 
 @pytest.fixture
-def new_fmu(path_to_project_root : Path, path_to_fmu : Path, model_description):
+def new_fmu(unzipdir : Path, model_description):
     """ Return a function that creates an instantiated FMU.
 
     All instances created by a test are freed after the test, also if the
     test left the FMU in an error state.
     """
-    unzipdir = fmpy.extract(path_to_fmu, path_to_project_root.joinpath("work"))
     instances = []
 
     def instantiate(instance_name : str = "test_instance"):
