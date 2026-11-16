@@ -322,9 +322,9 @@ Things to know:
 1. **The order of the entries is free.** Group them however you find readable.
 2. **Names must be unique.** By default a variable is published under its field name. Here `Outputs` and `States` both have a field `x`, so the states are published under a different name with `STATE_AS(field, "name")`. The same exists as `PARAM_AS`, `INPUT_AS` and `OUTPUT_AS`.
 3. **Every state must be listed.** All fields of `States` have to appear in the table. The start value of a state is its initial condition.
-4. **Other fields are optional.** A field of `Params`, `Inputs` or `Outputs` that is not listed stays internal to your model and starts at zero.
+4. **List every parameter, input and output too.** Only listed variables appear in the `modelDescription.xml`. The build does not stop you from leaving out a field of `Params`, `Inputs` or `Outputs`, but such a field cannot be reached from outside and stays at zero: an input that is never set, an output nobody can read, a parameter without a start value.
 
-If you get one of these wrong, the build stops with a message that tells you what to fix.
+If you break rule 2 or 3, the build stops with a message that tells you what to fix.
 
 #### The model definition
 
