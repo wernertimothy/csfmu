@@ -9,7 +9,7 @@ static const modelVariable VARIABLES[] = {
       .description = "Static gain of the first-order system" },
     { INPUT(u),   .start = 0.0,  .unit = "1",
       .description = "Input signal to the first-order system" },
-    { OUTPUT(y),                 .unit = "1",
+    { OUTPUT(y),                 .unit = "1", .dependsOn = "",
       .description = "Output of the first-order system (equal to state x)" },
     { STATE(x),   .start = 0.0,  .unit = "1",
       .description = "State of the first-order system" },

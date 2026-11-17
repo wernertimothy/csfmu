@@ -9,10 +9,15 @@
  * - The value reference of a variable is its index in the variable table.
  *   fmi2Functions.c uses the same mapping.
  * - The role of a variable determines causality, variability and initial.
+ * - The inputs an output depends on directly (dependsOn) become the
+ *   dependencies of the output in the ModelStructure.
  * - The capability flags and log categories describe fmi2Functions.c and
  *   are therefore defined here, not in the model.
  *
- * Usage: generate_model_description <output file>
+ * The model identifier is the name of the FMU binary. It is passed in by
+ * the build and must be equal to the name of the model definition.
+ *
+ * Usage: generate_model_description <output file> <model identifier>
  */
 
 #include <stdio.h>
@@ -129,9 +134,114 @@ static bool unitIsDefined(const modelDefinition* def, const char* unit)
     return false;
 }
 
+/**
+ * Step through a list of names that are separated by spaces
+ *
+ * Returns the start of the next name and stores its length, or returns
+ * NULL if there is no further name. Continue with the returned position
+ * plus the length.
+ */
+static const char* nextName(const char* position, size_t* length)
+{
+    while (*position == ' ') {
+        position++;
+    }
+    if (*position == '\0') {
+        return NULL;
+    }
+
+    *length = strcspn(position, " ");
+    return position;
+}
+
+/**
+ * Check whether a list of names (separated by spaces) contains a name
+ */
+static bool nameListContains(const char* list, const char* name)
+{
+    size_t length = 0;
+
+    for (const char* entry = nextName(list, &length); entry; entry = nextName(entry + length, &length)) {
+        if (strlen(name) == length && strncmp(entry, name, length) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Check whether a name is a valid C identifier (required for the model
+ * identifier, which is also the name of the FMU binary)
+ */
+static bool isIdentifier(const char* name)
+{
+    if (name[0] == '\0' || (name[0] >= '0' && name[0] <= '9')) {
+        return false;
+    }
+    for (const char* c = name; *c != '\0'; c++) {
+        bool isLetter = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z');
+        bool isDigit = (*c >= '0' && *c <= '9');
+        if (!isLetter && !isDigit && *c != '_') {
+            return false;
+        }
+    }
+    return true;
+}
+
 /***************************************************
  * Validation
  ***************************************************/
+
+/**
+ * Check the dependsOn list of one variable
+ *
+ * Prints one message per problem and returns the number of problems.
+ */
+static int validateDependencies(const modelDefinition* def, const modelVariable* variable)
+{
+    int problems = 0;
+
+    if (variable->role != VAR_OUTPUT) {
+        fprintf(stderr, "error: '%s' is not an output, only outputs can have dependsOn\n", variable->name);
+        return 1;
+    }
+
+    size_t length = 0;
+
+    for (const char* entry = nextName(variable->dependsOn, &length); entry;
+         entry = nextName(entry + length, &length)) {
+
+        /* The name must be an input of this model */
+        bool isInput = false;
+        for (size_t k = 0; k < def->numberOfVariables; k++) {
+            const modelVariable* other = &def->variables[k];
+            if (other->role == VAR_INPUT && other->name &&
+                strlen(other->name) == length && strncmp(other->name, entry, length) == 0) {
+                isInput = true;
+            }
+        }
+        if (!isInput) {
+            fprintf(stderr, "error: output '%s' depends on '%.*s', which is not an input of this model "
+                            "(dependsOn takes the published names of inputs, separated by spaces)\n",
+                            variable->name, (int)length, entry);
+            problems++;
+        }
+
+        /* The name must not have been listed before */
+        size_t earlierLength = 0;
+        for (const char* earlier = nextName(variable->dependsOn, &earlierLength); earlier != entry;
+             earlier = nextName(earlier + earlierLength, &earlierLength)) {
+            if (earlierLength == length && strncmp(earlier, entry, length) == 0) {
+                fprintf(stderr, "error: output '%s' lists '%.*s' more than once in dependsOn\n",
+                                variable->name, (int)length, entry);
+                problems++;
+                break;
+            }
+        }
+    }
+
+    return problems;
+}
 
 /**
  * Check the model definition for mistakes that the compiler cannot catch
@@ -140,18 +250,31 @@ static bool unitIsDefined(const modelDefinition* def, const char* unit)
  *
  * Checks:
  * - Required fields of the definition are set
+ * - The name of the definition is the model identifier
  * - Variable names are present and unique
  * - Every variable lies inside its storage block
  * - The states cover the state vector exactly (every double of the struct
  *   States is published once)
  * - Start values lie within [min, max]
+ * - dependsOn is only used by outputs and names inputs of this model
  */
-static int validateDefinition(const modelDefinition* def)
+static int validateDefinition(const modelDefinition* def, const char* modelIdentifier)
 {
     int problems = 0;
 
     if (!def->name || !def->guid) {
         fprintf(stderr, "error: model definition needs a name and a guid\n");
+        problems++;
+    }
+    if (def->name && !isIdentifier(def->name)) {
+        fprintf(stderr, "error: the model name '%s' is not a valid C identifier "
+                        "(letters, digits and underscores, not starting with a digit)\n", def->name);
+        problems++;
+    }
+    if (def->name && strcmp(def->name, modelIdentifier) != 0) {
+        fprintf(stderr, "error: the model definition is named '%s' but the FMU binary is named '%s' "
+                        "(.name must be equal to the name of the model folder)\n",
+                        def->name, modelIdentifier);
         problems++;
     }
     if (!def->getStateDerivatives || !def->getOutputs || !def->integrate) {
@@ -219,6 +342,11 @@ static int validateDefinition(const modelDefinition* def)
             (variable->max.set && variable->start > variable->max.value)) {
             fprintf(stderr, "error: start value of '%s' lies outside [min, max]\n", variable->name);
             problems++;
+        }
+
+        /* Dependencies must be inputs of this model */
+        if (variable->dependsOn) {
+            problems += validateDependencies(def, variable);
         }
     }
 
@@ -300,6 +428,20 @@ static void writeUnitDefinitions(FILE* file, const modelDefinition* def)
     if (opened) {
         fputs("    </UnitDefinitions>\n\n", file);
     }
+}
+
+/**
+ * Title of the group of variables with the given role
+ */
+static const char* roleTitle(varRole role)
+{
+    switch (role) {
+        case VAR_PARAMETER: return "Parameters";
+        case VAR_INPUT:     return "Inputs";
+        case VAR_OUTPUT:    return "Outputs";
+        case VAR_STATE:     return "States";
+    }
+    return "";
 }
 
 /**
@@ -395,10 +537,14 @@ static void writeScalarVariable(FILE* file, const modelVariable* variable, size_
 /**
  * Write a list of Unknown elements, one per output
  *
- * The index refers to the position in ModelVariables (1-based). No
- * dependencies attribute is written, which means "depends on all knowns".
+ * The index refers to the position in ModelVariables (1-based).
+ *
+ * With dependencies, the inputs an output depends on directly are written
+ * as declared by the model (dependsOn). An output that declares nothing
+ * gets no dependencies attribute, which means "depends on all knowns".
  */
-static void writeOutputUnknowns(FILE* file, const modelDefinition* def, const char* element)
+static void writeOutputUnknowns(FILE* file, const modelDefinition* def, const char* element,
+                                bool withDependencies)
 {
     bool opened = false;
 
@@ -410,7 +556,25 @@ static void writeOutputUnknowns(FILE* file, const modelDefinition* def, const ch
             fprintf(file, "        <%s>\n", element);
             opened = true;
         }
-        fprintf(file, "            <Unknown index=\"%zu\"/>\n", k + 1);
+        fprintf(file, "            <Unknown index=\"%zu\"", k + 1);
+
+        /* Indices of the inputs named in dependsOn, in ascending order */
+        const char* dependsOn = def->variables[k].dependsOn;
+        if (withDependencies && dependsOn) {
+            const char* separator = "";
+
+            fputs(" dependencies=\"", file);
+            for (size_t j = 0; j < def->numberOfVariables; j++) {
+                const modelVariable* other = &def->variables[j];
+                if (other->role == VAR_INPUT && nameListContains(dependsOn, other->name)) {
+                    fprintf(file, "%s%zu", separator, j + 1);
+                    separator = " ";
+                }
+            }
+            fputs("\"", file);
+        }
+
+        fputs("/>\n", file);
     }
 
     if (opened) {
@@ -474,17 +638,26 @@ static void writeModelDescription(FILE* file, const modelDefinition* def)
         fputs("/>\n\n", file);
     }
 
-    /* Model variables (value reference = index in the variable table) */
+    /* Model variables (value reference = index in the variable table).
+       The variables keep the order of the table; a comment marks every
+       place where the role changes. */
     fputs("    <ModelVariables>\n", file);
     for (size_t k = 0; k < def->numberOfVariables; k++) {
+        varRole role = def->variables[k].role;
+        if (k == 0) {
+            fprintf(file, "        <!-- %s -->\n", roleTitle(role));
+        } else if (role != def->variables[k - 1].role) {
+            fprintf(file, "\n        <!-- %s -->\n", roleTitle(role));
+        }
         writeScalarVariable(file, &def->variables[k], k);
     }
     fputs("    </ModelVariables>\n\n", file);
 
-    /* Model structure */
+    /* Model structure (the initial unknowns also depend on parameters and
+       states, which dependsOn does not describe: "depends on all knowns") */
     fputs("    <ModelStructure>\n", file);
-    writeOutputUnknowns(file, def, "Outputs");
-    writeOutputUnknowns(file, def, "InitialUnknowns");
+    writeOutputUnknowns(file, def, "Outputs", true);
+    writeOutputUnknowns(file, def, "InitialUnknowns", false);
     fputs("    </ModelStructure>\n\n", file);
 
     fputs("</fmiModelDescription>\n", file);
@@ -496,14 +669,14 @@ static void writeModelDescription(FILE* file, const modelDefinition* def)
 
 int main(int argc, char* argv[])
 {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <output file>\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <output file> <model identifier>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     const modelDefinition* def = &MODEL_DEFINITION;
 
-    int problems = validateDefinition(def);
+    int problems = validateDefinition(def, argv[2]);
     if (problems > 0) {
         fprintf(stderr, "modelDescription.xml was not generated: %d problem(s) in the model definition\n",
                 problems);

@@ -628,7 +628,7 @@ All access functions below work the same way:
 
 Integration tools should always look up value references by variable name in the `modelDescription.xml` and never hardcode them.
 
-**Outputs are always consistent with the other variables.** Every setter marks the outputs as stale, and every getter recomputes them first if needed (by calling the model's output equation). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last.
+**Outputs are always consistent with the other variables.** Every setter marks the outputs as stale, and every getter recomputes them first if needed (by calling the model's output equation). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last. Which inputs an output depends on is declared by the model (`.dependsOn`) and published in the `ModelStructure` of the `modelDescription.xml`.
 
 **Example for the `first_order` model:**
 

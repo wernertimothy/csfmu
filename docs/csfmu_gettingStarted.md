@@ -298,6 +298,7 @@ After the macro you can add optional properties:
 | `.min`, `.max` | Bounds | `.min = SOME(0.0)` |
 | `.nominal` | Nominal value (real variables) | `.nominal = 1.0` |
 | `.variability` | Parameters only: `VAR_TUNABLE` (default) or `VAR_FIXED` | `.variability = VAR_FIXED` |
+| `.dependsOn` | Outputs only: the inputs the output depends on directly (see [below](#direct-feedthrough)) | `.dependsOn = ""` |
 
 ```c
 #include "variables.h"
@@ -428,6 +429,8 @@ You do not write this file. During the build, a small program (`src/fmi2ModelDes
 | output | `output` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
 | state | `local` | `continuous` | `exact` |
 
+The model name becomes the `modelIdentifier`, which is also the name of the binary inside the FMU. The `.name` of your model definition must therefore be equal to the name of your model folder; the build stops if it is not.
+
 The **value reference** of a variable is simply its position in your variable table. The FMI implementation uses the same rule to find a variable, which is why the two can never disagree. When you use the FMU, always address variables **by name** and let your tool look up the value reference:
 
 ```python
@@ -437,6 +440,23 @@ result = simulate_fmu("build/lorenz_attractor.fmu",
 ```
 
 Since the states are published, initial conditions can be set from outside like any other start value. Parameters marked `VAR_FIXED` and states can be set until the initialization is finished; inputs and tunable parameters also between steps.
+
+#### Direct feedthrough
+
+An output has *direct feedthrough* if your output equation uses an input, e.g. `y = x + u`: the output then changes in the very moment the input is set. Integration tools need to know this to find algebraic loops when FMUs are connected in a feedback loop.
+
+Only you know what your output equation does, so you declare it with `.dependsOn`, which takes the names of the inputs separated by spaces:
+
+```c
+    { OUTPUT(y), .dependsOn = "" },      /* y = x        : no input             */
+    { OUTPUT(e), .dependsOn = "u" },     /* e = u - x    : only u               */
+    { OUTPUT(z), .dependsOn = "u w" },   /* z = u + w    : u and w              */
+    { OUTPUT(v) },                       /* not declared : assumed to be all    */
+```
+
+If you declare nothing, the `modelDescription.xml` says that the output depends on **all** inputs. That is always safe, but tools may then report algebraic loops that do not exist. Most models compute their outputs from the states only, so `.dependsOn = ""` is the common case.
+
+The build checks that the names are inputs of your model, and the test suite checks your declaration against the FMU: an output must not change when an input it does not depend on is set.
 
 #### Quick Checklist
 

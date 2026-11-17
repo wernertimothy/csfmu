@@ -183,7 +183,7 @@ set(MODEL_DESCRIPTION_XML "${CMAKE_BINARY_DIR}/modelDescription.xml")
 
 add_custom_command(
     OUTPUT ${MODEL_DESCRIPTION_XML}
-    COMMAND generate_model_description ${MODEL_DESCRIPTION_XML}
+    COMMAND generate_model_description ${MODEL_DESCRIPTION_XML} ${LIB_NAME}
     DEPENDS generate_model_description
     COMMENT "Generating modelDescription.xml for model '${MODEL}' ..."
     VERBATIM

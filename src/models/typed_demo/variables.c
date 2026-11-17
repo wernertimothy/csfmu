@@ -9,7 +9,7 @@
  * by role or type.
  */
 static const modelVariable VARIABLES[] = {
-    { OUTPUT(limit_reached),
+    { OUTPUT(limit_reached), .dependsOn = "",
       .description = "True once the ramp has reached the limit" },
     { INPUT(enable),    .start = 1,
       .description = "The ramp runs while this input is true" },
@@ -19,11 +19,11 @@ static const modelVariable VARIABLES[] = {
       .description = "Ramp value" },
     { PARAM(direction), .start = 1, .min = SOME(-1), .max = SOME(1),
       .description = "Direction of the ramp: +1 up, -1 down" },
-    { OUTPUT(level),
+    { OUTPUT(level),    .dependsOn = "",
       .description = "Ramp value rounded down to an integer" },
     { INPUT(boost),     .start = 1, .min = SOME(0),
       .description = "Multiplier of the ramp rate" },
-    { OUTPUT(y),        .unit = "1",
+    { OUTPUT(y),        .unit = "1", .dependsOn = "",
       .description = "Ramp value (limited if clamp is true)" },
     { PARAM(clamp),     .start = 0,
       .description = "Limit the output y to the value of limit" },

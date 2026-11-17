@@ -56,6 +56,22 @@ if(UNIX)
     target_link_libraries(test_rungeKutta4 PRIVATE m)
 endif()
 
+# modelDescription.xml generator, linked against a model definition that uses
+# every feature of the generator (instead of a real model)
+add_executable(generate_fixture_description
+    ${CMAKE_SOURCE_DIR}/src/fmi2ModelDescription.c
+    fixtures/generator_model.c
+)
+target_include_directories(generate_fixture_description PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+# The same definition with an output that depends on an unknown input
+add_executable(generate_invalid_description
+    ${CMAKE_SOURCE_DIR}/src/fmi2ModelDescription.c
+    fixtures/generator_model.c
+)
+target_include_directories(generate_invalid_description PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(generate_invalid_description PRIVATE INVALID_DEPENDENCY)
+
 #==============================================================================
 # 3. Register tests
 #==============================================================================
@@ -65,3 +81,26 @@ add_test(NAME test_freeModel COMMAND test_freeModel)
 add_test(NAME test_modelData COMMAND test_modelData)
 add_test(NAME test_eulerForward COMMAND test_eulerForward)
 add_test(NAME test_rungeKutta4 COMMAND test_rungeKutta4)
+
+# The generated modelDescription.xml must be equal to the handwritten one
+add_test(NAME test_modelDescription_golden
+    COMMAND ${CMAKE_COMMAND}
+        -DGENERATOR=$<TARGET_FILE:generate_fixture_description>
+        -DIDENTIFIER=generator_model
+        -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/generator_model.xml
+        -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/generator_model.expected.xml
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/compare_generated.cmake
+)
+
+# The generator must reject mistakes in the model definition
+add_test(NAME test_modelDescription_rejectsWrongIdentifier
+    COMMAND generate_fixture_description ${CMAKE_CURRENT_BINARY_DIR}/rejected.xml another_name
+)
+add_test(NAME test_modelDescription_rejectsUnknownDependency
+    COMMAND generate_invalid_description ${CMAKE_CURRENT_BINARY_DIR}/rejected.xml generator_model
+)
+set_tests_properties(
+    test_modelDescription_rejectsWrongIdentifier
+    test_modelDescription_rejectsUnknownDependency
+    PROPERTIES WILL_FAIL TRUE
+)

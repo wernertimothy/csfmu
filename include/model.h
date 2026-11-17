@@ -138,6 +138,9 @@ typedef struct {
     optReal        max;          /**< Upper bound (optional) */
     double         nominal;      /**< Nominal value, 0 = not set (real variables only) */
     varVariability variability;  /**< Parameters only, defaults to VAR_TUNABLE */
+    const char*    dependsOn;    /**< Outputs only: names of the inputs the output depends on
+                                      directly, separated by spaces. "" = none,
+                                      NULL (default) = all inputs */
 } modelVariable;
 
 /**
