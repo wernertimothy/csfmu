@@ -3,7 +3,7 @@
 Usage:
     csfmu new <model>
     csfmu rm <model>
-    csfmu build [<model>]
+    csfmu build [<model>] [-o <dir>]
     csfmu test [<model>] [-- <pytest args>]
     csfmu list
     csfmu clean
@@ -85,9 +85,17 @@ def require(program: str) -> None:
         raise SystemExit(f"Error: '{program}' not found on PATH")
 
 
-def build(root: Path, model: str) -> int:
-    """ Configure and build the model in build/<model>/; the FMU is placed in build/. """
+def build(root: Path, model: str, output_dir: Path | None = None) -> int:
+    """ Configure and build the model in build/<model>/; the FMU is placed in build/.
+
+    If an output folder is given, the FMU is also copied there. It is not
+    built there directly: the FMU is only packaged when the library is
+    relinked, so an up-to-date model would not be packaged again.
+    """
     require("cmake")
+    if output_dir is not None and output_dir.exists() and not output_dir.is_dir():
+        print(f"Error: '{output_dir}' is not a folder")
+        return 1
     build_dir = root / "build"
     model_build_dir = build_dir / model
 
@@ -100,7 +108,14 @@ def build(root: Path, model: str) -> int:
     ])
     if returncode != 0:
         return returncode
-    return run(["cmake", "--build", str(model_build_dir)])
+    returncode = run(["cmake", "--build", str(model_build_dir)])
+    if returncode != 0 or output_dir is None or output_dir.resolve() == build_dir.resolve():
+        return returncode
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fmu = shutil.copy2(build_dir / f"{model}.fmu", output_dir)
+    print(f"Copied FMU to {fmu}")
+    return 0
 
 
 def test(root: Path, model: str, pytest_args: list[str]) -> int:
@@ -267,6 +282,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
     build_parser = commands.add_parser("build", help="build the FMU of a model")
     build_parser.add_argument("model", nargs="?", help="name of a folder under src/models/ (prompted if omitted)")
+    build_parser.add_argument("-o", "--output-dir", type=Path,
+                              help="also place the FMU in this folder (created if missing)")
 
     test_parser = commands.add_parser("test", help="run the tests of a model (builds it if needed)")
     test_parser.add_argument("model", nargs="?", help="name of a folder under src/models/ (prompted if omitted)")
@@ -306,7 +323,9 @@ def main(argv: list[str] | None = None) -> int:
     if model is None:
         return 1
     if args.command == "build":
-        return build(root, model)
+        # Relative to where csfmu was called from, not to the project root
+        output_dir = args.output_dir.expanduser().resolve() if args.output_dir else None
+        return build(root, model, output_dir)
     return test(root, model, args.pytest_args)
 
 

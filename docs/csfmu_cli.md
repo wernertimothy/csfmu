@@ -130,7 +130,7 @@ Keep in mind that `first_order` is the default model of the `CMakeLists.txt` and
 
 `rm` also removes leftovers of a model that is no longer complete, e.g. a `test/models/<model>/` whose model folder was deleted by hand.
 
-### `build [<model>]`
+### `build [<model>] [-o <dir>]`
 
 Builds the FMU of a model.
 
@@ -141,12 +141,24 @@ uv run csfmu build first_order
 The model is configured and built in `build/<model>/`, and the packaged FMU is placed at `build/<model>.fmu`.
 Each model has its own build folder, so switching between models doesn't trigger a full rebuild.
 
+With `-o <dir>` (or `--output-dir <dir>`) the FMU is additionally copied to a folder of your choice, which is created if it doesn't exist.
+A relative path is relative to the directory you call csfmu from.
+
+```bash
+uv run csfmu build first_order -o fmus
+```
+
+The FMU is still built in `build/` first and then copied, also when the model is already up to date.
+`test` and `rm` only know `build/<model>.fmu`; copies made with `-o` are yours, `rm` does not remove them.
+
 This is the same as:
 
 ```bash
 cmake -S . -B build/first_order -DMODEL=first_order -DFMU_OUTPUT_DIR=build
 cmake --build build/first_order
 ```
+
+where `-DFMU_OUTPUT_DIR` sets the folder the FMU is placed in.
 
 ### `test [<model>] [-- <pytest args>]`
 
