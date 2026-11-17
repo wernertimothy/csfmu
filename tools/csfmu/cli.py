@@ -41,7 +41,7 @@ def available_models(root: Path) -> list[str]:
         has_equations = (directory / "equations.c").is_file() or (directory / "equations.cpp").is_file()
         if directory.is_dir() and has_variables and has_equations:
             models.append(directory.name)
-    return sorted(models)
+    return sorted(models, key=str.lower)
 
 
 def resolve_model(root: Path, name: str | None) -> str | None:
@@ -131,10 +131,13 @@ def new(root: Path, name: str) -> int:
     if error is not None:
         print(f"Error: {error}")
         return 1
-    for directory in (root / "src" / "models" / name, root / "test" / "models" / name):
-        if directory.exists():
-            print(f"Error: model '{name}' already exists ({directory.relative_to(root)})")
-            return 1
+    # Names that only differ in case are the same folder on macOS and Windows,
+    # so they count as the same model on every platform
+    for parent in (root / "src" / "models", root / "test" / "models"):
+        for existing in parent.iterdir() if parent.is_dir() else ():
+            if existing.name.lower() == name.lower():
+                print(f"Error: model '{name}' already exists ({existing.relative_to(root).as_posix()})")
+                return 1
 
     print(f"Created model '{name}':")
     for path in create_model(root, name):
@@ -154,7 +157,9 @@ def model_traces(root: Path, name: str) -> list[Path]:
         root / "build" / name,
         root / "build" / f"{name}.fmu",
     ]
-    return [path for path in candidates if path.exists()]
+    # Compare the exact names: on macOS and Windows, path.exists() ignores case
+    # and would let "rm First_Order" remove first_order
+    return [path for path in candidates if path.exists() and path.name in os.listdir(path.parent)]
 
 
 def references_to(root: Path, name: str, excluded: list[Path]) -> list[Path]:

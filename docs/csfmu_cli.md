@@ -76,16 +76,16 @@ uv run csfmu test my_model
 
 **Naming rules.** The model name ends up as folder name, CMake target, FMI `modelIdentifier`, file name of the FMU and Python package name of the tests. It therefore has to be valid for all of them:
 
-* only lowercase letters `a-z`, digits `0-9` and underscores `_`
+* only letters `a-z` and `A-Z`, digits `0-9` and underscores `_`
 * starts with a letter, no double underscore `__`, no trailing underscore
 * at most 64 characters
 * not a C, C++ or Python keyword (e.g. `int`, `class`, `import`)
-* not a name reserved by CMake or this project (e.g. `all`, `test`, `install`, `unity`, `model_core`) or by Windows (e.g. `con`, `nul`)
+* not a name reserved by CMake or this project (e.g. `all`, `test`, `install`, `ALL_BUILD`, `unity`, `model_core`) or by Windows (e.g. `con`, `nul`), in any case
 
-In short, use `snake_case`, like `first_order` or `lorenz_attractor`.
-Uppercase letters are not allowed because macOS and Windows do not distinguish `My_Model` from `my_model` in file names.
+For example `first_order`, `lorenz_attractor` or `PID_controller`.
 
 If `src/models/<model>/` or `test/models/<model>/` already exists, `new` stops with an error and changes nothing.
+Names that only differ in case count as the same model (`My_Model` already exists if `my_model` does), on every platform: macOS and Windows do not distinguish them in file names, so the project would break when checked out there.
 
 To undo `new`, use `rm`.
 
@@ -96,6 +96,8 @@ Removes a model and all of its files.
 ```bash
 uv run csfmu rm my_model
 ```
+
+The model name must be given exactly, including its case: `rm First_Order` does not remove `first_order`.
 
 The following files and folders are removed, as far as they exist:
 

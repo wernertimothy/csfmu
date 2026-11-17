@@ -8,7 +8,7 @@ from string import Template
 
 MAX_NAME_LENGTH = 64
 
-NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
+NAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 
 # The model name becomes the FMI modelIdentifier, which must be a valid C
 # function name, and the equations may be written in C++
@@ -29,14 +29,17 @@ CPP_KEYWORDS = {
 }
 
 # The model name is also the name of a CMake target, so it must not collide
-# with the built-in targets or the other targets of this project
+# with the built-in targets (incl. those of Visual Studio) or the other targets
+# of this project. Compared in lowercase: file names of targets that only differ
+# in case collide on macOS and Windows.
 RESERVED_TARGETS = {
     "all", "clean", "help", "install", "test", "package", "edit_cache", "rebuild_cache",
+    "all_build", "zero_check", "run_tests",
     "model_core", "unity", "model_description", "generate_model_description",
     "example_model", "example_fmu",
 }
 
-# Folder names that Windows does not allow
+# Folder names that Windows does not allow, in any case
 WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
 
@@ -46,7 +49,7 @@ def validate_name(name: str) -> str | None:
     The name is used as folder name, CMake target, FMI modelIdentifier,
     file name of the FMU and Python package name of the model's tests.
     """
-    hint = "use lowercase letters, digits and underscores, starting with a letter (e.g. my_model)"
+    hint = "use letters, digits and underscores, starting with a letter (e.g. my_model)"
     if not NAME_PATTERN.fullmatch(name):
         return f"invalid model name '{name}': {hint}"
     if len(name) > MAX_NAME_LENGTH:
@@ -55,15 +58,15 @@ def validate_name(name: str) -> str | None:
         return f"invalid model name '{name}': no double or trailing underscores (e.g. my_model)"
     if name in C_KEYWORDS or name in CPP_KEYWORDS or keyword.iskeyword(name):
         return f"invalid model name '{name}': it is a C, C++ or Python keyword"
-    if name in RESERVED_TARGETS or name in WINDOWS_RESERVED:
+    if name.lower() in RESERVED_TARGETS or name.lower() in WINDOWS_RESERVED:
         return f"invalid model name '{name}': the name is reserved by the build system or the OS"
     return None
 
 
 def camel_case(name: str) -> str:
-    """ Return the snake_case name in camelCase: first_order -> firstOrder. """
+    """ Return the snake_case name in camelCase: first_order -> firstOrder, my_PID -> myPID. """
     first, *rest = name.split("_")
-    return first + "".join(part.capitalize() for part in rest)
+    return first + "".join(part[:1].upper() + part[1:] for part in rest)
 
 
 VARIABLES_H = Template("""\
