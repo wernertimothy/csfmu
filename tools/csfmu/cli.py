@@ -1,6 +1,8 @@
 """Command line interface of the csfmu project manager.
 
 Usage:
+    csfmu new <model>
+    csfmu rm <model>
     csfmu build [<model>]
     csfmu test [<model>] [-- <pytest args>]
     csfmu list
@@ -9,10 +11,13 @@ Usage:
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from .scaffold import create_model, validate_name
 
 
 def find_root() -> Path:
@@ -120,6 +125,120 @@ def test(root: Path, model: str, pytest_args: list[str]) -> int:
     return run([sys.executable, "-m", "pytest", *pytest_args], cwd=root, env=env)
 
 
+def new(root: Path, name: str) -> int:
+    """ Create a new model from the template in src/models/<name>/ and its tests in test/models/<name>/. """
+    error = validate_name(name)
+    if error is not None:
+        print(f"Error: {error}")
+        return 1
+    for directory in (root / "src" / "models" / name, root / "test" / "models" / name):
+        if directory.exists():
+            print(f"Error: model '{name}' already exists ({directory.relative_to(root)})")
+            return 1
+
+    print(f"Created model '{name}':")
+    for path in create_model(root, name):
+        print(f"  {path.relative_to(root)}")
+    print("Next:")
+    print(f"  uv run csfmu build {name}")
+    print(f"  uv run csfmu test {name}")
+    return 0
+
+
+def model_traces(root: Path, name: str) -> list[Path]:
+    """ Return the existing files and folders that belong to the model only. """
+    candidates = [
+        root / "src" / "models" / name,
+        root / "test" / "models" / name,
+        root / "examples" / f"example_{name}.py",
+        root / "build" / name,
+        root / "build" / f"{name}.fmu",
+    ]
+    return [path for path in candidates if path.exists()]
+
+
+def references_to(root: Path, name: str, excluded: list[Path]) -> list[Path]:
+    """ Return the text files of the project, other than the excluded ones, that mention the name as a word. """
+    # Hidden folders are caches and tool settings, except for the CI workflows
+    skipped_dirs = {"build", "external", "__pycache__"}
+    pattern = re.compile(rf"\b{re.escape(name)}\b")
+    references = []
+    for directory, subdirs, files in os.walk(root):
+        directory = Path(directory)
+        subdirs[:] = sorted(
+            d for d in subdirs
+            if d not in skipped_dirs
+            and (not d.startswith(".") or d == ".github")
+            and directory / d not in excluded
+        )
+        for file in sorted(files):
+            path = directory / file
+            if path in excluded:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if pattern.search(text):
+                references.append(path)
+    return references
+
+
+def confirm(question: str) -> bool:
+    """ Ask a yes/no question that defaults to yes; no input (EOF) counts as no. """
+    while True:
+        try:
+            answer = input(f"{question} [Y/n] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if answer in ("", "y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+
+
+def remove(root: Path, name: str) -> int:
+    """ Remove all files and folders of a model after asking the user. """
+    # The name must not be a path, otherwise it could point outside of src/models/
+    if name in ("", ".", "..") or "/" in name or "\\" in name:
+        print(f"Error: '{name}' is not a model name")
+        return 1
+
+    traces = model_traces(root, name)
+    if not traces:
+        print(f"Error: model '{name}' not found")
+        print("Available models:")
+        for model in available_models(root):
+            print(f"  {model}")
+        return 1
+
+    def show(path: Path) -> str:
+        return f"{path.relative_to(root).as_posix()}{'/' if path.is_dir() else ''}"
+
+    print(f"This removes model '{name}':")
+    for path in traces:
+        print(f"  {show(path)}")
+    references = references_to(root, name, traces)
+    if references:
+        print(f"These files still mention '{name}' and are not changed:")
+        for path in references:
+            print(f"  {show(path)}")
+
+    if not confirm(f"Remove model '{name}'?"):
+        print("Aborted, nothing was removed")
+        return 1
+
+    for path in traces:
+        label = show(path)
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        print(f"Removed {label}")
+    return 0
+
+
 def clean(root: Path) -> int:
     """ Remove the build/ folder. """
     build_dir = root / "build"
@@ -132,8 +251,14 @@ def clean(root: Path) -> int:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="csfmu", description="Build and test csfmu FMUs.")
+    parser = argparse.ArgumentParser(prog="csfmu", description="Create, build and test csfmu FMUs.")
     commands = parser.add_subparsers(dest="command", required=True)
+
+    new_parser = commands.add_parser("new", help="create a new model from a template")
+    new_parser.add_argument("model", help="name of the new folder under src/models/ (e.g. my_model)")
+
+    rm_parser = commands.add_parser("rm", help="remove a model and all its files")
+    rm_parser.add_argument("model", help="name of a folder under src/models/")
 
     build_parser = commands.add_parser("build", help="build the FMU of a model")
     build_parser.add_argument("model", nargs="?", help="name of a folder under src/models/ (prompted if omitted)")
@@ -167,6 +292,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "clean":
         return clean(root)
+    if args.command == "new":
+        return new(root, args.model)
+    if args.command == "rm":
+        return remove(root, args.model)
 
     model = resolve_model(root, args.model)
     if model is None:

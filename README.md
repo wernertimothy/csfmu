@@ -22,9 +22,7 @@ Let's build your first FMU.
 - C compiler (GCC, Clang, or MSVC)
 - uv for testing
 
-### Build Your First FMU
-
-The quickest way is the `csfmu` project manager:
+The quickest way to build and test a model is via the `csfmu` cli:
 
 ```bash
 git clone https://github.com/wernertimothy/csfmu.git
@@ -34,10 +32,9 @@ uv run csfmu build first_order
 uv run csfmu test first_order
 ```
 
-`csfmu list` shows all models and `csfmu clean` removes the `build/` folder.
-Each model is built in `build/<model>/`, the FMU is placed at `build/<model>.fmu`.
-`csfmu test` builds the FMU first if it doesn't exist yet.
-If you omit the model (or it doesn't exist), csfmu lists the models and lets you pick one.
+To learn more about the cli, go [here][csfmu cli].
+
+### Build Your First FMU (manually)
 
 Alternatively, build with CMake directly.
 
@@ -52,7 +49,7 @@ cmake --build .
 
 This creates `first_order.fmu` in the `build/` directory. The FMU is named after the selected model. You can change the output directory with `-DFMU_OUTPUT_DIR=<path>`.
 
-### Test It
+### And Test It (manually)
 
 Navigate back to the repository root.
 ```bash
@@ -98,6 +95,7 @@ Make sure to pay their page a visit, if you haven't done so already.
 And although most of the code was written by a real human beeing, it was heavily supervised by [Claude Code](https://code.claude.com/docs/en/overview), which accelerated the learning curve regarding both FMU and C code significantly. 
 
 [getting started]: docs/csfmu_gettingStarted.md
+[csfmu cli]: docs/csfmu_cli.md
 [Co-Sim FMUs]: docs/csfmu_coSimFMUs.md
 [fmi2]: docs/csfmu_fmi2Reference.md
 [fmi3]: docs/csfmu_fmi3Reference.md
