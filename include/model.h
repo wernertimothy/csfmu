@@ -62,6 +62,10 @@ typedef void (*stateDerivativesFn)(modelInstance* model);
  * Advances the model state by one time step using a numerical integration
  * method (e.g., Euler forward, Runge-Kutta).
  *
+ * Contract: on entry model->time is t and model->stateDerivatives holds
+ * f(t, x, u). Before every further derivative evaluation the integrator sets
+ * model->time to the time of that stage. On return model->time is t + stepSize.
+ *
  * @param model Pointer to the model instance to integrate
  * @param stepSize Time step for integration (dt)
  */
@@ -200,6 +204,7 @@ typedef struct {
  *
  * Represents a single instance of a dynamical system model, containing:
  * - A pointer to the model definition
+ * - The current time t
  * - Storage blocks for parameters, inputs and outputs (model-specific structs)
  * - State and state derivative vectors
  * - Work memory for the integrator (content is undefined between calls; it is
@@ -214,6 +219,7 @@ typedef struct {
  */
 struct modelInstance {
     const modelDefinition* def;              /**< Definition this instance was created from */
+    double time;                             /**< Current time t, owned by the model (advanced by the integrator) */
     void* params;                            /**< Parameter block [def->sizeOfParams bytes] */
     void* inputs;                            /**< Input block [def->sizeOfInputs bytes] */
     void* outputs;                           /**< Output block [def->sizeOfOutputs bytes] */
@@ -249,7 +255,7 @@ modelInstance* newModel(const modelDefinition* def);
 /**
  * @brief Brings a model instance back to its state right after newModel().
  *
- * Zeroes all storage blocks, writes the start value of every variable in
+ * Sets the time to 0, zeroes all storage blocks, writes the start value of every variable in
  * the definition's variable table and (re-)binds the function pointers
  * from the definition. This function is NULL-safe.
  *
@@ -274,8 +280,8 @@ void* modelVariableAddress(modelInstance* model, size_t index);
 /**
  * @brief Returns the number of bytes needed to store the data of a model.
  *
- * The data of a model are its parameter, input and output blocks, its
- * states and its state derivatives.
+ * The data of a model are its time, its parameter, input and output
+ * blocks, its states and its state derivatives.
  *
  * @param def Definition of the model
  *
@@ -288,8 +294,8 @@ size_t modelDataSize(const modelDefinition* def);
  * @brief Copies the data of a model instance into a buffer.
  *
  * Together with restoreModelData() this allows taking a snapshot of a model
- * and returning to it later. The buffer is a plain copy of the storage
- * blocks, so it is only valid for the same model definition on the same
+ * and returning to it later. The buffer is a plain copy of the time and
+ * the storage blocks, so it is only valid for the same model definition on the same
  * platform.
  *
  * @param model  Pointer to the model instance

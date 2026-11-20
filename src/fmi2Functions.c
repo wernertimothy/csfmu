@@ -36,11 +36,10 @@ typedef struct {
     /* Metadata */
     char* instanceName;
 
-    /* Experiment time bounds */
+    /* Experiment time bounds (the current time is model->time) */
     fmi2Real    startTime;
     fmi2Real    stopTime;
     fmi2Boolean stopTimeDefined;
-    fmi2Real    time;
 
     /* Logging configuration */
     unsigned int logLevel;
@@ -119,14 +118,13 @@ typedef enum {
  * Holds everything that changes during a simulation. Instance name,
  * callbacks and log level belong to the instance and are not part of it.
  * The struct contains no pointers, so its bytes are also the serialized
- * form of the FMU state.
+ * form of the FMU state. The current time is part of the model data.
  */
 typedef struct {
     uint32_t      magic;     /* SNAPSHOT_MAGIC */
     uint32_t      guidHash;  /* Identifies the model the snapshot was taken from */
     fmi2Real      startTime;
     fmi2Real      stopTime;
-    fmi2Real      time;
     fmi2Boolean   stopTimeDefined;
     fmi2Boolean   outputsAreStale;
     unsigned int  state;
@@ -497,7 +495,7 @@ void fmi2FreeInstance(fmi2Component c)
  * - tolerance parameter ignored (the integrators use a fixed step size)
  * - Validates stopTime >= startTime if defined
  * - If a stop time is defined, fmi2DoStep refuses to step beyond it
- * - Initializes internal clock to startTime
+ * - Initializes the internal clock (the model's time) to startTime
  */
 fmi2Status fmi2SetupExperiment(
     fmi2Component c,
@@ -528,7 +526,7 @@ fmi2Status fmi2SetupExperiment(
     myfmu2->startTime = startTime;
     myfmu2->stopTimeDefined = stopTimeDefined ? fmi2True : fmi2False;
     myfmu2->stopTime = stopTimeDefined ? stopTime : 0.0;
-    myfmu2->time = startTime;
+    myfmu2->model->time = startTime;
 
     if (stopTimeDefined) {
         logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. End = %.4f", startTime, stopTime);
@@ -990,6 +988,7 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  * - Validates internal clock matches environment clock
  * - Refuses to step beyond the stop time of the experiment (if defined)
  * - Inputs are held constant during the step
+ * - The model owns the time: model->time is the internal clock
  * - Fails if a state is not finite after the step (integration diverged)
  * - Computes outputs after integration via getOutputs()
  *
@@ -999,8 +998,12 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *   numberOfSteps = ceil(communicationStepSize / maxStepSize)
  * - SUBSTEP_TOLERANCE keeps rounding in the division from adding a step
  *   (0.3 / 0.1 must give 3 steps, not 4)
+ * - Every sub-step starts at currentCommunicationPoint + k * actualStepSize,
+ *   computed from the integer k, so rounding errors do not accumulate over
+ *   the sub-steps
  * - The internal clock is set to the end of the step as seen by the
  *   integration tool, so rounding errors do not accumulate over the steps
+ *   either, and the outputs are evaluated exactly at the communication point
  */
 fmi2Status fmi2DoStep(
     fmi2Component c,
@@ -1024,9 +1027,9 @@ fmi2Status fmi2DoStep(
     }
 
     /* Validate time synchronization (also fails if currentCommunicationPoint is not finite) */
-    if (!(fabs(myfmu2->time - currentCommunicationPoint) <= timeTolerance(myfmu2->time))) {
+    if (!(fabs(model->time - currentCommunicationPoint) <= timeTolerance(model->time))) {
         return enterErrorState(myfmu2, "FMU internal clock (%.16g) does not match environment clock (%.16g).",
-                               myfmu2->time, currentCommunicationPoint);
+                               model->time, currentCommunicationPoint);
     }
 
     /* Validate stop time */
@@ -1050,6 +1053,7 @@ fmi2Status fmi2DoStep(
 
     /* Perform sub-steps */
     for (size_t k = 0; k < (size_t)numberOfSteps; k++) {
+        model->time = currentCommunicationPoint + (fmi2Real)k * actualStepSize;
         model->getStateDerivatives(model);
         model->integrate(model, actualStepSize);
     }
@@ -1063,7 +1067,7 @@ fmi2Status fmi2DoStep(
     }
 
     /* Update internal clock */
-    myfmu2->time = nextCommunicationPoint;
+    model->time = nextCommunicationPoint;
 
     /* Compute outputs */
     model->getOutputs(model);
@@ -1118,7 +1122,8 @@ fmi2Status fmi2Terminate(fmi2Component c)
  *
  * Implementation notes:
  * - Resets the experiment (start time 0.0, no stop time)
- * - Resets all model variables to their start values (see resetModel())
+ * - Resets the time to 0.0 and all model variables to their start values
+ *   (see resetModel())
  * - Preserves instance identity (name, callbacks, log level)
  * - Can be called from any state and is the way out of the error state
  */
@@ -1133,9 +1138,8 @@ fmi2Status fmi2Reset(fmi2Component c)
     myfmu2->startTime       = 0.0;
     myfmu2->stopTime        = 0.0;
     myfmu2->stopTimeDefined = fmi2False;
-    myfmu2->time            = 0.0;
 
-    /* Reset all model variables to their start values */
+    /* Reset the time and all model variables to their start values */
     resetModel(myfmu2->model);
     myfmu2->outputsAreStale = fmi2True;
 
@@ -1224,7 +1228,7 @@ fmi2Status fmi2GetRealStatus(fmi2Component c, const fmi2StatusKind s, fmi2Real* 
         return statusNotAvailable(myfmu2, __func__, s);
     }
 
-    *value = myfmu2->time;
+    *value = myfmu2->model->time;
     return fmi2OK;
 }
 
@@ -1365,7 +1369,6 @@ fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate)
     snapshot->guidHash        = guidHash(myfmu2);
     snapshot->startTime       = myfmu2->startTime;
     snapshot->stopTime        = myfmu2->stopTime;
-    snapshot->time            = myfmu2->time;
     snapshot->stopTimeDefined = myfmu2->stopTimeDefined;
     snapshot->outputsAreStale = myfmu2->outputsAreStale;
     snapshot->state           = myfmu2->state;
@@ -1373,7 +1376,7 @@ fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate)
 
     *FMUstate = snapshot;
 
-    logEventMessage(myfmu2, "FMU state saved at time %.16g.", myfmu2->time);
+    logEventMessage(myfmu2, "FMU state saved at time %.16g.", myfmu2->model->time);
     return fmi2OK;
 }
 
@@ -1401,13 +1404,12 @@ fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate)
 
     myfmu2->startTime       = snapshot->startTime;
     myfmu2->stopTime        = snapshot->stopTime;
-    myfmu2->time            = snapshot->time;
     myfmu2->stopTimeDefined = snapshot->stopTimeDefined;
     myfmu2->outputsAreStale = snapshot->outputsAreStale;
     myfmu2->state           = snapshot->state;
     restoreModelData(myfmu2->model, snapshot->modelData);
 
-    logEventMessage(myfmu2, "FMU state restored to time %.16g.", myfmu2->time);
+    logEventMessage(myfmu2, "FMU state restored to time %.16g.", myfmu2->model->time);
     return fmi2OK;
 }
 

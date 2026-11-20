@@ -1,7 +1,7 @@
 #include "variables.h"
 
 /**
- * Spring-Mass-Damper System: dx/dt = f(x, u)
+ * Spring-Mass-Damper System: dx/dt = f(t, x, u)
  *
  * Implements the differential equation:
  *     dx/dt = v
@@ -35,7 +35,7 @@ void massSpringDamper(modelInstance* model)
 }
 
 /**
- * Mass-Spring-Damper output equation: y = h(x, u)
+ * Mass-Spring-Damper output equation: y = h(t, x, u)
  *
  * For this system, the outputs are simply equal to the states:
  *     y = x

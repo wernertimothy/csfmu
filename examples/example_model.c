@@ -42,27 +42,25 @@ int main() {
 
     /* simualtion config */
     double dt   = 0.01;  ///> sample time
-    double T    = 1.0;   ///> final simulation time
-    double time = 0.0;   ///> current time of simulation
+    double T    = 1.0;   ///> final simulation time (the current time is model->time)
     
     int N = (int) T/dt;
     for (int k=0; k<N; k++) {
         /* log current state */
-        printf("t = %.2f, y = %.2f\n", time, outputs->y);
+        printf("t = %.2f, y = %.2f\n", model->time, outputs->y);
 
         /* set model inputs */
         inputs->u = 1.0;
 
-        /* step in time */
+        /* step in time (the integrator advances model->time by dt) */
         model->getStateDerivatives(model);
         model->integrate(model, dt);
-        time += dt;
 
         /* write outputs */
         model->getOutputs(model);
     }
     /* log current state */
-    printf("t = %.2f, y = %.2f\n", time, outputs->y);
+    printf("t = %.2f, y = %.2f\n", model->time, outputs->y);
 
 
     /* free model memory */

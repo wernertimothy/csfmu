@@ -33,6 +33,23 @@ static void harmonicOscillator(modelInstance* m) {
     m->stateDerivatives[1] = -m->states[0];
 }
 
+/* Time-dependent derivative: dx/dt = cos(t), exact solution x(t) = sin(t) */
+static void cosineOfTime(modelInstance* m) {
+    m->stateDerivatives[0] = cos(m->time);
+}
+
+/* Records the time of every derivative evaluation */
+static double evaluationTimes[8];
+static int numberOfEvaluations;
+
+static void recordTime(modelInstance* m) {
+    if (numberOfEvaluations < 8) {
+        evaluationTimes[numberOfEvaluations] = m->time;
+    }
+    numberOfEvaluations++;
+    m->stateDerivatives[0] = 0.0;
+}
+
 void setUp(void) {
     model = NULL;
 }
@@ -155,6 +172,57 @@ void test_rungeKutta4_statesRestoredAfterStep(void) {
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, analytical, model->states[0]);
 }
 
+void test_rungeKutta4_evaluatesTheStagesAtTheirTimes(void) {
+    model = newModel(&ONE_STATE);
+    model->getStateDerivatives = recordTime;
+    model->time = 0.3;
+    numberOfEvaluations = 0;
+
+    /* k1 is evaluated by the caller at t = 0.3 */
+    rungeKutta4(model, 0.1);
+
+    TEST_ASSERT_EQUAL_INT(3, numberOfEvaluations);
+    TEST_ASSERT_EQUAL_DOUBLE(0.3 + 0.05, evaluationTimes[0]);
+    TEST_ASSERT_EQUAL_DOUBLE(0.3 + 0.05, evaluationTimes[1]);
+    TEST_ASSERT_EQUAL_DOUBLE(0.3 + 0.1, evaluationTimes[2]);
+    TEST_ASSERT_EQUAL_DOUBLE(0.3 + 0.1, model->time);
+}
+
+void test_rungeKutta4_modelWithoutStatesAdvancesTheTime(void) {
+    model = newModel(&NO_STATES);
+    model->time = 1.0;
+
+    rungeKutta4(model, 0.25);
+
+    TEST_ASSERT_EQUAL_DOUBLE(1.25, model->time);
+}
+
+void test_rungeKutta4_orderOfAccuracyForTimeVaryingModel(void) {
+    /* dx/dt = cos(t): 4th order only if every stage sees its own time */
+    double errors[2];
+    double stepSizes[2] = {0.2, 0.1};
+
+    for (int run = 0; run < 2; run++) {
+        modelInstance* m = newModel(&ONE_STATE);
+        m->getStateDerivatives = cosineOfTime;
+
+        double dt = stepSizes[run];
+        int steps = (int)(2.0 / dt + 0.5);
+
+        for (int i = 0; i < steps; i++) {
+            m->getStateDerivatives(m);
+            rungeKutta4(m, dt);
+        }
+
+        errors[run] = fabs(m->states[0] - sin(m->time));
+        TEST_ASSERT_DOUBLE_WITHIN(1e-12, 2.0, m->time);
+        freeModel(m);
+    }
+
+    double ratio = errors[0] / errors[1];
+    TEST_ASSERT_DOUBLE_WITHIN(2.0, 16.0, ratio);
+}
+
 // ============ Test Runner ============
 
 int main(void) {
@@ -174,6 +242,11 @@ int main(void) {
     RUN_TEST(test_rungeKutta4_exponentialDecay);
     RUN_TEST(test_rungeKutta4_orderOfAccuracy);
     RUN_TEST(test_rungeKutta4_statesRestoredAfterStep);
+
+    // Time
+    RUN_TEST(test_rungeKutta4_evaluatesTheStagesAtTheirTimes);
+    RUN_TEST(test_rungeKutta4_modelWithoutStatesAdvancesTheTime);
+    RUN_TEST(test_rungeKutta4_orderOfAccuracyForTimeVaryingModel);
 
     return UNITY_END();
 }

@@ -118,6 +118,16 @@ void test_eulerForward_exponentialDecay(void) {
     TEST_ASSERT_DOUBLE_WITHIN(0.01, analytical, model->states[0]);
 }
 
+void test_eulerForward_advancesTheTime(void) {
+    model = newModel(&ONE_STATE);
+    model->time = 0.3;
+    model->stateDerivatives[0] = 1.0;
+
+    eulerForward(model, 0.1);
+
+    TEST_ASSERT_EQUAL_DOUBLE(0.3 + 0.1, model->time);
+}
+
 // ============ Test Runner ============
 
 int main(void) {
@@ -137,6 +147,7 @@ int main(void) {
     // Behavioral
     RUN_TEST(test_eulerForward_multipleSteps);
     RUN_TEST(test_eulerForward_variableStepSize);
+    RUN_TEST(test_eulerForward_advancesTheTime);
 
     // Validation
     RUN_TEST(test_eulerForward_exponentialDecay);

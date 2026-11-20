@@ -156,11 +156,14 @@ The model instance gives you access to the storage of your model:
 
 | Member | Type | Content |
 |--------|------|---------|
+| `model->time` | `double` | the current time **t** |
 | `model->params` | `void*` | your `Params` struct |
 | `model->inputs` | `void*` | your `Inputs` struct |
 | `model->outputs` | `void*` | your `Outputs` struct |
 | `model->states` | `double*` | the state vector |
 | `model->stateDerivatives` | `double*` | the state derivatives, same layout as the states |
+
+For a time-varying model read **t** from `model->time`, e.g. `double t = model->time;`. The integrator sets it to the time of every stage it evaluates, so you never compute it yourself. The output equation sees the time of the communication point.
 
 The state vector is an array of doubles, because that is what the numerical integrators work on. Your `States` struct consists only of doubles, so it can be used as a view on that array that gives every entry a name. This is the one place where a cast is needed.
 
@@ -479,9 +482,10 @@ void yourIntegrator(modelInstance* model, double stepSize);
 ```
 
 The contract is:
-* **model->stateDerivatives** contains the derivatives at the current state (pre-computed before the call)
+* On entry **model->time** is the time **t** at the start of the step, and **model->stateDerivatives** contains the derivatives at **t** and the current state (pre-computed before the call)
 * The function must update **model->states** in-place with the result of the integration step
-* If your method needs intermediate derivative evaluations (like multi-stage methods), call **model->getStateDerivatives(model)** internally after temporarily modifying **model->states**
+* If your method needs intermediate derivative evaluations (like multi-stage methods), call **model->getStateDerivatives(model)** internally after temporarily modifying **model->states** and setting **model->time** to the time of that stage. Otherwise a model that depends on time loses the order of your method
+* On return **model->time** must be **t + stepSize**
 * For intermediate results use **model->scratch**. It holds `MODEL_SCRATCH_VECTORS` (5) vectors of length nx and is allocated once per instance. Do not use variable-length arrays (`double k1[nx]`): MSVC does not support them
 
 First, add your implementation to `src/integrator.c` and its declaration to `include/integrator.h`.
@@ -491,19 +495,22 @@ Here is a minimal example of the **explicit midpoint method** (2nd-order Runge-K
 ```c
 void midpoint(modelInstance* model, double stepSize)
 {
+    double t0 = model->time;
     size_t nx = model->def->numberOfStates;
     if (nx == 0) {
+        model->time = t0 + stepSize;
         return;
     }
 
     double* k1 = model->scratch;
     double* stateBackup = k1 + nx;
 
-    /* k1 = f(x) — reuse pre-computed derivatives */
+    /* k1 = f(t, x) — reuse pre-computed derivatives */
     memcpy(k1, model->stateDerivatives, nx * sizeof(double));
     memcpy(stateBackup, model->states, nx * sizeof(double));
 
-    /* evaluate at midpoint: f(x + h/2 * k1) */
+    /* evaluate at midpoint: f(t + h/2, x + h/2 * k1) */
+    model->time = t0 + 0.5 * stepSize;
     for (size_t i = 0; i < nx; i++) {
         model->states[i] = stateBackup[i] + 0.5 * stepSize * k1[i];
     }
@@ -513,6 +520,7 @@ void midpoint(modelInstance* model, double stepSize)
     for (size_t i = 0; i < nx; i++) {
         model->states[i] = stateBackup[i] + stepSize * model->stateDerivatives[i];
     }
+    model->time = t0 + stepSize;
 }
 ```
 

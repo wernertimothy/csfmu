@@ -44,7 +44,7 @@ private:
 extern "C" {
 
 /**
- * Pendulum on cart state equation: dx/dt = f(x, u)
+ * Pendulum on cart state equation: dx/dt = f(t, x, u)
  *
  * Computes the four state derivatives for the inverted pendulum system.
  */
@@ -61,7 +61,7 @@ void pendulumOnCartSystem(modelInstance* model) {
 }
 
 /**
- * Pendulum on cart output equation: y = h(x, u)
+ * Pendulum on cart output equation: y = h(t, x, u)
  *
  * Outputs:
  *   x     = cart position

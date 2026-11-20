@@ -2,7 +2,7 @@
 #include "variables.h"
 
 /**
- * Typed demo state equation: dx/dt = f(x, u)
+ * Typed demo state equation: dx/dt = f(t, x, u)
  *
  * Implements a ramp that can be switched on and off:
  *     dx/dt = rate * direction * boost    if enable
@@ -28,7 +28,7 @@ void typedDemoSystem(modelInstance* model)
 }
 
 /**
- * Typed demo output equation: y = h(x, u)
+ * Typed demo output equation: y = h(t, x, u)
  *
  *     limit_reached = x >= limit
  *     level         = floor(x)

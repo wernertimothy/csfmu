@@ -168,7 +168,7 @@ EQUATIONS_C = Template("""\
 #include "variables.h"
 
 /**
- * Integrator state equation: dx/dt = f(x, u)
+ * Integrator state equation: dx/dt = f(t, x, u)
  *
  * Implements the differential equation:
  *     dx/dt = k*u
@@ -180,6 +180,7 @@ EQUATIONS_C = Template("""\
  *
  * Implementation notes:
  * - Views the storage blocks through the structs from variables.h
+ * - The current time t is model->time (this equation does not use it)
  * - The state vector is a double array; States gives its entries names
  * - Writes result directly to the state derivatives
  */
@@ -194,7 +195,7 @@ void ${camel}System(modelInstance* model)
 }
 
 /**
- * Integrator output equation: y = h(x, u)
+ * Integrator output equation: y = h(t, x, u)
  *
  * The output is equal to the state:
  *     y = x

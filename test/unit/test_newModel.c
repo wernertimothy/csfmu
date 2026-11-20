@@ -95,6 +95,7 @@ void test_newModel_zeroesEverythingWithoutStartValue(void) {
     const Params*  p   = model->params;
     const Outputs* out = model->outputs;
 
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, model->time);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, p->internal);  /* not published */
     TEST_ASSERT_EQUAL_DOUBLE(0.0, out->y);
     TEST_ASSERT_EQUAL_INT(0, out->count);
@@ -138,6 +139,7 @@ void test_resetModel_restoresStartValues(void) {
     Outputs* out = model->outputs;
 
     /* arrange: change everything */
+    model->time = 99.0;
     p->gain = 99.0;
     p->mode = 99;
     p->enabled = false;
@@ -152,6 +154,7 @@ void test_resetModel_restoresStartValues(void) {
     resetModel(model);
 
     /* assert */
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, model->time);
     TEST_ASSERT_EQUAL_DOUBLE(2.5, p->gain);
     TEST_ASSERT_EQUAL_INT(3, p->mode);
     TEST_ASSERT_TRUE(p->enabled);

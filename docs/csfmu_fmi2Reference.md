@@ -338,7 +338,7 @@ if (status != fmi2OK) {
 #### Notes
 - Must be called before `fmi2EnterInitializationMode`
 - `tolerance` is typically undefined for co-simulation (solver-specific)
-- Internally stores `startTime`, `stopTime`, and initializes internal time clock to `startTime`
+- Internally stores `startTime`, `stopTime`, and initializes the internal clock to `startTime`. The clock is the model's time `model->time`, so the equations `f(t,x,u)` and `h(t,x,u)` see `t = startTime` during initialization
 - If `stopTimeDefined` is true, `stopTime` must be `>= startTime`, and [`fmi2DoStep`](#fmi2dostep) later refuses to step beyond it. If it is false, `stopTime` is ignored
 - `startTime` must be finite
 - The time values are in seconds (SI units as per FMI standard)
@@ -1026,14 +1026,14 @@ The communication step is divided into the smallest number of **equal** sub-step
 
 2. **Execute sub-steps**:
    - Take `numberOfSteps` steps of size `actualStepSize`
-   - Each step: compute derivatives → integrate states
+   - Each step: set `model->time = currentCommunicationPoint + k * actualStepSize` → compute derivatives → integrate states (the integrator sets the stage times itself)
 
 3. **Check the result**:
    - If a state is NaN or infinite, the integration has diverged and the function returns `fmi2Error`
 
 4. **Update time and outputs**:
-   - Set the internal clock to `currentCommunicationPoint + communicationStepSize`
-   - Compute outputs from final state
+   - Set the internal clock (`model->time`) to `currentCommunicationPoint + communicationStepSize`
+   - Compute outputs from final state, so they are evaluated exactly at the communication point
 
 **Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
 
@@ -1247,6 +1247,7 @@ fmi2FreeFMUstate(fmu, &snapshot);
 - **The snapshot belongs to the caller**: It is not freed by `fmi2FreeInstance`. Free it with `fmi2FreeFMUstate`
 - **Initialize the pointer with NULL**: An uninitialized `fmi2FMUstate` would be taken for an existing snapshot
 - **One block of memory**: A snapshot is a single allocation without pointers. All snapshots of a model have the same size, which is why an existing one can be reused
+- **Contents**: the experiment (start and stop time), the state machine and all model data: the model's time, parameters, inputs, outputs, states and state derivatives
 
 ---
 

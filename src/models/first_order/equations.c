@@ -1,7 +1,7 @@
 #include "variables.h"
 
 /**
- * First-order lag system (PT1) state equation: dx/dt = f(x, u)
+ * First-order lag system (PT1) state equation: dx/dt = f(t, x, u)
  *
  * Implements the differential equation:
  *     dx/dt = (-x + k*u) / tau
@@ -31,7 +31,7 @@ void firstOrderSystem(modelInstance* model)
 }
 
 /**
- * First-order system output equation: y = h(x, u)
+ * First-order system output equation: y = h(t, x, u)
  *
  * For this system, the output is simply equal to the state:
  *     y = x
