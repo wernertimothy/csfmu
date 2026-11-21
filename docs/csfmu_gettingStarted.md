@@ -478,7 +478,14 @@ Only you know what your output equation does, so you declare it with `.dependsOn
 
 If you declare nothing, the `modelDescription.xml` says that the output depends on **all** inputs. That is always safe, but tools may then report algebraic loops that do not exist. Most models compute their outputs from the states only, so `.dependsOn = ""` is the common case.
 
-The build checks that the names are inputs of your model, and the test suite checks your declaration against the FMU: an output must not change when an input it does not depend on is set.
+The build checks that the names are inputs of your model, and the test suite (`test/integration/test_feedthrough.py`) checks your declaration against the FMU in both directions:
+
+- An output must **not** change when an input it does not depend on is set.
+- An output **must** change right after an input it declares is set, without a simulation step in between.
+
+FMI itself only says that a declared output *may* depend on the input. The second check is stricter, so declare only real dependencies, and choose start values at which the dependency is active (e.g. a gain that is not 0, an input that is not in saturation). An undeclared output (all inputs) is not checked in this direction.
+
+The `pi_controller` model (`src/models/pi_controller/`) is the worked example: `e = r - y_m` and `u = Kp*e + Ki*x_I` both declare `.dependsOn = "r y_m"`, and `test/models/pi_controller/test_feedthrough_oracle.py` checks the values right after a set.
 
 #### Quick Checklist
 
