@@ -226,6 +226,28 @@ void test_modelDefaultTolerance_handlesNull(void) {
     TEST_ASSERT_EQUAL_DOUBLE(MODEL_DEFAULT_TOLERANCE, modelDefaultTolerance(NULL));
 }
 
+void test_newModel_allocatesTheRollbackBuffer(void) {
+    /* stepStart holds a full copy of the model data, even for a model that
+     * consists of nothing but its time and tolerance */
+    static const modelDefinition EMPTY = { 0 };
+    const modelDefinition* definitions[] = { &DEFINITION, &ONLY_STATES, &NO_STATES, &EMPTY };
+
+    for (size_t k = 0; k < ARRAY_LEN(definitions); k++) {
+        modelInstance* m = newModel(definitions[k]);
+        TEST_ASSERT_NOT_NULL(m);
+        TEST_ASSERT_NOT_NULL(m->stepStart);
+
+        /* A step can be rolled back through the buffer */
+        m->time = 1.0;
+        saveModelData(m, m->stepStart);
+        m->time = 2.0;
+        restoreModelData(m, m->stepStart);
+        TEST_ASSERT_EQUAL_DOUBLE(1.0, m->time);
+
+        freeModel(m);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -238,6 +260,7 @@ int main(void) {
     RUN_TEST(test_newModel_statesAreAVectorOfDoubles);
     RUN_TEST(test_newModel_handlesEmptyBlocks);
     RUN_TEST(test_newModel_handlesModelWithoutStates);
+    RUN_TEST(test_newModel_allocatesTheRollbackBuffer);
     RUN_TEST(test_newModel_usesTheSuggestedTolerance);
     RUN_TEST(test_newModel_fallsBackToTheDefaultTolerance);
     RUN_TEST(test_modelDefaultTolerance_handlesNull);

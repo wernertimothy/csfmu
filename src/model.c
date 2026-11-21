@@ -25,6 +25,7 @@ static bool allocateBlock(void** block, size_t size)
  * - Uses calloc() for the instance so that freeModel() can clean up a
  *   partially allocated instance (unallocated blocks are NULL)
  * - Blocks of size 0 are not allocated and stay NULL
+ * - stepStart is never empty: the model data always contain time and relTol
  * - Start values and function pointers are set by resetModel()
  */
 modelInstance* newModel(const modelDefinition* def)
@@ -47,7 +48,8 @@ modelInstance* newModel(const modelDefinition* def)
         !allocateBlock(&model->outputs, def->sizeOfOutputs) ||
         !allocateBlock((void**)&model->states, sizeOfStates) ||
         !allocateBlock((void**)&model->stateDerivatives, sizeOfStates) ||
-        !allocateBlock((void**)&model->scratch, MODEL_SCRATCH_VECTORS * sizeOfStates)) {
+        !allocateBlock((void**)&model->scratch, MODEL_SCRATCH_VECTORS * sizeOfStates) ||
+        !allocateBlock(&model->stepStart, modelDataSize(def))) {
         freeModel(model);
         return NULL;
     }
@@ -250,6 +252,7 @@ void freeModel(modelInstance* model)
     free(model->states);
     free(model->stateDerivatives);
     free(model->scratch);
+    free(model->stepStart);
 
     /* Free the model instance itself */
     free(model);

@@ -217,6 +217,7 @@ typedef struct {
  * - State and state derivative vectors
  * - Work memory for the integrator (content is undefined between calls; it is
  *   neither reset by resetModel() nor part of saveModelData())
+ * - A buffer for rolling back a failed step (see stepStart)
  * - Function pointers for model equations and integration
  *
  * Memory layout is managed by newModel() and freeModel().
@@ -235,6 +236,9 @@ struct modelInstance {
     double* states;                          /**< Array of current state values [nx] */
     double* stateDerivatives;                /**< Array of computed state derivatives [nx] */
     double* scratch;                         /**< Work memory for the integrator [MODEL_SCRATCH_VECTORS * nx] */
+    void* stepStart;                         /**< Model data at the start of the current step, written by
+                                                  saveModelData() and used to roll back a failed step
+                                                  [modelDataSize(def) bytes]. Not part of the model data */
     stateDerivativesFn getStateDerivatives;  /**< Function to compute dx/dt = f(t,x,u) */
     integrateFn integrate;                   /**< Function to perform time integration */
     outputsFn getOutputs;                    /**< Function to compute y = h(t,x,u) */

@@ -185,6 +185,20 @@ void lorenzAttractor(modelInstance* model) {
 }
 ```
 
+#### When the Integration Fails
+
+After every integration sub-step the FMU checks whether a state has become NaN or infinite. If one has, the integration has failed: the FMU puts the model back to the start of the communication step and returns `fmi2Discard`. The master can then go back to a saved FMU state and try again, without having to reset the FMU (see [Discarded Steps](csfmu_fmi2Reference.md#discarded-steps)).
+
+So a state equation that cannot be evaluated at some point (e.g. outside the range where it is defined) can return `NAN` from `<math.h>` for a derivative. The step is then discarded and the master is told why. The `fault_injection` model does exactly this on purpose, to test the protocol:
+
+```c
+if (p->fail && model->time >= p->t_fail) {
+    dx->x = NAN;               /* step will be discarded */
+} else {
+    dx->x = -x->x / p->tau;
+}
+```
+
 #### Output Equation
 
 You can define your outputs and calculate them using an output equation **y=h(t,x,u)**.

@@ -40,7 +40,10 @@ All functions follow the same rules:
 
 - A function that fails returns `fmi2Error` and puts the FMU into the **Error** state. This includes calls that are not allowed in the current state, invalid arguments and unknown value references.
 - In the Error state every further call fails, except: `fmi2Reset` (start over), `fmi2FreeInstance`, `fmi2SetFMUstate` (go back to a snapshot), `fmi2GetXXX` and `fmi2SetDebugLogging` (diagnosis), and the functions that only handle snapshots (`fmi2FreeFMUstate`, serialization).
-- `fmi2Warning` means the call had its effect, but something is worth reporting. `fmi2Discard` is only returned by the status queries, for a status that is not available. Neither changes the state.
+- `fmi2Warning` means the call had its effect, but something is worth reporting. It does not change the state.
+- `fmi2Discard` is returned in two cases:
+  - by `fmi2DoStep` when the integration fails numerically (a state becomes NaN or infinite). The FMU is rolled back to the communication point and enters the **Step Failed** state (see [`fmi2DoStep`](#fmi2dostep)).
+  - by the status queries, for a status that is not available. This does not change the state.
 - A NULL component returns `fmi2Error` (there is no instance whose state could change).
 
 ---
@@ -1008,11 +1011,12 @@ The heart of co-simulation - advances the FMU's internal state from time `t` to 
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Step completed successfully |
-| `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, step ends behind the stop time, or a state is not finite after the step |
+| `fmi2Discard` | The integration failed numerically (a state became NaN or infinite). The FMU was rolled back to `currentCommunicationPoint` |
+| `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, or step ends behind the stop time |
 
 #### FMI State Requirements
 **Can be called in**: **Step Complete** (after `fmi2ExitInitializationMode`, before `fmi2Terminate`)
-**State transitions**: Remains in **Step Complete**. On error the FMU enters the **Error** state
+**State transitions**: Remains in **Step Complete**. On `fmi2Discard` the FMU enters **Step Failed**, on error the **Error** state
 
 #### Algorithm: Sub-Stepping for Numerical Stability
 
@@ -1025,20 +1029,51 @@ The communication step is divided into the smallest number of **equal** sub-step
    ```
    The small tolerance keeps rounding in the division from adding a step (`0.3 / 0.1` is `2.9999999999999996` in floating point and must give 3 steps, not 4).
 
-2. **Execute sub-steps**:
+2. **Remember the communication point**:
+   - The model data (time, variables, states, derivatives) are copied into a buffer that was allocated with the instance (`model->stepStart`), so nothing is allocated during the step
+
+3. **Execute sub-steps**:
    - Take `numberOfSteps` steps of size `actualStepSize`
    - Each step: set `model->time = currentCommunicationPoint + k * actualStepSize` → compute derivatives → integrate states (the integrator sets the stage times itself)
+   - After each sub-step: if a state is NaN or infinite, the integration has failed. The model data are restored from the buffer, so the FMU is back at `currentCommunicationPoint` (not at the last good sub-step). The function returns `fmi2Discard` and the FMU enters **Step Failed**
 
-3. **Check the result**:
-   - If a state is NaN or infinite, the integration has diverged and the function returns `fmi2Error`
-
-4. **Update time and outputs**:
+4. **Update time and outputs** (only if all sub-steps succeeded):
    - Set the internal clock (`model->time`) to `currentCommunicationPoint + communicationStepSize`
    - Compute outputs from final state, so they are evaluated exactly at the communication point
 
 **Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
 
 **Why equal sub-steps?** A full-steps-plus-remainder scheme needs a threshold below which the remainder is dropped, and the remainder step can be arbitrarily small. Equal steps need neither.
+
+#### Discarded Steps
+
+FMI 2.0 (section 4.2.3) lets a slave report with `fmi2Discard` that it could not compute the whole communication step. This FMU does so on numerical failure only, never to stop at an event. It always rolls back to `currentCommunicationPoint`, so the master sees:
+
+| Query | Answer after a discarded step |
+|-------|-------------------------------|
+| `fmi2GetStatus(fmi2DoStepStatus)` | `fmi2Discard` |
+| `fmi2GetRealStatus(fmi2LastSuccessfulTime)` | `currentCommunicationPoint` of the discarded step |
+| `fmi2GetBooleanStatus(fmi2Terminated)` | `fmi2False`: the step may be repeated, the simulation need not end |
+| `fmi2GetReal` etc. | The values at `currentCommunicationPoint` |
+
+In the **Step Failed** state the master can read variables and the status, take or restore a snapshot, terminate, reset or free the FMU. `fmi2DoStep` and the `fmi2SetXXX` functions are not allowed (calling them is an error). To continue, the master restores a snapshot taken at (or before) the start of the failed step, changes what it wants to change (e.g. a tunable parameter), and steps again:
+
+```c
+fmi2FMUstate atStart = NULL;
+fmi2GetFMUstate(fmu, &atStart);
+
+if (fmi2DoStep(fmu, time, h, fmi2False) == fmi2Discard) {
+    fmi2Real lastTime;
+    fmi2GetRealStatus(fmu, fmi2LastSuccessfulTime, &lastTime);  /* == time */
+
+    fmi2SetFMUstate(fmu, atStart);     /* back to Step Complete */
+    /* ... change a tunable parameter, or retry with another master strategy ... */
+    fmi2DoStep(fmu, time, h, fmi2False);
+}
+fmi2FreeFMUstate(fmu, &atStart);
+```
+
+The integrator of this FMU works with sub-steps of a fixed size (see `maxStepSize`), so retrying with a smaller communication step size usually gives the same failure. The `fault_injection` model (`src/models/fault_injection/`) demonstrates the protocol. Its tests in `test/models/fault_injection/test_discard.py` exercise every allowed and refused call.
 
 #### Time Validation
 
@@ -1094,7 +1129,7 @@ fmi2FreeInstance(fmu);
 **Execution**:
 1. Calculate: `numberOfSteps = ceil(2.5) = 3`, `actualStepSize = 0.025 / 3 ≈ 0.00833 s`
 2. Step 1 to 3: Integrate 0.00833 s each
-3. Check that all states are finite
+3. Check after each sub-step that all states are finite
 4. Set clock to `currentCommunicationPoint + 0.025 s`
 5. Compute outputs at t+0.025
 
@@ -1112,8 +1147,8 @@ fmi2FreeInstance(fmu);
 - **Zero-order hold assumption**: Inputs are assumed constant during each communication step (FMI standard)
 - **Outputs computed once**: After all sub-steps complete, not after each internal step
 - **maxStepSize configurable**: Field of the model definition in the model's `variables.c`
-- **Divergence is an error**: A step that produces NaN or infinite states returns `fmi2Error`. The FMU is then in the Error state; continue with `fmi2Reset` or `fmi2SetFMUstate`
-- **Never discards a step**: The function returns `fmi2OK` or `fmi2Error`, never `fmi2Discard` or `fmi2Pending`
+- **Divergence discards the step**: A step that produces NaN or infinite states returns `fmi2Discard` and rolls the FMU back to the communication point (see [Discarded Steps](#discarded-steps)). Continue with `fmi2SetFMUstate`, `fmi2Reset` or `fmi2Terminate`
+- **Never pending**: The function returns `fmi2OK`, `fmi2Discard` or `fmi2Error`, never `fmi2Pending`
 - **Synchronous only**: Blocks until computation completes (`noSetFMUStatePriorToCurrentPoint` ignored)
 - **No variable step size within DoStep**: Uses fixed sub-steps (adaptive methods would require more complex integrators)
 
@@ -1143,13 +1178,13 @@ fmi2Status fmi2GetStringStatus (fmi2Component c, const fmi2StatusKind s, fmi2Str
 ```
 
 #### Description
-These functions mainly serve slaves that step asynchronously (`fmi2DoStep` returns `fmi2Pending`) or that discard steps (`fmi2DoStep` returns `fmi2Discard`). This FMU does neither, so there is little to report, but every status kind of the standard is answered by the function of the matching type:
+These functions mainly serve slaves that step asynchronously (`fmi2DoStep` returns `fmi2Pending`) or that discard steps (`fmi2DoStep` returns `fmi2Discard`). This FMU never steps asynchronously, but it discards a step on numerical failure. Every status kind of the standard is answered by the function of the matching type:
 
 | Function | Status kind | Value |
 |----------|-------------|-------|
-| `fmi2GetStatus` | `fmi2DoStepStatus` | `fmi2OK` (steps are computed synchronously, so the last step is always finished) |
-| `fmi2GetRealStatus` | `fmi2LastSuccessfulTime` | End of the last successful step (the internal clock of the FMU) |
-| `fmi2GetBooleanStatus` | `fmi2Terminated` | `fmi2False` (the FMU never asks to stop the simulation) |
+| `fmi2GetStatus` | `fmi2DoStepStatus` | Result of the last `fmi2DoStep`: `fmi2Discard` in the **Step Failed** state, otherwise `fmi2OK` (steps are computed synchronously, so the last step is always finished) |
+| `fmi2GetRealStatus` | `fmi2LastSuccessfulTime` | End of the last successful step (the internal clock of the FMU). After a discarded step this is the communication point the FMU was rolled back to |
+| `fmi2GetBooleanStatus` | `fmi2Terminated` | `fmi2False` (the FMU never asks to stop the simulation; after a discarded step this means that the step may be repeated) |
 | `fmi2GetStringStatus` | `fmi2PendingStatus` | `""` (no step is ever pending) |
 | `fmi2GetIntegerStatus` | - | FMI 2.0 defines no status of type Integer |
 
@@ -1186,6 +1221,7 @@ if (fmi2GetRealStatus(fmu, fmi2LastSuccessfulTime, &lastTime) == fmi2OK) {
 
 #### Notes
 - **`fmi2Discard` is not an error**: It only says "no such information". A message is written to the category `logStatusWarning`
+- **Derived from the state machine**: `fmi2DoStepStatus` follows the FMU state, so a snapshot taken after a discarded step reports `fmi2Discard` again when it is restored
 
 ---
 
@@ -1289,6 +1325,7 @@ See [`fmi2GetFMUstate`](#fmi2getfmustate).
 
 #### Notes
 - **Recovery from errors**: Because a snapshot can only be taken from a healthy FMU, restoring one always leaves the Error state
+- **Recovery from a discarded step**: Restoring a snapshot taken before the failed step leaves the **Step Failed** state (see [Discarded Steps](#discarded-steps))
 - **The next `fmi2DoStep` must start at the restored time**: The internal clock goes back with the snapshot
 - **Works across instances**: A snapshot can be set into another instance of the same model
 
@@ -1514,7 +1551,8 @@ fmi2FreeInstance(fmu);
 - **Template implementation is minimal**: This FMU template has no files or resources to close, so the function just transitions state
 - **Real FMUs might**: Close log files, disconnect from hardware, finalize statistics, save checkpoint data
 - **After termination**: Only `fmi2FreeInstance` and `fmi2Reset` are allowed - prevents accidental re-simulation
-- **Not callable in the Error state**: After a function returned `fmi2Error`, `fmi2Terminate` fails as well. Free or reset the FMU instead. (The mask also contains `stateStepFailed`, as in the standard, but this FMU never discards a step)
+- **Not callable in the Error state**: After a function returned `fmi2Error`, `fmi2Terminate` fails as well. Free or reset the FMU instead
+- **Callable after a discarded step**: In the **Step Failed** state (after `fmi2DoStep` returned `fmi2Discard`) the simulation can be ended with `fmi2Terminate`
 - **Event logging**: Logs "FMU was terminated" when logging is enabled, useful for debugging lifecycle issues
 - **Idiomatic C pattern**: Two-phase destruction (logical shutdown + memory cleanup) appears in SDL, OpenGL, database libraries
 

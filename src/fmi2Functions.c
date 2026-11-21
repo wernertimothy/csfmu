@@ -106,7 +106,7 @@ typedef enum {
     stateInitializationMode = 1 << 1,  /* Set by fmi2EnterInitializationMode */
     stateStepComplete       = 1 << 2,  /* Set by fmi2ExitInitializationMode and fmi2DoStep */
     stateStepInProgress     = 1 << 3,  /* Asynchronous fmi2DoStep (not used) */
-    stateStepFailed         = 1 << 4,  /* fmi2DoStep returned fmi2Discard (not used) */
+    stateStepFailed         = 1 << 4,  /* fmi2DoStep returned fmi2Discard */
     stateStepCanceled       = 1 << 5,  /* Set by fmi2CancelStep (not used) */
     stateTerminated         = 1 << 6,  /* Set by fmi2Terminate */
     stateError              = 1 << 7,  /* A function returned fmi2Error */
@@ -275,6 +275,24 @@ static fmi2Status enterErrorState(myFMU2* fmu, const char* message, ...)
 }
 
 /**
+ * Log why a step was discarded and put the FMU into the step failed state
+ *
+ * Always returns fmi2Discard, so that fmi2DoStep can fail with
+ * "return discardStep(fmu, ...)". The caller must have rolled the model
+ * back to the communication point before.
+ */
+static fmi2Status discardStep(myFMU2* fmu, const char* message, ...)
+{
+    va_list args;
+    va_start(args, message);
+    logMessage(fmu, logStatusWarning, fmi2Discard, message, args);
+    va_end(args);
+
+    fmu->state = stateStepFailed;
+    return fmi2Discard;
+}
+
+/**
  * Common checks at the start of every FMI function
  *
  * Returns the FMU instance, or NULL if the component is NULL or the
@@ -321,6 +339,33 @@ static fmi2Status notSupported(fmi2Component c, const char* functionName)
 static fmi2Real timeTolerance(fmi2Real time)
 {
     return TIME_TOLERANCE * fmax(1.0, fabs(time));
+}
+
+/**
+ * Published name of the state with the given index (for log messages)
+ */
+static const char* stateName(const modelDefinition* def, size_t index)
+{
+    for (size_t k = 0; k < def->numberOfVariables; k++) {
+        const modelVariable* variable = &def->variables[k];
+        if (variable->role == VAR_STATE && variable->offset == index * sizeof(double)) {
+            return variable->name;
+        }
+    }
+    return "?";
+}
+
+/**
+ * Index of the first state that is NaN or infinite, or numberOfStates if
+ * all states are finite
+ */
+static size_t firstNonFiniteState(const modelInstance* model)
+{
+    size_t k = 0;
+    while (k < model->def->numberOfStates && isfinite(model->states[k])) {
+        k++;
+    }
+    return k;
 }
 
 /**
@@ -998,8 +1043,21 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  * - Refuses to step beyond the stop time of the experiment (if defined)
  * - Inputs are held constant during the step
  * - The model owns the time: model->time is the internal clock
- * - Fails if a state is not finite after the step (integration diverged)
  * - Computes outputs after integration via getOutputs()
+ *
+ * Numerical failure (FMI 2.0, section 4.2.3: "fmi2Discard ... the slave
+ * computed successfully only a subinterval of the communication step"):
+ * - The model data are saved to model->stepStart before the first sub-step
+ *   (preallocated, no allocation during the step)
+ * - After every sub-step the states are checked. If one is NaN or infinite,
+ *   the model is restored to currentCommunicationPoint, the function returns
+ *   fmi2Discard and the FMU enters stateStepFailed
+ * - The rollback goes to the communication point and not to the last good
+ *   sub-step, so fmi2LastSuccessfulTime is currentCommunicationPoint and the
+ *   outputs are those of that point
+ * - From stateStepFailed the master can read variables and the status, go
+ *   back with fmi2SetFMUstate, terminate or reset. fmi2DoStep is refused
+ * - fmi2Discard is only used for numerical failure, never to stop at an event
  *
  * Sub-stepping algorithm:
  * - The communication step is divided into the smallest number of equal
@@ -1060,18 +1118,25 @@ fmi2Status fmi2DoStep(
     }
     fmi2Real actualStepSize = communicationStepSize / numberOfSteps;
 
+    /* Remember the communication point to roll back a failed step */
+    saveModelData(model, model->stepStart);
+
     /* Perform sub-steps */
     for (size_t k = 0; k < (size_t)numberOfSteps; k++) {
         model->time = currentCommunicationPoint + (fmi2Real)k * actualStepSize;
         model->getStateDerivatives(model);
         model->integrate(model, actualStepSize);
-    }
 
-    /* Validate result */
-    for (size_t k = 0; k < model->def->numberOfStates; k++) {
-        if (!isfinite(model->states[k])) {
-            return enterErrorState(myfmu2, "State %zu is not finite after the step to %.16g.",
-                                   k, nextCommunicationPoint);
+        /* Discard the step if the integration diverged */
+        size_t failed = firstNonFiniteState(model);
+        if (failed < model->def->numberOfStates) {
+            fmi2Real failureTime = model->time;
+            restoreModelData(model, model->stepStart);
+            return discardStep(myfmu2,
+                               "State '%s' is not finite at t = %.16g. Step from %.16g to %.16g discarded, "
+                               "FMU rolled back to %.16g.",
+                               stateName(model->def, failed), failureTime, currentCommunicationPoint,
+                               nextCommunicationPoint, model->time);
         }
     }
 
@@ -1163,9 +1228,10 @@ fmi2Status fmi2Reset(fmi2Component c)
  * FMI 2.0 Status Queries
  *
  * These functions mainly serve asynchronous slaves and slaves that discard
- * steps. This FMU steps synchronously and never discards a step, so there
- * is little to report. A status kind that is not available is answered
- * with fmi2Discard, as required by the standard.
+ * steps. This FMU steps synchronously, so a step is always finished when
+ * they can be called. It discards a step on numerical failure (see
+ * fmi2DoStep), which they report. A status kind that is not available is
+ * answered with fmi2Discard, as required by the standard.
  ***************************************************/
 
 /**
@@ -1202,7 +1268,10 @@ static fmi2Status statusNotAvailable(const myFMU2* fmu, const char* functionName
  *
  * Implementation notes:
  * - fmi2DoStepStatus: steps are computed synchronously, so a step is always
- *   finished when this function can be called
+ *   finished when this function can be called. The value is the result of
+ *   the last fmi2DoStep: fmi2Discard in stateStepFailed, otherwise fmi2OK.
+ *   It is derived from the state machine, so a restored FMU state reports
+ *   the status of the step it was taken after
  */
 fmi2Status fmi2GetStatus(fmi2Component c, const fmi2StatusKind s, fmi2Status* value)
 {
@@ -1215,7 +1284,7 @@ fmi2Status fmi2GetStatus(fmi2Component c, const fmi2StatusKind s, fmi2Status* va
         return statusNotAvailable(myfmu2, __func__, s);
     }
 
-    *value = fmi2OK;
+    *value = (myfmu2->state == stateStepFailed) ? fmi2Discard : fmi2OK;
     return fmi2OK;
 }
 
@@ -1224,7 +1293,9 @@ fmi2Status fmi2GetStatus(fmi2Component c, const fmi2StatusKind s, fmi2Status* va
  *
  * Implementation notes:
  * - fmi2LastSuccessfulTime: end of the last successful step, which is the
- *   internal clock of the FMU
+ *   internal clock of the FMU. After fmi2DoStep returned fmi2Discard this is
+ *   the communication point of the discarded step, because the FMU was
+ *   rolled back to it
  */
 fmi2Status fmi2GetRealStatus(fmi2Component c, const fmi2StatusKind s, fmi2Real* value)
 {
@@ -1258,7 +1329,10 @@ fmi2Status fmi2GetIntegerStatus(fmi2Component c, const fmi2StatusKind s, fmi2Int
  * Boolean-valued status
  *
  * Implementation notes:
- * - fmi2Terminated: the FMU never asks to stop the simulation
+ * - fmi2Terminated: the FMU never asks to stop the simulation. After
+ *   fmi2DoStep returned fmi2Discard, fmi2False tells the master that the
+ *   step may be repeated (e.g. with a smaller step size) instead of
+ *   ending the simulation (FMI 2.0, section 4.2.3)
  */
 fmi2Status fmi2GetBooleanStatus(fmi2Component c, const fmi2StatusKind s, fmi2Boolean* value)
 {
@@ -1395,8 +1469,9 @@ fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate)
  * Implementation notes:
  * - Restores variables, clock, experiment and the state of the FMU state
  *   machine
- * - Can be called in the error state: this is the way to continue a
- *   simulation after a failed step without starting over
+ * - Can be called after a discarded step (stateStepFailed) and in the error
+ *   state: this is the way to continue a simulation after a failed step
+ *   without starting over
  */
 fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate)
 {
