@@ -12,8 +12,10 @@ SETTERS = {"Real": "setReal", "Integer": "setInteger", "Boolean": "setBoolean"}
 
 def all_values(fmu, model_description) -> dict:
     """Read every variable of the FMU."""
-    return {v.name: getattr(fmu, GETTERS[v.type])([v.valueReference])[0]
-            for v in model_description.modelVariables}
+    return {
+        v.name: getattr(fmu, GETTERS[v.type])([v.valueReference])[0]
+        for v in model_description.modelVariables
+    }
 
 
 def excite(fmu, model_description) -> None:
@@ -23,11 +25,16 @@ def excite(fmu, model_description) -> None:
             fmu.setReal([variable.valueReference], [0.5])
 
 
-def run(fmu, model_description, start: float, steps: int = 20, step_size: float = 0.01) -> list:
+def run(
+    fmu, model_description, start: float, steps: int = 20, step_size: float = 0.01
+) -> list:
     """Step the FMU and return the values of all variables after every step."""
     trajectory = []
     for k in range(steps):
-        fmu.doStep(currentCommunicationPoint=start + k * step_size, communicationStepSize=step_size)
+        fmu.doStep(
+            currentCommunicationPoint=start + k * step_size,
+            communicationStepSize=step_size,
+        )
         trajectory.append(all_values(fmu, model_description))
     return trajectory
 
@@ -37,7 +44,9 @@ def test_capability_flags_are_set(model_description) -> None:
     assert model_description.coSimulation.canSerializeFMUstate
 
 
-def test_set_fmu_state_repeats_the_trajectory(initialized_fmu, model_description) -> None:
+def test_set_fmu_state_repeats_the_trajectory(
+    initialized_fmu, model_description
+) -> None:
     """Going back to a snapshot and stepping again gives exactly the same result."""
     excite(initialized_fmu, model_description)
     run(initialized_fmu, model_description, start=0.0, steps=5)
@@ -73,7 +82,9 @@ def test_fmu_state_includes_the_state_machine(new_fmu, model_description) -> Non
     fmu.freeFMUstate(state)
 
 
-def test_set_fmu_state_recovers_from_an_error(initialized_fmu, model_description) -> None:
+def test_set_fmu_state_recovers_from_an_error(
+    initialized_fmu, model_description
+) -> None:
     """A snapshot is the way to continue after an error without a reset."""
     initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.1)
     state = initialized_fmu.getFMUstate()
@@ -122,7 +133,9 @@ def test_free_fmu_state_clears_the_pointer(initialized_fmu) -> None:
     initialized_fmu.freeFMUstate(state)
 
 
-def test_serialized_fmu_state_round_trip(initialized_fmu, new_fmu, model_description) -> None:
+def test_serialized_fmu_state_round_trip(
+    initialized_fmu, new_fmu, model_description
+) -> None:
     """A serialized state can be loaded into another instance of the same FMU."""
     excite(initialized_fmu, model_description)
     run(initialized_fmu, model_description, start=0.0, steps=5)
@@ -145,7 +158,9 @@ def test_serialization_is_deterministic(initialized_fmu) -> None:
     first = initialized_fmu.getFMUstate()
     second = initialized_fmu.getFMUstate()
 
-    assert initialized_fmu.serializeFMUstate(first) == initialized_fmu.serializeFMUstate(second)
+    assert initialized_fmu.serializeFMUstate(
+        first
+    ) == initialized_fmu.serializeFMUstate(second)
 
     initialized_fmu.freeFMUstate(first)
     initialized_fmu.freeFMUstate(second)

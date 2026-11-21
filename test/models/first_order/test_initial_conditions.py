@@ -17,14 +17,16 @@ def test_initial_parameters(unzipdir: Path, path_to_fmu: Path, vr) -> None:
 
     # Skip if not first_order model
     if model_description.modelName != "first_order":
-        pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to first_order model, got {model_description.modelName}"
+        )
 
     # Create FMU instance
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
         unzipDirectory=unzipdir,
         modelIdentifier=model_description.coSimulation.modelIdentifier,
-        instanceName='param_test'
+        instanceName="param_test",
     )
 
     # Setup and initialize
@@ -59,14 +61,16 @@ def test_initial_inputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
 
     # Skip if not first_order model
     if model_description.modelName != "first_order":
-        pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to first_order model, got {model_description.modelName}"
+        )
 
     # Create FMU instance
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
         unzipDirectory=unzipdir,
         modelIdentifier=model_description.coSimulation.modelIdentifier,
-        instanceName='input_test'
+        instanceName="input_test",
     )
 
     # Setup and initialize
@@ -98,14 +102,16 @@ def test_initial_outputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
 
     # Skip if not first_order model
     if model_description.modelName != "first_order":
-        pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to first_order model, got {model_description.modelName}"
+        )
 
     # Create FMU instance
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
         unzipDirectory=unzipdir,
         modelIdentifier=model_description.coSimulation.modelIdentifier,
-        instanceName='output_test'
+        instanceName="output_test",
     )
 
     # Setup and initialize
@@ -132,7 +138,9 @@ def test_initial_output_reflects_initial_state(new_fmu, model_description, vr) -
     The state x is set before initialization; y = x must hold at t = 0.
     """
     if model_description.modelName != "first_order":
-        pytest.skip(f"Test specific to first_order model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to first_order model, got {model_description.modelName}"
+        )
 
     fmu = new_fmu()
     fmu.setReal([vr("x")], [0.7])

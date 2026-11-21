@@ -28,10 +28,10 @@ from matplotlib import animation, patches
 fmu_path = "build/pendulum_on_cart.fmu"
 
 # Model parameters
-M = 1.0    # cart mass [kg]
-m = 0.1    # pendulum mass [kg]
-l = 0.5    # pendulum length [m]
-g = 9.81   # gravity [m/s^2]
+M = 1.0  # cart mass [kg]
+m = 0.1  # pendulum mass [kg]
+l = 0.5  # pendulum length [m]
+g = 9.81  # gravity [m/s^2]
 
 # Read model description to inspect variables
 model_description = read_model_description(fmu_path)
@@ -102,12 +102,18 @@ ax_anim.axhline(y=0, color="gray", linewidth=1, linestyle="--")
 
 # Drawing elements
 cart_patch = patches.Rectangle(
-    (0, 0), cart_w, cart_h,
-    facecolor="tab:blue", edgecolor="black", linewidth=1.5,
+    (0, 0),
+    cart_w,
+    cart_h,
+    facecolor="tab:blue",
+    edgecolor="black",
+    linewidth=1.5,
 )
 ax_anim.add_patch(cart_patch)
 (pendulum_line,) = ax_anim.plot([], [], "k-", linewidth=2.5)
-(bob_dot,) = ax_anim.plot([], [], "o", color="tab:red", markersize=10, markeredgecolor="black")
+(bob_dot,) = ax_anim.plot(
+    [], [], "o", color="tab:red", markersize=10, markeredgecolor="black"
+)
 time_text = ax_anim.text(0.02, 0.95, "", transform=ax_anim.transAxes, fontsize=10)
 
 # Subsample for smooth animation (~50 fps display)

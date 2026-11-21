@@ -43,13 +43,17 @@ def test_cannot_do_step_after_terminate(initialized_fmu) -> None:
     initialized_fmu.terminate()
 
     with pytest.raises(FMICallException):
-        initialized_fmu.doStep(currentCommunicationPoint=0.01, communicationStepSize=0.01)
+        initialized_fmu.doStep(
+            currentCommunicationPoint=0.01, communicationStepSize=0.01
+        )
 
 
 def test_error_state_is_kept_until_reset(initialized_fmu, model_description) -> None:
     """After an error every call fails until the FMU is reset."""
     variable = model_description.modelVariables[0]
-    getter = {"Real": "getReal", "Integer": "getInteger", "Boolean": "getBoolean"}[variable.type]
+    getter = {"Real": "getReal", "Integer": "getInteger", "Boolean": "getBoolean"}[
+        variable.type
+    ]
 
     # cause an error: wrong call sequence
     with pytest.raises(FMICallException):
@@ -57,7 +61,9 @@ def test_error_state_is_kept_until_reset(initialized_fmu, model_description) -> 
 
     # calls that would have been fine before now fail
     with pytest.raises(FMICallException):
-        initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.01)
+        initialized_fmu.doStep(
+            currentCommunicationPoint=0.0, communicationStepSize=0.01
+        )
     with pytest.raises(FMICallException):
         initialized_fmu.terminate()
 
@@ -109,7 +115,9 @@ def test_step_must_start_at_the_internal_clock(initialized_fmu) -> None:
 @pytest.mark.parametrize("step_size", [0.0, -0.1, float("nan"), float("inf")])
 def test_step_size_must_be_positive_and_finite(initialized_fmu, step_size) -> None:
     with pytest.raises(FMICallException):
-        initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=step_size)
+        initialized_fmu.doStep(
+            currentCommunicationPoint=0.0, communicationStepSize=step_size
+        )
 
 
 def test_clock_does_not_drift_at_large_times(new_fmu) -> None:
@@ -160,7 +168,9 @@ def test_unknown_log_category_is_ignored(new_fmu) -> None:
 
 def test_status_queries(initialized_fmu) -> None:
     """Status of a synchronous slave: last step finished, clock, not terminated."""
-    fmi2DoStepStatus, fmi2PendingStatus, fmi2LastSuccessfulTime, fmi2Terminated = range(4)
+    fmi2DoStepStatus, fmi2PendingStatus, fmi2LastSuccessfulTime, fmi2Terminated = range(
+        4
+    )
 
     initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.25)
 

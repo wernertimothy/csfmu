@@ -13,19 +13,101 @@ NAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 # The model name becomes the FMI modelIdentifier, which must be a valid C
 # function name, and the equations may be written in C++
 C_KEYWORDS = {
-    "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
-    "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return",
-    "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
-    "volatile", "while",
+    "auto",
+    "break",
+    "case",
+    "char",
+    "const",
+    "continue",
+    "default",
+    "do",
+    "double",
+    "else",
+    "enum",
+    "extern",
+    "float",
+    "for",
+    "goto",
+    "if",
+    "inline",
+    "int",
+    "long",
+    "register",
+    "restrict",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "struct",
+    "switch",
+    "typedef",
+    "union",
+    "unsigned",
+    "void",
+    "volatile",
+    "while",
 }
 CPP_KEYWORDS = {
-    "alignas", "alignof", "and", "and_eq", "asm", "bitand", "bitor", "bool", "catch", "char8_t",
-    "char16_t", "char32_t", "class", "compl", "concept", "const_cast", "consteval", "constexpr",
-    "constinit", "co_await", "co_return", "co_yield", "decltype", "delete", "dynamic_cast", "explicit",
-    "export", "false", "friend", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr",
-    "operator", "or", "or_eq", "private", "protected", "public", "reinterpret_cast", "requires",
-    "static_assert", "static_cast", "template", "this", "thread_local", "throw", "true", "try", "typeid",
-    "typename", "using", "virtual", "wchar_t", "xor", "xor_eq",
+    "alignas",
+    "alignof",
+    "and",
+    "and_eq",
+    "asm",
+    "bitand",
+    "bitor",
+    "bool",
+    "catch",
+    "char8_t",
+    "char16_t",
+    "char32_t",
+    "class",
+    "compl",
+    "concept",
+    "const_cast",
+    "consteval",
+    "constexpr",
+    "constinit",
+    "co_await",
+    "co_return",
+    "co_yield",
+    "decltype",
+    "delete",
+    "dynamic_cast",
+    "explicit",
+    "export",
+    "false",
+    "friend",
+    "mutable",
+    "namespace",
+    "new",
+    "noexcept",
+    "not",
+    "not_eq",
+    "nullptr",
+    "operator",
+    "or",
+    "or_eq",
+    "private",
+    "protected",
+    "public",
+    "reinterpret_cast",
+    "requires",
+    "static_assert",
+    "static_cast",
+    "template",
+    "this",
+    "thread_local",
+    "throw",
+    "true",
+    "try",
+    "typeid",
+    "typename",
+    "using",
+    "virtual",
+    "wchar_t",
+    "xor",
+    "xor_eq",
 }
 
 # The model name is also the name of a CMake target, so it must not collide
@@ -33,18 +115,38 @@ CPP_KEYWORDS = {
 # of this project. Compared in lowercase: file names of targets that only differ
 # in case collide on macOS and Windows.
 RESERVED_TARGETS = {
-    "all", "clean", "help", "install", "test", "package", "edit_cache", "rebuild_cache",
-    "all_build", "zero_check", "run_tests",
-    "model_core", "unity", "model_description", "generate_model_description",
-    "example_model", "example_fmu",
+    "all",
+    "clean",
+    "help",
+    "install",
+    "test",
+    "package",
+    "edit_cache",
+    "rebuild_cache",
+    "all_build",
+    "zero_check",
+    "run_tests",
+    "model_core",
+    "unity",
+    "model_description",
+    "generate_model_description",
+    "example_model",
+    "example_fmu",
 }
 
 # Folder names that Windows does not allow, in any case
-WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+WINDOWS_RESERVED = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
 
 
 def validate_name(name: str) -> str | None:
-    """ Return why the name cannot be used for a model, or None if it can.
+    """Return why the name cannot be used for a model, or None if it can.
 
     The name is used as folder name, CMake target, FMI modelIdentifier,
     file name of the FMU and Python package name of the model's tests.
@@ -64,7 +166,7 @@ def validate_name(name: str) -> str | None:
 
 
 def camel_case(name: str) -> str:
-    """ Return the snake_case name in camelCase: first_order -> firstOrder, my_PID -> myPID. """
+    """Return the snake_case name in camelCase: first_order -> firstOrder, my_PID -> myPID."""
     first, *rest = name.split("_")
     return first + "".join(part[:1].upper() + part[1:] for part in rest)
 
@@ -242,7 +344,7 @@ def test_fmu_is_valid(path_to_fmu: Path) -> None:
 
 
 def create_model(root: Path, name: str) -> list[Path]:
-    """ Create the files of a new model from the template and return their paths.
+    """Create the files of a new model from the template and return their paths.
 
     Creates src/models/<name>/ with an integrator (dx/dt = k*u, y = x) and
     test/models/<name>/ with FMI compliance tests. Neither folder may exist.

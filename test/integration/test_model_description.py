@@ -7,17 +7,23 @@ from fmpy.validation import validate_fmu
 FMI2_OK = 0
 
 
-def test_fmu_model_description_is_valid(path_to_fmu : Path) -> None:
+def test_fmu_model_description_is_valid(path_to_fmu: Path) -> None:
     """Static test: Verify modelDescription.xml against the FMI 2.0 schema and rules"""
     model_description = fmpy.read_model_description(
-        path_to_fmu, validate=True, validate_variable_names=True, validate_model_structure=True)
+        path_to_fmu,
+        validate=True,
+        validate_variable_names=True,
+        validate_model_structure=True,
+    )
     assert model_description is not None
 
     problems = validate_fmu(path_to_fmu)
     assert not problems, f"FMPy reports problems: {problems}"
 
 
-def test_model_identifier_is_the_name_of_the_fmu(path_to_fmu : Path, model_description) -> None:
+def test_model_identifier_is_the_name_of_the_fmu(
+    path_to_fmu: Path, model_description
+) -> None:
     """The binary is found by the model identifier, which is also the name of the FMU"""
     assert model_description.coSimulation.modelIdentifier == path_to_fmu.stem
     assert model_description.modelName == path_to_fmu.stem

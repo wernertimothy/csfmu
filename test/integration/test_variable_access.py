@@ -46,8 +46,11 @@ def changed_value(variable):
 
 
 def variables_with(model_description, causality: str, type: str | None = None) -> list:
-    return [v for v in model_description.modelVariables
-            if v.causality == causality and (type is None or v.type == type)]
+    return [
+        v
+        for v in model_description.modelVariables
+        if v.causality == causality and (type is None or v.type == type)
+    ]
 
 
 def test_generated_model_description_is_valid(path_to_fmu: Path) -> None:
@@ -72,7 +75,9 @@ def test_states_are_exposed(model_description) -> None:
         assert state.start is not None
 
 
-def test_variables_hold_start_values_after_instantiation(new_fmu, model_description) -> None:
+def test_variables_hold_start_values_after_instantiation(
+    new_fmu, model_description
+) -> None:
     """Right after instantiation every variable equals its start value."""
     fmu = new_fmu()
     for variable in model_description.modelVariables:
@@ -86,7 +91,11 @@ def test_values_set_before_initialization_survive(new_fmu, model_description) ->
     fmi2EnterInitializationMode. This is how fmpy applies start_values.
     """
     fmu = new_fmu()
-    settable = [v for v in model_description.modelVariables if v.causality in ("parameter", "input", "local")]
+    settable = [
+        v
+        for v in model_description.modelVariables
+        if v.causality in ("parameter", "input", "local")
+    ]
     expected = {}
 
     for variable in settable:
@@ -104,7 +113,11 @@ def test_values_set_before_initialization_survive(new_fmu, model_description) ->
 def test_values_can_be_set_in_initialization_mode(new_fmu, model_description) -> None:
     """Parameters, inputs and states can be set during initialization mode."""
     fmu = new_fmu()
-    settable = [v for v in model_description.modelVariables if v.causality in ("parameter", "input", "local")]
+    settable = [
+        v
+        for v in model_description.modelVariables
+        if v.causality in ("parameter", "input", "local")
+    ]
     expected = {}
 
     fmu.setupExperiment(startTime=0.0)
@@ -126,7 +139,9 @@ def test_inputs_can_be_set_between_steps(initialized_fmu, model_description) -> 
         assert get_value(initialized_fmu, variable) == value, variable.name
 
 
-def test_states_cannot_be_set_after_initialization(initialized_fmu, model_description) -> None:
+def test_states_cannot_be_set_after_initialization(
+    initialized_fmu, model_description
+) -> None:
     """States are initial conditions: setting them during the simulation is an error."""
     state = variables_with(model_description, "local")[0]
     with pytest.raises(FMICallException):
@@ -180,17 +195,25 @@ def test_reset_restores_start_values(initialized_fmu, model_description) -> None
 
     for variable in model_description.modelVariables:
         if variable.start is not None:
-            assert get_value(initialized_fmu, variable) == start_value(variable), variable.name
+            assert get_value(initialized_fmu, variable) == start_value(variable), (
+                variable.name
+            )
 
 
-def test_variables_can_be_read_in_initialization_mode(new_fmu, model_description) -> None:
+def test_variables_can_be_read_in_initialization_mode(
+    new_fmu, model_description
+) -> None:
     """
     Every variable can be read during initialization mode. Outputs are
     computed from the values set so far, so they already equal the outputs
     at the first communication point.
     """
     fmu = new_fmu()
-    settable = [v for v in model_description.modelVariables if v.causality in ("parameter", "input", "local")]
+    settable = [
+        v
+        for v in model_description.modelVariables
+        if v.causality in ("parameter", "input", "local")
+    ]
     outputs = variables_with(model_description, "output")
 
     fmu.setupExperiment(startTime=0.0)
@@ -203,10 +226,16 @@ def test_variables_can_be_read_in_initialization_mode(new_fmu, model_description
     assert [get_value(fmu, output) for output in outputs] == during_initialization
 
 
-def test_outputs_follow_values_set_before_initialization(new_fmu, model_description) -> None:
+def test_outputs_follow_values_set_before_initialization(
+    new_fmu, model_description
+) -> None:
     """Outputs read in the instantiated state reflect the values set so far."""
     fmu = new_fmu()
-    settable = [v for v in model_description.modelVariables if v.causality in ("parameter", "input", "local")]
+    settable = [
+        v
+        for v in model_description.modelVariables
+        if v.causality in ("parameter", "input", "local")
+    ]
     outputs = variables_with(model_description, "output")
 
     for variable in settable:

@@ -21,16 +21,20 @@ from .scaffold import create_model, validate_name
 
 
 def find_root() -> Path:
-    """ Return the project root: the first parent of the cwd with a CMakeLists.txt and src/models/. """
+    """Return the project root: the first parent of the cwd with a CMakeLists.txt and src/models/."""
     cwd = Path.cwd().resolve()
     for directory in (cwd, *cwd.parents):
-        if (directory / "CMakeLists.txt").is_file() and (directory / "src" / "models").is_dir():
+        if (directory / "CMakeLists.txt").is_file() and (
+            directory / "src" / "models"
+        ).is_dir():
             return directory
-    raise SystemExit("Error: not inside a csfmu project (no CMakeLists.txt with src/models/ found)")
+    raise SystemExit(
+        "Error: not inside a csfmu project (no CMakeLists.txt with src/models/ found)"
+    )
 
 
 def available_models(root: Path) -> list[str]:
-    """ Return the sorted names of all buildable models under src/models/.
+    """Return the sorted names of all buildable models under src/models/.
 
     A model is buildable if it has a variables.c and an equations.c or
     equations.cpp, which is the same check the CMakeLists.txt performs.
@@ -38,14 +42,16 @@ def available_models(root: Path) -> list[str]:
     models = []
     for directory in (root / "src" / "models").iterdir():
         has_variables = (directory / "variables.c").is_file()
-        has_equations = (directory / "equations.c").is_file() or (directory / "equations.cpp").is_file()
+        has_equations = (directory / "equations.c").is_file() or (
+            directory / "equations.cpp"
+        ).is_file()
         if directory.is_dir() and has_variables and has_equations:
             models.append(directory.name)
     return sorted(models, key=str.lower)
 
 
 def resolve_model(root: Path, name: str | None) -> str | None:
-    """ Return the model name if it exists, otherwise let the user select one.
+    """Return the model name if it exists, otherwise let the user select one.
 
     The selection is also shown if no name was given.
     Returns None if the user quits the selection.
@@ -64,7 +70,7 @@ def resolve_model(root: Path, name: str | None) -> str | None:
     while True:
         try:
             answer = input(f"Select a model [1-{len(models)}] or q to quit: ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             print()
             return None
         if answer.lower() == "q":
@@ -74,19 +80,19 @@ def resolve_model(root: Path, name: str | None) -> str | None:
 
 
 def run(command: list[str], **kwargs) -> int:
-    """ Run a command, echoing it first, and return its exit code. """
+    """Run a command, echoing it first, and return its exit code."""
     print("+", " ".join(command), flush=True)
     return subprocess.run(command, check=False, **kwargs).returncode
 
 
 def require(program: str) -> None:
-    """ Exit with an error if the program is not on the PATH. """
+    """Exit with an error if the program is not on the PATH."""
     if shutil.which(program) is None:
         raise SystemExit(f"Error: '{program}' not found on PATH")
 
 
 def build(root: Path, model: str, output_dir: Path | None = None) -> int:
-    """ Configure and build the model in build/<model>/; the FMU is placed in build/.
+    """Configure and build the model in build/<model>/; the FMU is placed in build/.
 
     If an output folder is given, the FMU is also copied there. It is not
     built there directly: the FMU is only packaged when the library is
@@ -99,17 +105,25 @@ def build(root: Path, model: str, output_dir: Path | None = None) -> int:
     build_dir = root / "build"
     model_build_dir = build_dir / model
 
-    returncode = run([
-        "cmake",
-        "-S", str(root),
-        "-B", str(model_build_dir),
-        f"-DMODEL={model}",
-        f"-DFMU_OUTPUT_DIR={build_dir}",
-    ])
+    returncode = run(
+        [
+            "cmake",
+            "-S",
+            str(root),
+            "-B",
+            str(model_build_dir),
+            f"-DMODEL={model}",
+            f"-DFMU_OUTPUT_DIR={build_dir}",
+        ]
+    )
     if returncode != 0:
         return returncode
     returncode = run(["cmake", "--build", str(model_build_dir)])
-    if returncode != 0 or output_dir is None or output_dir.resolve() == build_dir.resolve():
+    if (
+        returncode != 0
+        or output_dir is None
+        or output_dir.resolve() == build_dir.resolve()
+    ):
         return returncode
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -119,7 +133,7 @@ def build(root: Path, model: str, output_dir: Path | None = None) -> int:
 
 
 def test(root: Path, model: str, pytest_args: list[str]) -> int:
-    """ Run the C unit tests and the pytest suite against build/<model>.fmu, building it if missing. """
+    """Run the C unit tests and the pytest suite against build/<model>.fmu, building it if missing."""
     build_dir = root / "build"
     model_build_dir = build_dir / model
 
@@ -130,7 +144,9 @@ def test(root: Path, model: str, pytest_args: list[str]) -> int:
 
     if model_build_dir.is_dir():
         require("ctest")
-        returncode = run(["ctest", "--test-dir", str(model_build_dir), "--output-on-failure"])
+        returncode = run(
+            ["ctest", "--test-dir", str(model_build_dir), "--output-on-failure"]
+        )
         if returncode != 0:
             return returncode
     else:
@@ -141,7 +157,7 @@ def test(root: Path, model: str, pytest_args: list[str]) -> int:
 
 
 def new(root: Path, name: str) -> int:
-    """ Create a new model from the template in src/models/<name>/ and its tests in test/models/<name>/. """
+    """Create a new model from the template in src/models/<name>/ and its tests in test/models/<name>/."""
     error = validate_name(name)
     if error is not None:
         print(f"Error: {error}")
@@ -151,7 +167,9 @@ def new(root: Path, name: str) -> int:
     for parent in (root / "src" / "models", root / "test" / "models"):
         for existing in parent.iterdir() if parent.is_dir() else ():
             if existing.name.lower() == name.lower():
-                print(f"Error: model '{name}' already exists ({existing.relative_to(root).as_posix()})")
+                print(
+                    f"Error: model '{name}' already exists ({existing.relative_to(root).as_posix()})"
+                )
                 return 1
 
     print(f"Created model '{name}':")
@@ -164,7 +182,7 @@ def new(root: Path, name: str) -> int:
 
 
 def model_traces(root: Path, name: str) -> list[Path]:
-    """ Return the existing files and folders that belong to the model only. """
+    """Return the existing files and folders that belong to the model only."""
     candidates = [
         root / "src" / "models" / name,
         root / "test" / "models" / name,
@@ -174,11 +192,15 @@ def model_traces(root: Path, name: str) -> list[Path]:
     ]
     # Compare the exact names: on macOS and Windows, path.exists() ignores case
     # and would let "rm First_Order" remove first_order
-    return [path for path in candidates if path.exists() and path.name in os.listdir(path.parent)]
+    return [
+        path
+        for path in candidates
+        if path.exists() and path.name in os.listdir(path.parent)
+    ]
 
 
 def references_to(root: Path, name: str, excluded: list[Path]) -> list[Path]:
-    """ Return the text files of the project, other than the excluded ones, that mention the name as a word. """
+    """Return the text files of the project, other than the excluded ones, that mention the name as a word."""
     # Hidden folders are caches and tool settings, except for the CI workflows
     skipped_dirs = {"build", "external", "__pycache__"}
     pattern = re.compile(rf"\b{re.escape(name)}\b")
@@ -186,7 +208,8 @@ def references_to(root: Path, name: str, excluded: list[Path]) -> list[Path]:
     for directory, subdirs, files in os.walk(root):
         directory = Path(directory)
         subdirs[:] = sorted(
-            d for d in subdirs
+            d
+            for d in subdirs
             if d not in skipped_dirs
             and (not d.startswith(".") or d == ".github")
             and directory / d not in excluded
@@ -197,7 +220,7 @@ def references_to(root: Path, name: str, excluded: list[Path]) -> list[Path]:
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
+            except UnicodeDecodeError, OSError:
                 continue
             if pattern.search(text):
                 references.append(path)
@@ -205,11 +228,11 @@ def references_to(root: Path, name: str, excluded: list[Path]) -> list[Path]:
 
 
 def confirm(question: str) -> bool:
-    """ Ask a yes/no question that defaults to yes; no input (EOF) counts as no. """
+    """Ask a yes/no question that defaults to yes; no input (EOF) counts as no."""
     while True:
         try:
             answer = input(f"{question} [Y/n] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             print()
             return False
         if answer in ("", "y", "yes"):
@@ -219,7 +242,7 @@ def confirm(question: str) -> bool:
 
 
 def remove(root: Path, name: str) -> int:
-    """ Remove all files and folders of a model after asking the user. """
+    """Remove all files and folders of a model after asking the user."""
     # The name must not be a path, otherwise it could point outside of src/models/
     if name in ("", ".", "..") or "/" in name or "\\" in name:
         print(f"Error: '{name}' is not a model name")
@@ -260,7 +283,7 @@ def remove(root: Path, name: str) -> int:
 
 
 def clean(root: Path) -> int:
-    """ Remove the build/ folder. """
+    """Remove the build/ folder."""
     build_dir = root / "build"
     if not build_dir.exists():
         print("Nothing to clean")
@@ -271,22 +294,40 @@ def clean(root: Path) -> int:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="csfmu", description="Create, build and test csfmu FMUs.")
+    parser = argparse.ArgumentParser(
+        prog="csfmu", description="Create, build and test csfmu FMUs."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     new_parser = commands.add_parser("new", help="create a new model from a template")
-    new_parser.add_argument("model", help="name of the new folder under src/models/ (e.g. my_model)")
+    new_parser.add_argument(
+        "model", help="name of the new folder under src/models/ (e.g. my_model)"
+    )
 
     rm_parser = commands.add_parser("rm", help="remove a model and all its files")
     rm_parser.add_argument("model", help="name of a folder under src/models/")
 
     build_parser = commands.add_parser("build", help="build the FMU of a model")
-    build_parser.add_argument("model", nargs="?", help="name of a folder under src/models/ (prompted if omitted)")
-    build_parser.add_argument("-o", "--output-dir", type=Path,
-                              help="also place the FMU in this folder (created if missing)")
+    build_parser.add_argument(
+        "model",
+        nargs="?",
+        help="name of a folder under src/models/ (prompted if omitted)",
+    )
+    build_parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        help="also place the FMU in this folder (created if missing)",
+    )
 
-    test_parser = commands.add_parser("test", help="run the tests of a model (builds it if needed)")
-    test_parser.add_argument("model", nargs="?", help="name of a folder under src/models/ (prompted if omitted)")
+    test_parser = commands.add_parser(
+        "test", help="run the tests of a model (builds it if needed)"
+    )
+    test_parser.add_argument(
+        "model",
+        nargs="?",
+        help="name of a folder under src/models/ (prompted if omitted)",
+    )
     test_parser.epilog = "arguments after -- are passed to pytest"
 
     commands.add_parser("list", help="list the available models")
@@ -298,7 +339,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     pytest_args = []
     if "--" in argv:
         separator = argv.index("--")
-        argv, pytest_args = argv[:separator], argv[separator + 1:]
+        argv, pytest_args = argv[:separator], argv[separator + 1 :]
 
     args = parser.parse_args(argv)
     args.pytest_args = pytest_args

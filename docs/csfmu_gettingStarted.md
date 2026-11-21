@@ -440,9 +440,11 @@ The model name becomes the `modelIdentifier`, which is also the name of the bina
 The **value reference** of a variable is simply its position in your variable table. The FMI implementation uses the same rule to find a variable, which is why the two can never disagree. When you use the FMU, always address variables **by name** and let your tool look up the value reference:
 
 ```python
-result = simulate_fmu("build/lorenz_attractor.fmu",
-                      start_values={"rho": 20.0, "state_x": 2.0},
-                      output=["x", "y", "z"])
+result = simulate_fmu(
+    "build/lorenz_attractor.fmu",
+    start_values={"rho": 20.0, "state_x": 2.0},
+    output=["x", "y", "z"],
+)
 ```
 
 Since the states are published, initial conditions can be set from outside like any other start value. Parameters marked `VAR_FIXED` and states can be set until the initialization is finished; inputs and tunable parameters also between steps.

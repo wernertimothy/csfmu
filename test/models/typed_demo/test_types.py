@@ -5,10 +5,14 @@ from fmpy.fmi1 import FMICallException
 @pytest.fixture(autouse=True)
 def only_for_typed_demo(model_description) -> None:
     if model_description.modelName != "typed_demo":
-        pytest.skip(f"Test specific to typed_demo model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to typed_demo model, got {model_description.modelName}"
+        )
 
 
-def step(fmu, duration: float, step_size: float = 0.01, start_time: float = 0.0) -> float:
+def step(
+    fmu, duration: float, step_size: float = 0.01, start_time: float = 0.0
+) -> float:
     """Advance the FMU by duration and return the new time."""
     time = start_time
     for _ in range(round(duration / step_size)):
@@ -22,9 +26,15 @@ def test_variable_types_in_model_description(model_description) -> None:
     types = {v.name: v.type for v in model_description.modelVariables}
 
     assert types == {
-        "rate": "Real", "direction": "Integer", "clamp": "Boolean", "limit": "Real",
-        "enable": "Boolean", "boost": "Integer",
-        "y": "Real", "level": "Integer", "limit_reached": "Boolean",
+        "rate": "Real",
+        "direction": "Integer",
+        "clamp": "Boolean",
+        "limit": "Real",
+        "enable": "Boolean",
+        "boost": "Integer",
+        "y": "Real",
+        "level": "Integer",
+        "limit_reached": "Boolean",
         "x": "Real",
     }
 
@@ -125,7 +135,9 @@ def test_boolean_output_and_boolean_parameter(new_fmu, vr) -> None:
     assert fmu.getReal([vr("x")])[0] == pytest.approx(3.0, abs=1e-9)
 
 
-def test_fixed_parameter_cannot_be_set_after_initialization(initialized_fmu, vr) -> None:
+def test_fixed_parameter_cannot_be_set_after_initialization(
+    initialized_fmu, vr
+) -> None:
     with pytest.raises(FMICallException):
         initialized_fmu.setReal([vr("limit")], [1.0])
 

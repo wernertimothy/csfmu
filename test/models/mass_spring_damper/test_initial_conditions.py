@@ -16,13 +16,15 @@ def test_initial_parameters(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     model_description = fmpy.read_model_description(path_to_fmu)
 
     if model_description.modelName != "mass_spring_damper":
-        pytest.skip(f"Test specific to mass_spring_damper model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to mass_spring_damper model, got {model_description.modelName}"
+        )
 
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
         unzipDirectory=unzipdir,
         modelIdentifier=model_description.coSimulation.modelIdentifier,
-        instanceName='param_test'
+        instanceName="param_test",
     )
 
     fmu.instantiate()
@@ -50,13 +52,15 @@ def test_initial_inputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     model_description = fmpy.read_model_description(path_to_fmu)
 
     if model_description.modelName != "mass_spring_damper":
-        pytest.skip(f"Test specific to mass_spring_damper model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to mass_spring_damper model, got {model_description.modelName}"
+        )
 
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
         unzipDirectory=unzipdir,
         modelIdentifier=model_description.coSimulation.modelIdentifier,
-        instanceName='input_test'
+        instanceName="input_test",
     )
 
     fmu.instantiate()
@@ -83,13 +87,15 @@ def test_initial_outputs(unzipdir: Path, path_to_fmu: Path, vr) -> None:
     model_description = fmpy.read_model_description(path_to_fmu)
 
     if model_description.modelName != "mass_spring_damper":
-        pytest.skip(f"Test specific to mass_spring_damper model, got {model_description.modelName}")
+        pytest.skip(
+            f"Test specific to mass_spring_damper model, got {model_description.modelName}"
+        )
 
     fmu = fmpy.fmi2.FMU2Slave(
         guid=model_description.guid,
         unzipDirectory=unzipdir,
         modelIdentifier=model_description.coSimulation.modelIdentifier,
-        instanceName='output_test'
+        instanceName="output_test",
     )
 
     fmu.instantiate()

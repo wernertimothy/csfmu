@@ -43,7 +43,7 @@ fmu.freeInstance()
 """
 
 
-def test_two_fmus_in_one_process(path_to_project_root : Path, tmp_path : Path) -> None:
+def test_two_fmus_in_one_process(path_to_project_root: Path, tmp_path: Path) -> None:
     """
     Verify that an FMU still runs its own model if another FMU of this
     template was loaded into the process with RTLD_GLOBAL before.
@@ -51,7 +51,9 @@ def test_two_fmus_in_one_process(path_to_project_root : Path, tmp_path : Path) -
     Needs the FMUs of two different models. The test is skipped if they have
     not been built, unless CSFMU_REQUIRE_TWO_FMUS is set (CI).
     """
-    fmu_dir = Path(os.environ.get("FMU_OUTPUT_DIR", str(path_to_project_root / "build")))
+    fmu_dir = Path(
+        os.environ.get("FMU_OUTPUT_DIR", str(path_to_project_root / "build"))
+    )
     fmus = [fmu_dir / "mass_spring_damper.fmu", fmu_dir / "typed_demo.fmu"]
 
     missing = [fmu.name for fmu in fmus if not fmu.is_file()]
@@ -63,5 +65,12 @@ def test_two_fmus_in_one_process(path_to_project_root : Path, tmp_path : Path) -
 
     unzipdirs = [fmpy.extract(fmu, tmp_path / fmu.stem) for fmu in fmus]
 
-    result = subprocess.run([sys.executable, "-c", LOAD_TWO_FMUS, *map(str, unzipdirs)], capture_output=True, text=True, check=False)
-    assert result.returncode == 0, f"Second FMU failed after the first was loaded globally:\n{result.stdout}\n{result.stderr}"
+    result = subprocess.run(
+        [sys.executable, "-c", LOAD_TWO_FMUS, *map(str, unzipdirs)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"Second FMU failed after the first was loaded globally:\n{result.stdout}\n{result.stderr}"
+    )

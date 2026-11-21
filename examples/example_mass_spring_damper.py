@@ -59,13 +59,22 @@ zeta = d_val / (2.0 * np.sqrt(k_val * m_val))
 omega_d = omega_n * np.sqrt(1.0 - zeta**2)
 x_ss = 1.0 / k_val  # steady-state displacement
 
-x_analytical = x_ss * (1.0 - np.exp(-zeta * omega_n * time) * (
-    np.cos(omega_d * time) + (zeta / np.sqrt(1.0 - zeta**2)) * np.sin(omega_d * time)
-))
+x_analytical = x_ss * (
+    1.0
+    - np.exp(-zeta * omega_n * time)
+    * (
+        np.cos(omega_d * time)
+        + (zeta / np.sqrt(1.0 - zeta**2)) * np.sin(omega_d * time)
+    )
+)
 
-v_analytical = x_ss * omega_n / np.sqrt(1.0 - zeta**2) * np.exp(
-    -zeta * omega_n * time
-) * np.sin(omega_d * time)
+v_analytical = (
+    x_ss
+    * omega_n
+    / np.sqrt(1.0 - zeta**2)
+    * np.exp(-zeta * omega_n * time)
+    * np.sin(omega_d * time)
+)
 
 # Plot
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)

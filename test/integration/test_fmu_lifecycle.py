@@ -20,7 +20,7 @@ def test_fmu_complete_lifecycle(unzipdir: Path, path_to_fmu: Path) -> None:
         guid=model_description.guid,
         unzipDirectory=unzipdir,
         modelIdentifier=model_description.coSimulation.modelIdentifier,
-        instanceName='instance1'
+        instanceName="instance1",
     )
 
     # Test inquiry functions (can be called before instantiate)
@@ -35,7 +35,7 @@ def test_fmu_complete_lifecycle(unzipdir: Path, path_to_fmu: Path) -> None:
 
     # Test debug logging control
     fmu.setDebugLogging(loggingOn=True, categories=[])  # Enable all categories
-    fmu.setDebugLogging(loggingOn=False, categories=[]) # Disable logging
+    fmu.setDebugLogging(loggingOn=False, categories=[])  # Disable logging
 
     # Setup experiment with stop time defined
     start_time = 0.0
@@ -54,12 +54,15 @@ def test_fmu_complete_lifecycle(unzipdir: Path, path_to_fmu: Path) -> None:
     num_steps = 100
 
     for i in range(num_steps):
-        fmu.doStep(currentCommunicationPoint=current_time, communicationStepSize=step_size)
+        fmu.doStep(
+            currentCommunicationPoint=current_time, communicationStepSize=step_size
+        )
         current_time += step_size
 
     # Verify simulation advanced to expected time
-    assert abs(current_time - (start_time + num_steps * step_size)) < 1e-9, \
+    assert abs(current_time - (start_time + num_steps * step_size)) < 1e-9, (
         "Time tracking error in multi-step simulation"
+    )
 
     # Terminate gracefully
     fmu.terminate()
