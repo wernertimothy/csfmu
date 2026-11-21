@@ -1,4 +1,5 @@
 import pytest
+from fmpy.fmi1 import FMICallException
 
 """
 Model-independent tests of FMU state handling (fmi2GetFMUstate,
@@ -77,9 +78,9 @@ def test_set_fmu_state_recovers_from_an_error(initialized_fmu, model_description
     initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.1)
     state = initialized_fmu.getFMUstate()
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.enterInitializationMode()
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.doStep(currentCommunicationPoint=0.1, communicationStepSize=0.1)
 
     initialized_fmu.setFMUstate(state)
@@ -88,9 +89,9 @@ def test_set_fmu_state_recovers_from_an_error(initialized_fmu, model_description
 
 
 def test_cannot_get_fmu_state_in_error_state(initialized_fmu) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.enterInitializationMode()
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.getFMUstate()
 
 
@@ -155,7 +156,7 @@ def test_deserialize_rejects_wrong_size(initialized_fmu) -> None:
     serialized = initialized_fmu.serializeFMUstate(state)
     initialized_fmu.freeFMUstate(state)
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.deSerializeFMUstate(serialized[:-1])
 
 
@@ -164,5 +165,5 @@ def test_deserialize_rejects_foreign_bytes(initialized_fmu) -> None:
     serialized = initialized_fmu.serializeFMUstate(state)
     initialized_fmu.freeFMUstate(state)
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.deSerializeFMUstate(bytes(len(serialized)))

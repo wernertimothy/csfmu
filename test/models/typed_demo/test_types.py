@@ -1,4 +1,5 @@
 import pytest
+from fmpy.fmi1 import FMICallException
 
 
 @pytest.fixture(autouse=True)
@@ -61,18 +62,18 @@ def test_boolean_round_trip(new_fmu, vr) -> None:
 
 
 def test_boolean_variable_cannot_be_accessed_as_real_or_integer(new_fmu, vr) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getReal([vr("enable")])
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getInteger([vr("enable")])
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().setReal([vr("enable")], [1.0])
 
 
 def test_integer_variable_cannot_be_accessed_as_real_or_boolean(new_fmu, vr) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getReal([vr("boost")])
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getBoolean([vr("boost")])
 
 
@@ -125,7 +126,7 @@ def test_boolean_output_and_boolean_parameter(new_fmu, vr) -> None:
 
 
 def test_fixed_parameter_cannot_be_set_after_initialization(initialized_fmu, vr) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.setReal([vr("limit")], [1.0])
 
 

@@ -1,6 +1,7 @@
 import math
 
 import pytest
+from fmpy.fmi1 import FMICallException
 
 """
 Model-independent tests of fmi2SetupExperiment: the tolerance.
@@ -81,5 +82,5 @@ def test_invalid_tolerance_is_rejected(new_fmu, tolerance) -> None:
     """ A defined tolerance must be finite and greater than zero. """
     fmu = new_fmu()
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         fmu.setupExperiment(tolerance=tolerance, startTime=0.0)

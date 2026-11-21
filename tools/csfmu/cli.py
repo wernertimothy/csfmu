@@ -76,7 +76,7 @@ def resolve_model(root: Path, name: str | None) -> str | None:
 def run(command: list[str], **kwargs) -> int:
     """ Run a command, echoing it first, and return its exit code. """
     print("+", " ".join(command), flush=True)
-    return subprocess.run(command, **kwargs).returncode
+    return subprocess.run(command, check=False, **kwargs).returncode
 
 
 def require(program: str) -> None:

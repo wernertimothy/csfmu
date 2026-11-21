@@ -63,5 +63,5 @@ def test_two_fmus_in_one_process(path_to_project_root : Path, tmp_path : Path) -
 
     unzipdirs = [fmpy.extract(fmu, tmp_path / fmu.stem) for fmu in fmus]
 
-    result = subprocess.run([sys.executable, "-c", LOAD_TWO_FMUS, *map(str, unzipdirs)], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-c", LOAD_TWO_FMUS, *map(str, unzipdirs)], capture_output=True, text=True, check=False)
     assert result.returncode == 0, f"Second FMU failed after the first was loaded globally:\n{result.stdout}\n{result.stderr}"

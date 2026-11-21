@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from fmpy.fmi1 import FMICallException
 from fmpy.validation import validate_fmu
 
 """
@@ -128,28 +129,28 @@ def test_inputs_can_be_set_between_steps(initialized_fmu, model_description) -> 
 def test_states_cannot_be_set_after_initialization(initialized_fmu, model_description) -> None:
     """States are initial conditions: setting them during the simulation is an error."""
     state = variables_with(model_description, "local")[0]
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         set_value(initialized_fmu, state, 1.0)
 
 
 def test_outputs_cannot_be_set(new_fmu, model_description) -> None:
     """Outputs are computed by the model and can never be set."""
     output = variables_with(model_description, "output")[0]
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         set_value(new_fmu(), output, True if output.type == "Boolean" else 1)
 
 
 def test_access_with_wrong_type_fails(new_fmu, model_description) -> None:
     """A Real variable cannot be accessed through the Integer or Boolean functions."""
-    real = [v for v in model_description.modelVariables if v.type == "Real"][0]
+    real = next(v for v in model_description.modelVariables if v.type == "Real")
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getInteger([real.valueReference])
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getBoolean([real.valueReference])
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().setInteger([real.valueReference], [1])
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().setBoolean([real.valueReference], [True])
 
 
@@ -157,15 +158,15 @@ def test_access_with_unknown_value_reference_fails(new_fmu, model_description) -
     """A value reference beyond the variable table is an error."""
     unknown = len(model_description.modelVariables)
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getReal([unknown])
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().setReal([unknown], [1.0])
 
 
 def test_string_access_fails(new_fmu) -> None:
     """The template has no String variables, so every String access is an error."""
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         new_fmu().getString([0])
 
 

@@ -1,5 +1,6 @@
 import fmpy
 import pytest
+from fmpy.fmi1 import FMICallException
 
 """
 Model-independent tests of the FMU state machine.
@@ -16,13 +17,13 @@ def test_cannot_do_step_before_exiting_initialization_mode(new_fmu) -> None:
     fmu.setupExperiment(startTime=0.0)
     fmu.enterInitializationMode()
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.01)
 
 
 def test_cannot_enter_initialization_mode_after_exiting(initialized_fmu) -> None:
     """Initialization mode can only be entered from the instantiated state."""
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.enterInitializationMode()
 
 
@@ -32,7 +33,7 @@ def test_cannot_setup_experiment_after_entering_initialization_mode(new_fmu) -> 
     fmu.setupExperiment(startTime=0.0)
     fmu.enterInitializationMode()
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         fmu.setupExperiment(startTime=1.0)
 
 
@@ -41,7 +42,7 @@ def test_cannot_do_step_after_terminate(initialized_fmu) -> None:
     initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.01)
     initialized_fmu.terminate()
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.doStep(currentCommunicationPoint=0.01, communicationStepSize=0.01)
 
 
@@ -51,13 +52,13 @@ def test_error_state_is_kept_until_reset(initialized_fmu, model_description) -> 
     getter = {"Real": "getReal", "Integer": "getInteger", "Boolean": "getBoolean"}[variable.type]
 
     # cause an error: wrong call sequence
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.enterInitializationMode()
 
     # calls that would have been fine before now fail
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.01)
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.terminate()
 
     # variables can still be read for diagnosis
@@ -80,7 +81,7 @@ def test_cannot_step_beyond_stop_time(new_fmu) -> None:
 
     fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.1)
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         fmu.doStep(currentCommunicationPoint=0.1, communicationStepSize=0.1)
 
 
@@ -101,13 +102,13 @@ def test_step_must_start_at_the_internal_clock(initialized_fmu) -> None:
     """currentCommunicationPoint must be the end of the previous step."""
     initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.1)
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.doStep(currentCommunicationPoint=0.5, communicationStepSize=0.1)
 
 
 @pytest.mark.parametrize("step_size", [0.0, -0.1, float("nan"), float("inf")])
 def test_step_size_must_be_positive_and_finite(initialized_fmu, step_size) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=step_size)
 
 
@@ -136,7 +137,7 @@ def test_model_exchange_is_rejected(unzipdir, model_description) -> None:
 
     # The library must be unloaded here, since there is no instance to free
     try:
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="Failed to instantiate model"):
             fmu.instantiate()
     finally:
         fmu.freeLibrary()
@@ -146,7 +147,7 @@ def test_unsupported_functions_fail(initialized_fmu, model_description) -> None:
     """Functions of capabilities the FMU does not have return fmi2Error."""
     assert not model_description.coSimulation.canInterpolateInputs
 
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.cancelStep()
 
 
@@ -170,9 +171,9 @@ def test_status_queries(initialized_fmu) -> None:
 
     # a status kind that is not available is answered with fmi2Discard,
     # which does not put the FMU into the error state
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.getIntegerStatus(fmi2DoStepStatus)
-    with pytest.raises(Exception):
+    with pytest.raises(FMICallException):
         initialized_fmu.getRealStatus(fmi2Terminated)
 
     initialized_fmu.doStep(currentCommunicationPoint=0.25, communicationStepSize=0.25)

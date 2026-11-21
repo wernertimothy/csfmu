@@ -74,7 +74,7 @@ def package_fmu(lib_path, model_desc_path, output_dir, fmu_name):
         print(f"Successfully created FMU: {fmu_path}")
         return 0
         
-    except Exception as e:
+    except OSError as e:
         print(f"Error packaging FMU: {e}", file=sys.stderr)
         return 1
     finally:
