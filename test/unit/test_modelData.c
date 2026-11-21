@@ -60,6 +60,7 @@ static void changeEverything(modelInstance* m) {
     Outputs* out = m->outputs;
 
     m->time = 100.0;
+    m->relTol = 1e-3;
     p->gain = 99.0;
     p->mode = 98;
     p->enabled = false;
@@ -74,13 +75,13 @@ static void changeEverything(modelInstance* m) {
 }
 
 void test_modelDataSize_isTheSumOfAllBlocks(void) {
-    size_t expected = sizeof(double) + sizeof(Params) + sizeof(Inputs) + sizeof(Outputs) + 2 * sizeof(States);
+    size_t expected = 2 * sizeof(double) + sizeof(Params) + sizeof(Inputs) + sizeof(Outputs) + 2 * sizeof(States);
     TEST_ASSERT_EQUAL_size_t(expected, modelDataSize(&DEFINITION));
 }
 
 void test_modelDataSize_handlesEmptyBlocks(void) {
-    /* time, 2 states, 2 state derivatives */
-    TEST_ASSERT_EQUAL_size_t(5 * sizeof(double), modelDataSize(&ONLY_STATES));
+    /* time, tolerance, 2 states, 2 state derivatives */
+    TEST_ASSERT_EQUAL_size_t(6 * sizeof(double), modelDataSize(&ONLY_STATES));
 }
 
 void test_modelDataSize_handlesNull(void) {
@@ -102,6 +103,7 @@ void test_restoreModelData_bringsBackEveryBlock(void) {
 
     /* assert */
     TEST_ASSERT_EQUAL_DOUBLE(100.0, model->time);
+    TEST_ASSERT_EQUAL_DOUBLE(1e-3, model->relTol);
     TEST_ASSERT_EQUAL_DOUBLE(99.0, p->gain);
     TEST_ASSERT_EQUAL_INT(98, p->mode);
     TEST_ASSERT_FALSE(p->enabled);
@@ -133,6 +135,7 @@ void test_modelData_canBeRestoredIntoAnotherInstance(void) {
     restoreModelData(other, buffer);
 
     TEST_ASSERT_EQUAL_DOUBLE(100.0, other->time);
+    TEST_ASSERT_EQUAL_DOUBLE(1e-3, other->relTol);
     TEST_ASSERT_EQUAL_DOUBLE(99.0, p->gain);
     TEST_ASSERT_EQUAL_DOUBLE(93.0, other->states[1]);
 
@@ -141,18 +144,21 @@ void test_modelData_canBeRestoredIntoAnotherInstance(void) {
 
 void test_modelData_handlesEmptyBlocks(void) {
     modelInstance* m = newModel(&ONLY_STATES);
-    double data[5];
+    double data[6];
 
     m->time = 0.5;
+    m->relTol = 1e-9;
     m->states[0] = 1.0;
     m->states[1] = 2.0;
     saveModelData(m, data);
     m->time = 0.0;
+    m->relTol = 0.0;
     m->states[0] = 0.0;
     m->states[1] = 0.0;
     restoreModelData(m, data);
 
     TEST_ASSERT_EQUAL_DOUBLE(0.5, m->time);
+    TEST_ASSERT_EQUAL_DOUBLE(1e-9, m->relTol);
     TEST_ASSERT_EQUAL_DOUBLE(1.0, m->states[0]);
     TEST_ASSERT_EQUAL_DOUBLE(2.0, m->states[1]);
 

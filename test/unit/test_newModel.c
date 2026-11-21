@@ -35,6 +35,7 @@ static const modelDefinition DEFINITION = {
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
     .integrate           = integrator,
+    .defaultExperiment   = { .tolerance = 1e-4 },
 };
 
 /* A model without parameters, inputs and outputs */
@@ -140,6 +141,7 @@ void test_resetModel_restoresStartValues(void) {
 
     /* arrange: change everything */
     model->time = 99.0;
+    model->relTol = 99.0;
     p->gain = 99.0;
     p->mode = 99;
     p->enabled = false;
@@ -155,6 +157,7 @@ void test_resetModel_restoresStartValues(void) {
 
     /* assert */
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->time);
+    TEST_ASSERT_EQUAL_DOUBLE(1e-4, model->relTol);
     TEST_ASSERT_EQUAL_DOUBLE(2.5, p->gain);
     TEST_ASSERT_EQUAL_INT(3, p->mode);
     TEST_ASSERT_TRUE(p->enabled);
@@ -206,6 +209,23 @@ void test_modelVariableAddress_rejectsInvalidArguments(void) {
     TEST_ASSERT_NULL(modelVariableAddress(NULL, 0));
 }
 
+void test_newModel_usesTheSuggestedTolerance(void) {
+    TEST_ASSERT_EQUAL_DOUBLE(1e-4, model->relTol);
+}
+
+void test_newModel_fallsBackToTheDefaultTolerance(void) {
+    /* ONLY_STATES suggests no tolerance */
+    modelInstance* m = newModel(&ONLY_STATES);
+
+    TEST_ASSERT_EQUAL_DOUBLE(MODEL_DEFAULT_TOLERANCE, m->relTol);
+
+    freeModel(m);
+}
+
+void test_modelDefaultTolerance_handlesNull(void) {
+    TEST_ASSERT_EQUAL_DOUBLE(MODEL_DEFAULT_TOLERANCE, modelDefaultTolerance(NULL));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -218,6 +238,9 @@ int main(void) {
     RUN_TEST(test_newModel_statesAreAVectorOfDoubles);
     RUN_TEST(test_newModel_handlesEmptyBlocks);
     RUN_TEST(test_newModel_handlesModelWithoutStates);
+    RUN_TEST(test_newModel_usesTheSuggestedTolerance);
+    RUN_TEST(test_newModel_fallsBackToTheDefaultTolerance);
+    RUN_TEST(test_modelDefaultTolerance_handlesNull);
     RUN_TEST(test_resetModel_restoresStartValues);
     RUN_TEST(test_resetModel_handlesNull);
     RUN_TEST(test_variableMacros_deriveNameTypeAndRole);

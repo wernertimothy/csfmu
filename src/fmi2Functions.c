@@ -489,10 +489,14 @@ void fmi2FreeInstance(fmi2Component c)
  ***************************************************/
 
 /**
- * Set up experiment time bounds
+ * Set up experiment time bounds and tolerance
  *
  * Implementation notes:
- * - tolerance parameter ignored (the integrators use a fixed step size)
+ * - A defined tolerance becomes the model's relative tolerance
+ *   (model->relTol), otherwise the model's default applies (see
+ *   modelDefaultTolerance()). Only adaptive integrators use it; the
+ *   fixed-step integrators ignore it
+ * - A defined tolerance must be finite and greater than zero
  * - Validates stopTime >= startTime if defined
  * - If a stop time is defined, fmi2DoStep refuses to step beyond it
  * - Initializes the internal clock (the model's time) to startTime
@@ -505,10 +509,6 @@ fmi2Status fmi2SetupExperiment(
     fmi2Boolean stopTimeDefined,
     fmi2Real stopTime)
 {
-    /* Unused parameters */
-    (void)toleranceDefined;
-    (void)tolerance;
-
     myFMU2* myfmu2 = enterFunction(c, STATE_fmi2SetupExperiment, __func__);
     if (!myfmu2) {
         return fmi2Error;
@@ -522,16 +522,25 @@ fmi2Status fmi2SetupExperiment(
         return enterErrorState(myfmu2, "stopTime %.16g must be >= startTime %.16g.", stopTime, startTime);
     }
 
+    /* Validate tolerance */
+    if (toleranceDefined && !(isfinite(tolerance) && tolerance > 0.0)) {
+        return enterErrorState(myfmu2, "tolerance %.16g must be finite and greater than zero.", tolerance);
+    }
+
     /* Store experiment parameters */
     myfmu2->startTime = startTime;
     myfmu2->stopTimeDefined = stopTimeDefined ? fmi2True : fmi2False;
     myfmu2->stopTime = stopTimeDefined ? stopTime : 0.0;
     myfmu2->model->time = startTime;
+    myfmu2->model->relTol = toleranceDefined ? tolerance : modelDefaultTolerance(myfmu2->model->def);
 
+    const char* toleranceSource = toleranceDefined ? "set by the integration tool" : "default";
     if (stopTimeDefined) {
-        logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. End = %.4f", startTime, stopTime);
+        logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. End = %.4f. Tolerance = %g (%s).",
+                        startTime, stopTime, myfmu2->model->relTol, toleranceSource);
     } else {
-        logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. No end defined.", startTime);
+        logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. No end defined. Tolerance = %g (%s).",
+                        startTime, myfmu2->model->relTol, toleranceSource);
     }
     return fmi2OK;
 }

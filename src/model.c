@@ -76,6 +76,9 @@ void resetModel(modelInstance* model)
     /* Every simulation starts at time 0 unless the caller sets another start */
     model->time = 0.0;
 
+    /* The model's suggested tolerance, unless the caller defines another one */
+    model->relTol = modelDefaultTolerance(def);
+
     /* Zero all storage blocks */
     if (def->sizeOfParams > 0) {
         memset(model->params, 0, def->sizeOfParams);
@@ -113,6 +116,15 @@ void resetModel(modelInstance* model)
     model->getStateDerivatives = def->getStateDerivatives;
     model->integrate = def->integrate;
     model->getOutputs = def->getOutputs;
+}
+
+double modelDefaultTolerance(const modelDefinition* def)
+{
+    if (!def || !(def->defaultExperiment.tolerance > 0.0)) {
+        return MODEL_DEFAULT_TOLERANCE;
+    }
+
+    return def->defaultExperiment.tolerance;
 }
 
 /**
@@ -178,6 +190,7 @@ static void copyModelData(modelInstance* model, char* buffer, bool save)
     char* position = buffer;
 
     position = copyBlock(position, &model->time, sizeof(double), save);
+    position = copyBlock(position, &model->relTol, sizeof(double), save);
     position = copyBlock(position, model->params, def->sizeOfParams, save);
     position = copyBlock(position, model->inputs, def->sizeOfInputs, save);
     position = copyBlock(position, model->outputs, def->sizeOfOutputs, save);
@@ -191,7 +204,7 @@ size_t modelDataSize(const modelDefinition* def)
         return 0;
     }
 
-    return sizeof(double) + def->sizeOfParams + def->sizeOfInputs + def->sizeOfOutputs +
+    return 2 * sizeof(double) + def->sizeOfParams + def->sizeOfInputs + def->sizeOfOutputs +
            2 * def->numberOfStates * sizeof(double);
 }
 

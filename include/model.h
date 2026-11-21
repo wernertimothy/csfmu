@@ -47,6 +47,14 @@ typedef struct modelInstance modelInstance;
 #define MODEL_SCRATCH_VECTORS 5
 
 /**
+ * @brief Relative tolerance used when a model suggests none.
+ *
+ * Applies if defaultExperiment.tolerance of the model definition is 0 (not
+ * set) and the integration tool does not define a tolerance either.
+ */
+#define MODEL_DEFAULT_TOLERANCE 1e-6
+
+/**
  * @brief Function pointer type for computing state derivatives.
  *
  * Model-specific implementations compute dx/dt = f(t, x, u) and store
@@ -204,7 +212,7 @@ typedef struct {
  *
  * Represents a single instance of a dynamical system model, containing:
  * - A pointer to the model definition
- * - The current time t
+ * - The current time t and the relative tolerance
  * - Storage blocks for parameters, inputs and outputs (model-specific structs)
  * - State and state derivative vectors
  * - Work memory for the integrator (content is undefined between calls; it is
@@ -220,6 +228,7 @@ typedef struct {
 struct modelInstance {
     const modelDefinition* def;              /**< Definition this instance was created from */
     double time;                             /**< Current time t, owned by the model (advanced by the integrator) */
+    double relTol;                           /**< Relative tolerance for adaptive integrators (not used by fixed-step methods) */
     void* params;                            /**< Parameter block [def->sizeOfParams bytes] */
     void* inputs;                            /**< Input block [def->sizeOfInputs bytes] */
     void* outputs;                           /**< Output block [def->sizeOfOutputs bytes] */
@@ -255,13 +264,24 @@ modelInstance* newModel(const modelDefinition* def);
 /**
  * @brief Brings a model instance back to its state right after newModel().
  *
- * Sets the time to 0, zeroes all storage blocks, writes the start value of every variable in
+ * Sets the time to 0 and the relative tolerance to the model's default
+ * (see modelDefaultTolerance()), zeroes all storage blocks, writes the start value of every variable in
  * the definition's variable table and (re-)binds the function pointers
  * from the definition. This function is NULL-safe.
  *
  * @param model Pointer to the model instance to reset. May be NULL.
  */
 void resetModel(modelInstance* model);
+
+/**
+ * @brief Returns the default relative tolerance of a model.
+ *
+ * @param def Definition of the model
+ *
+ * @return def->defaultExperiment.tolerance if it is set (> 0), otherwise
+ *         MODEL_DEFAULT_TOLERANCE (also if def is NULL)
+ */
+double modelDefaultTolerance(const modelDefinition* def);
 
 /**
  * @brief Returns the address of a variable's storage.
@@ -280,8 +300,8 @@ void* modelVariableAddress(modelInstance* model, size_t index);
 /**
  * @brief Returns the number of bytes needed to store the data of a model.
  *
- * The data of a model are its time, its parameter, input and output
- * blocks, its states and its state derivatives.
+ * The data of a model are its time, its relative tolerance, its parameter,
+ * input and output blocks, its states and its state derivatives.
  *
  * @param def Definition of the model
  *
@@ -294,8 +314,8 @@ size_t modelDataSize(const modelDefinition* def);
  * @brief Copies the data of a model instance into a buffer.
  *
  * Together with restoreModelData() this allows taking a snapshot of a model
- * and returning to it later. The buffer is a plain copy of the time and
- * the storage blocks, so it is only valid for the same model definition on the same
+ * and returning to it later. The buffer is a plain copy of the time, the
+ * relative tolerance and the storage blocks, so it is only valid for the same model definition on the same
  * platform.
  *
  * @param model  Pointer to the model instance

@@ -1,6 +1,9 @@
 import os
 import fmpy
+import fmpy.fmi2
+import fmpy.logging
 import pytest
+from ctypes import byref
 from pathlib import Path
 
 @pytest.fixture(scope="session")
@@ -56,6 +59,23 @@ def vr(model_description):
 
     return value_reference_of
 
+def logging_callbacks(log : list) -> fmpy.fmi2.fmi2CallbackFunctions:
+    """ Return FMI callbacks whose logger appends every message to log.
+
+    The FMU passes its messages as "%s" plus a variadic argument, which ctypes
+    cannot hand to Python. FMPy's native logger proxy formats the message
+    first. The FMU keeps a reference to the callbacks, so they stay alive.
+    """
+    def logger(component, instanceName, status, category, message):
+        log.append((status, category.decode("utf-8"), message.decode("utf-8")))
+
+    callbacks = fmpy.fmi2.fmi2CallbackFunctions()
+    callbacks.logger = fmpy.fmi2.fmi2CallbackLoggerTYPE(logger)
+    callbacks.allocateMemory = fmpy.fmi2.fmi2CallbackAllocateMemoryTYPE(fmpy.calloc)
+    callbacks.freeMemory = fmpy.fmi2.fmi2CallbackFreeMemoryTYPE(fmpy.free)
+    fmpy.logging.addLoggerProxy(byref(callbacks))
+    return callbacks
+
 @pytest.fixture
 def new_fmu(unzipdir : Path, model_description):
     """ Return a function that creates an instantiated FMU.
@@ -65,14 +85,19 @@ def new_fmu(unzipdir : Path, model_description):
     """
     instances = []
 
-    def instantiate(instance_name : str = "test_instance"):
+    def instantiate(instance_name : str = "test_instance", log : list | None = None):
+        """ Create an FMU. If a list is given as log, logging is switched on
+        and every message is appended to it as (status, category, message). """
         fmu = fmpy.fmi2.FMU2Slave(
             guid=model_description.guid,
             unzipDirectory=unzipdir,
             modelIdentifier=model_description.coSimulation.modelIdentifier,
             instanceName=instance_name
         )
-        fmu.instantiate()
+        if log is None:
+            fmu.instantiate()
+        else:
+            fmu.instantiate(callbacks=logging_callbacks(log), loggingOn=True)
         instances.append(fmu)
         return fmu
 

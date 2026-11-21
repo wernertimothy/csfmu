@@ -297,7 +297,7 @@ Informs the FMU about the simulation time window and numerical tolerances before
 |------|------|-------------|
 | `c` | `fmi2Component` | The FMU instance |
 | `toleranceDefined` | `fmi2Boolean` | Whether `tolerance` parameter is meaningful |
-| `tolerance` | `fmi2Real` | Relative tolerance for numerical integration (often ignored in co-simulation) |
+| `tolerance` | `fmi2Real` | Relative tolerance for numerical integration, stored as `model->relTol`. Used by adaptive integrators; the fixed-step integrators (`eulerForward`, `rungeKutta4`) ignore it |
 | `startTime` | `fmi2Real` | Start time of the experiment in seconds |
 | `stopTimeDefined` | `fmi2Boolean` | Whether `stopTime` parameter is meaningful |
 | `stopTime` | `fmi2Real` | Stop time of the experiment in seconds |
@@ -306,7 +306,7 @@ Informs the FMU about the simulation time window and numerical tolerances before
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Experiment setup successful |
-| `fmi2Error` | Invalid parameters or wrong state |
+| `fmi2Error` | Invalid parameters (`startTime` not finite, `stopTime < startTime`, defined `tolerance` not finite or not > 0) or wrong state |
 
 #### FMI State Requirements
 **Can be called in**: **Instantiated** state (after `fmi2Instantiate`, before `fmi2EnterInitializationMode`)
@@ -319,8 +319,8 @@ fmi2Component fmu = fmi2Instantiate(/* ... */);
 // Setup a simulation from t=0 to t=10 seconds
 fmi2Status status = fmi2SetupExperiment(
     fmu,
-    fmi2False,  // tolerance not defined (common for co-sim)
-    0.0,        // tolerance (ignored)
+    fmi2False,  // tolerance not defined: the model's default applies
+    0.0,        // tolerance (not read if undefined)
     0.0,        // start time
     fmi2True,   // stop time is defined
     10.0        // stop time = 10 seconds
@@ -337,7 +337,8 @@ if (status != fmi2OK) {
 
 #### Notes
 - Must be called before `fmi2EnterInitializationMode`
-- `tolerance` is typically undefined for co-simulation (solver-specific)
+- **Tolerance**: a defined `tolerance` must be finite and greater than zero and becomes `model->relTol`. If `toleranceDefined` is false, `tolerance` is not read and the model's default applies: `defaultExperiment.tolerance` of the model definition, or `1e-6` (`MODEL_DEFAULT_TOLERANCE`) if the model suggests none. The last call before `fmi2EnterInitializationMode` counts, and `fmi2Reset` restores the default
+- The start time, stop time and tolerance are written to the log (category `logEvents`)
 - Internally stores `startTime`, `stopTime`, and initializes the internal clock to `startTime`. The clock is the model's time `model->time`, so the equations `f(t,x,u)` and `h(t,x,u)` see `t = startTime` during initialization
 - If `stopTimeDefined` is true, `stopTime` must be `>= startTime`, and [`fmi2DoStep`](#fmi2dostep) later refuses to step beyond it. If it is false, `stopTime` is ignored
 - `startTime` must be finite
@@ -1247,7 +1248,7 @@ fmi2FreeFMUstate(fmu, &snapshot);
 - **The snapshot belongs to the caller**: It is not freed by `fmi2FreeInstance`. Free it with `fmi2FreeFMUstate`
 - **Initialize the pointer with NULL**: An uninitialized `fmi2FMUstate` would be taken for an existing snapshot
 - **One block of memory**: A snapshot is a single allocation without pointers. All snapshots of a model have the same size, which is why an existing one can be reused
-- **Contents**: the experiment (start and stop time), the state machine and all model data: the model's time, parameters, inputs, outputs, states and state derivatives
+- **Contents**: the experiment (start and stop time), the state machine and all model data: the model's time, relative tolerance, parameters, inputs, outputs, states and state derivatives
 
 ---
 
