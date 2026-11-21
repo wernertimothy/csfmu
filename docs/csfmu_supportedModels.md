@@ -1,0 +1,57 @@
+# Supported models
+
+An FMU built with csfmu contains a continuous-time model that is described by ordinary differential equations. The FMU integrates the equations itself, so the integration tool only exchanges inputs and outputs at the communication points.
+
+This page describes which models can be written today and lists the demo models of this repository, each of which showcases one feature.
+
+## System class
+
+A model is described by a state equation and an output equation:
+
+```
+dx/dt = f(t, x, u)      x: vector of doubles
+    y = h(t, x, u)
+```
+
+where **t** is the time, **x** are the states, **u** are the inputs and **y** are the outputs. Parameters enter both equations.
+
+- `f` and `h` may be nonlinear.
+- `f` and `h` may depend explicitly on time. `model->time` is the time of the integrator stage inside `f` and the communication point inside `h`.
+- `h` may use the inputs directly (direct feedthrough). You declare which inputs an output depends on with `.dependsOn`, and the `modelDescription.xml` publishes it.
+
+How to write the two equations is explained in [getting started](csfmu_gettingStarted.md#equationsc-or-equationscpp).
+
+## Variables
+
+- **Parameters**, **inputs** and **outputs** can be of type `double`, `int` or `bool`.
+- Parameters are tunable (they can be changed between simulation steps) or fixed (`.variability = VAR_FIXED`, they can only be set before the simulation starts).
+- **States** are of type `double`, because the integrators work on a vector of doubles.
+
+## Integration
+
+- The models are integrated with fixed-step explicit methods: `eulerForward` and `rungeKutta4` (see `include/integrator.h`). They suit non-stiff systems.
+- Every communication step is split into equal sub-steps that are not larger than the model's `maxStepSize`. You choose `maxStepSize` small enough for your model to integrate stably, and the integration tool can use any communication step size.
+
+## Interaction with the integration tool
+
+- Inputs are held constant over a communication step (zero-order hold).
+- Outputs always reflect the inputs set last, also before a step and during initialization.
+- The communication step size can change from step to step.
+- The FMU state can be saved, restored and serialized, e.g. to repeat a step.
+- If a state becomes NaN or infinite during a step, the FMU discards the step: it returns `fmi2Discard` and is rolled back to the start of the step, so the integration tool can go back to a saved FMU state and continue.
+
+## Demo models
+
+The repository ships demo models, each of which showcases a certain feature. Use them as worked examples for your own model. Every model has its own tests under `test/models/<model>/`.
+
+| Model | Showcases |
+|-------|-----------|
+| [`first_order`](../src/models/first_order/) | The simplest model: a linear first-order lag, integrated with explicit Euler. It is the default model of the build and the tests |
+| [`mass_spring_damper`](../src/models/mass_spring_damper/) | A second-order system written as two first-order states. Outputs and states use the same field names, so the states are published under their own names with `STATE_AS` |
+| [`pendulum_on_cart`](../src/models/pendulum_on_cart/) | A nonlinear fourth-order system whose equations are written in C++ (`equations.cpp`) |
+| [`typed_demo`](../src/models/typed_demo/) | `int` and `bool` parameters, inputs and outputs next to `double` ones, and a fixed parameter |
+| [`forced_pt1`](../src/models/forced_pt1/) | Explicit time dependence in both equations (`model->time`). The integrator evaluates every stage at its own time |
+| [`pi_controller`](../src/models/pi_controller/) | Direct feedthrough: its outputs react to an input as soon as it is set, without a simulation step (`.dependsOn`) |
+| [`fault_injection`](../src/models/fault_injection/) | A model without inputs, and a numerical failure on request: the FMU discards the step and rolls back (`fmi2Discard`) |
+
+When the template learns a new kind of model, this page and the list of demo models are extended.

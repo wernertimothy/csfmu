@@ -33,10 +33,7 @@ The two sides are kept apart by one idea: **a model describes its variables once
 
 As a consequence there are no ordering rules: variables can be declared in any order and can be of type `double`, `int` or `bool`.
 
-The model implementation restrictions that remain are:
-* the model is described by **dx = f(t,x,u)** and **y = h(t,x,u)**.
-* continuous states are of type `double` (the numerical integrators work on a vector of doubles).
-* string variables are not supported.
+Which systems a model can describe, and a demo model for each feature, is listed in [supported models](csfmu_supportedModels.md).
 
 ## How to Build the FMU
 
@@ -146,7 +143,7 @@ In this file you should implement two functions, the models **state equations** 
 #### State Equation
 
 This template assumes that your model can be represented as a potentially nonlinear differential equation, such that the derivatives of the states can be computed by a function **dx=f(t,x,u)**, where **dx** are the state derivatives with respect to time **t**, **x** are the states and **u** are the inputs to the model.
-**f** is the state equation you have to implement here.
+**f** is the state equation you have to implement here (see [supported models](csfmu_supportedModels.md) for the class of systems it can describe).
 It can have any name.
 The signature of the function is
 ```c

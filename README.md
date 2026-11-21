@@ -76,6 +76,10 @@ And tested it's build and runtime sanity with FMPy
 
 Take a look at [getting started][], to learn about the project architecture and what it takes to implement your own model as an FMU.
 
+## Supported Models
+
+Which systems you can turn into an FMU, and which demo model showcases which feature, is described in [supported models][].
+
 ## Co-Simulation FMUs
 
 Since you have found your way to this project, you are probably already familiar with what an FMU is.
@@ -95,6 +99,7 @@ Make sure to pay their page a visit, if you haven't done so already.
 And although most of the code was written by a real human beeing, it was heavily supervised by [Claude Code](https://code.claude.com/docs/en/overview), which accelerated the learning curve regarding both FMU and C code significantly. 
 
 [getting started]: docs/csfmu_gettingStarted.md
+[supported models]: docs/csfmu_supportedModels.md
 [csfmu cli]: docs/csfmu_cli.md
 [Co-Sim FMUs]: docs/csfmu_coSimFMUs.md
 [fmi2]: docs/csfmu_fmi2Reference.md
