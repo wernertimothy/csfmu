@@ -1,5 +1,5 @@
-import pytest
 import fmpy
+import pytest
 
 """
 Model-independent tests of the FMU state machine.

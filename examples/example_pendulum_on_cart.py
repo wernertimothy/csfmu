@@ -19,11 +19,10 @@ Usage:
     python examples/example_pendulum_on_cart.py
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-import matplotlib.patches as patches
+import numpy as np
 from fmpy import read_model_description, simulate_fmu
+from matplotlib import animation, patches
 
 # Path to the FMU (built with: cmake -DMODEL=pendulum_on_cart .. && cmake --build .)
 fmu_path = "build/pendulum_on_cart.fmu"

@@ -9,6 +9,7 @@ dev = [
     "fmpy>=0.3.20",
     "matplotlib>=3.11.2",
     "pytest>=8.0",
+    "ruff>=0.17.6",
 ]
 
 [project.scripts]

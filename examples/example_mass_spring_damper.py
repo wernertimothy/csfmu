@@ -16,8 +16,8 @@ Usage:
     python examples/example_mass_spring_damper.py
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from fmpy import read_model_description, simulate_fmu
 
 # Path to the FMU (built with: cmake -DMODEL=mass_spring_damper .. && cmake --build .)

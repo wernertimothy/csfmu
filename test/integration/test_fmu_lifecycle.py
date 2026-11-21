@@ -1,6 +1,6 @@
-import pytest
-import fmpy
 from pathlib import Path
+
+import fmpy
 
 
 def test_fmu_complete_lifecycle(unzipdir: Path, path_to_fmu: Path) -> None:

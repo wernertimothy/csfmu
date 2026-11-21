@@ -1,10 +1,12 @@
 import os
+from ctypes import byref
+from pathlib import Path
+
 import fmpy
 import fmpy.fmi2
 import fmpy.logging
 import pytest
-from ctypes import byref
-from pathlib import Path
+
 
 @pytest.fixture(scope="session")
 def path_to_project_root() -> Path:

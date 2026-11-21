@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import pytest
 from fmpy import simulate_fmu
-from pathlib import Path
 
 
 @pytest.fixture(autouse=True)

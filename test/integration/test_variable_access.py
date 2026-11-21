@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import pytest
 from fmpy.validation import validate_fmu
-from pathlib import Path
 
 """
 Model-independent tests of variable access (fmi2GetXXX / fmi2SetXXX).

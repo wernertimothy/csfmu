@@ -1,8 +1,9 @@
 import shutil
 import subprocess
 import sys
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 @pytest.mark.skipif(sys.platform == "win32" or shutil.which("nm") is None, reason="requires nm")

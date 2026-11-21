@@ -1,9 +1,10 @@
 
-import sys
 import os
-import shutil
-import zipfile
 import platform
+import shutil
+import sys
+import zipfile
+
 
 def package_fmu(lib_path, model_desc_path, output_dir, fmu_name):
     """Package FMU according to FMI 2.0 standard."""

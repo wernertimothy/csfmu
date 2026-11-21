@@ -1,9 +1,10 @@
 import os
 import subprocess
 import sys
-import pytest
-import fmpy
 from pathlib import Path
+
+import fmpy
+import pytest
 
 # The two models are loaded in a separate process, because a library loaded
 # with RTLD_GLOBAL stays visible to everything loaded afterwards and would

@@ -1,7 +1,8 @@
 import ctypes
+from pathlib import Path
+
 import fmpy
 from fmpy.validation import validate_fmu
-from pathlib import Path
 
 FMI2_OK = 0
 

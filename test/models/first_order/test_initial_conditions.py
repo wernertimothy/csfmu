@@ -1,6 +1,7 @@
-import pytest
-import fmpy
 from pathlib import Path
+
+import fmpy
+import pytest
 
 
 def test_initial_parameters(unzipdir: Path, path_to_fmu: Path, vr) -> None:

@@ -1,7 +1,8 @@
+from pathlib import Path
+
 import fmpy
 import pytest
 from fmpy.validation import validate_fmu
-from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
