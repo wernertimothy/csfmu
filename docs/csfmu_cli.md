@@ -61,11 +61,11 @@ The following files are created:
   | `src/models/<model>/variables.h` | The structs `Params`, `Inputs`, `Outputs`, `States` and the declarations of the equations |
   | `src/models/<model>/variables.c` | The variable table and the model definition, with a freshly generated GUID |
   | `src/models/<model>/equations.c` | The state and output equations |
-  | `test/models/<model>/__init__.py` | Makes the tests a Python package |
-  | `test/models/<model>/test_<model>.py` | A starter test that checks the integrator against its exact solution |
+  | `tests/models/<model>/__init__.py` | Makes the tests a Python package |
+  | `tests/models/<model>/test_<model>.py` | A starter test that checks the integrator against its exact solution |
 
 The model builds and passes all tests as it is. Replace the integrator with your own equations; [getting started][] explains the three model files in detail.
-The FMI behavior of every model is checked by the tests in `test/integration/`. `test/models/<model>/` is the place for the tests of your own equations; they are only collected when this model is tested.
+The FMI behavior of every model is checked by the tests in `tests/integration/`. `tests/models/<model>/` is the place for the tests of your own equations; they are only collected when this model is tested.
 
 `new` only creates files. It does not build or test anything; it tells you the next steps instead:
 
@@ -84,7 +84,7 @@ uv run csfmu test my_model
 
 For example `first_order`, `lorenz_attractor` or `PID_controller`.
 
-If `src/models/<model>/` or `test/models/<model>/` already exists, `new` stops with an error and changes nothing.
+If `src/models/<model>/` or `tests/models/<model>/` already exists, `new` stops with an error and changes nothing.
 Names that only differ in case count as the same model (`My_Model` already exists if `my_model` does), on every platform: macOS and Windows do not distinguish them in file names, so the project would break when checked out there.
 
 To undo `new`, use `rm`.
@@ -104,7 +104,7 @@ The following files and folders are removed, as far as they exist:
   | Path | Content |
   |------|---------|
   | `src/models/<model>/` | The model |
-  | `test/models/<model>/` | Its tests |
+  | `tests/models/<model>/` | Its tests |
   | `examples/example_<model>.py` | Its Python example |
   | `build/<model>/` | Its build folder |
   | `build/<model>.fmu` | Its FMU |
@@ -116,19 +116,19 @@ If there is no one to answer, for example in a script, nothing is removed.
 $ uv run csfmu rm mass_spring_damper
 This removes model 'mass_spring_damper':
   src/models/mass_spring_damper/
-  test/models/mass_spring_damper/
+  tests/models/mass_spring_damper/
   examples/example_mass_spring_damper.py
 These files still mention 'mass_spring_damper' and are not changed:
   .github/workflows/ci.yml
   docs/csfmu_gettingStarted.md
-  test/integration/test_two_fmus.py
+  tests/integration/test_two_fmus.py
 Remove model 'mass_spring_damper'? [Y/n]
 ```
 
 Other files of the project may mention the model as well, like the CI workflow or the docs above. `rm` never changes them, because they are shared with other models. It lists them instead, so you can update them by hand.
-Keep in mind that `first_order` is the default model of the `CMakeLists.txt` and of the tests (`test/conftest.py`).
+Keep in mind that `first_order` is the default model of the `CMakeLists.txt` and of the tests (`tests/conftest.py`).
 
-`rm` also removes leftovers of a model that is no longer complete, e.g. a `test/models/<model>/` whose model folder was deleted by hand.
+`rm` also removes leftovers of a model that is no longer complete, e.g. a `tests/models/<model>/` whose model folder was deleted by hand.
 
 ### `build [<model>] [-o <dir>]`
 
@@ -169,8 +169,8 @@ uv run csfmu test first_order
 ```
 
 1. If `build/<model>.fmu` does not exist yet, the model is built first (like `build`).
-2. The C unit tests are run with `ctest` in `build/<model>/`. This includes the model's own C tests: if `test/models/<model>/CMakeLists.txt` exists, they are built together with that model.
-3. The pytest suite in `test/` is run against `build/<model>.fmu`. csfmu passes the model to the tests through the environment variables `FMU_MODEL` and `FMU_OUTPUT_DIR`.
+2. The C unit tests are run with `ctest` in `build/<model>/`. This includes the model's own C tests: if `tests/models/<model>/CMakeLists.txt` exists, they are built together with that model.
+3. The pytest suite in `tests/` is run against `build/<model>.fmu`. csfmu passes the model to the tests through the environment variables `FMU_MODEL` and `FMU_OUTPUT_DIR`.
 
 csfmu stops at the first step that fails.
 

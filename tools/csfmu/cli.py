@@ -157,14 +157,14 @@ def test(root: Path, model: str, pytest_args: list[str]) -> int:
 
 
 def new(root: Path, name: str) -> int:
-    """Create a new model from the template in src/models/<name>/ and its tests in test/models/<name>/."""
+    """Create a new model from the template in src/models/<name>/ and its tests in tests/models/<name>/."""
     error = validate_name(name)
     if error is not None:
         print(f"Error: {error}")
         return 1
     # Names that only differ in case are the same folder on macOS and Windows,
     # so they count as the same model on every platform
-    for parent in (root / "src" / "models", root / "test" / "models"):
+    for parent in (root / "src" / "models", root / "tests" / "models"):
         for existing in parent.iterdir() if parent.is_dir() else ():
             if existing.name.lower() == name.lower():
                 print(
@@ -185,7 +185,7 @@ def model_traces(root: Path, name: str) -> list[Path]:
     """Return the existing files and folders that belong to the model only."""
     candidates = [
         root / "src" / "models" / name,
-        root / "test" / "models" / name,
+        root / "tests" / "models" / name,
         root / "examples" / f"example_{name}.py",
         root / "build" / name,
         root / "build" / f"{name}.fmu",

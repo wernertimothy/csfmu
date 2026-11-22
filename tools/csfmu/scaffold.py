@@ -320,15 +320,15 @@ TEST_MODEL = Template('''\
 
 The template model is an integrator with gain: dx/dt = k*u, y = x. Adapt the
 tests when you change the equations, and check each result against a known
-solution, as the tests of the demo models in test/models/ do.
+solution, as the tests of the demo models in tests/models/ do.
 
-The tests in test/integration/ check the FMI behavior of every model. The
+The tests in tests/integration/ check the FMI behavior of every model. The
 tests in this folder are only collected when the ${name} model is tested.
 """
 
 import pytest
 
-from test.fmu_helpers import advance
+from tests.fmu_helpers import advance
 
 
 def test_output_integrates_the_input(initialized_fmu, vr) -> None:
@@ -347,7 +347,7 @@ def create_model(root: Path, name: str) -> list[Path]:
     """Create the files of a new model from the template and return their paths.
 
     Creates src/models/<name>/ with an integrator (dx/dt = k*u, y = x) and
-    test/models/<name>/ with a starter test of the model. Neither folder may exist.
+    tests/models/<name>/ with a starter test of the model. Neither folder may exist.
     """
     values = {
         "name": name,
@@ -356,7 +356,7 @@ def create_model(root: Path, name: str) -> list[Path]:
         "guid": str(uuid.uuid4()),
     }
     model_dir = root / "src" / "models" / name
-    test_dir = root / "test" / "models" / name
+    test_dir = root / "tests" / "models" / name
     files = {
         model_dir / "variables.h": VARIABLES_H.substitute(values),
         model_dir / "variables.c": VARIABLES_C.substitute(values),

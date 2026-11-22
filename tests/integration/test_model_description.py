@@ -6,7 +6,7 @@ import fmpy
 from fmpy.fmi2 import fmi2OK
 from fmpy.validation import validate_fmu
 
-from test.fmu_helpers import set_debug_logging
+from tests.fmu_helpers import set_debug_logging
 
 
 def test_fmu_model_description_is_valid(path_to_fmu: Path) -> None:

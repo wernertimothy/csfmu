@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from test.fmu_helpers import advance, initialize
+from tests.fmu_helpers import advance, initialize
 
 
 def parameters(fmu, vr) -> tuple[float, float]:

@@ -43,7 +43,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 
 ## Demo models
 
-The repository ships demo models, each of which showcases a certain feature. Use them as worked examples for your own model. Every model has its own tests under `test/models/<model>/`.
+The repository ships demo models, each of which showcases a certain feature. Use them as worked examples for your own model. Every model has its own tests under `tests/models/<model>/`.
 
 | Model | Showcases |
 |-------|-----------|

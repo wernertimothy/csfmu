@@ -17,7 +17,7 @@ def project(tmp_path):
     """An empty csfmu project: a CMakeLists.txt and the model folders."""
     (tmp_path / "CMakeLists.txt").write_text("")
     (tmp_path / "src" / "models").mkdir(parents=True)
-    (tmp_path / "test" / "models").mkdir(parents=True)
+    (tmp_path / "tests" / "models").mkdir(parents=True)
     return tmp_path
 
 
@@ -57,7 +57,7 @@ def test_pytest_arguments_do_not_become_the_model() -> None:
 
 
 def test_root_is_found_from_a_subfolder(project, monkeypatch) -> None:
-    monkeypatch.chdir(project / "test" / "models")
+    monkeypatch.chdir(project / "tests" / "models")
     assert cli.find_root() == project.resolve()
 
 
@@ -143,8 +143,8 @@ def test_new_model_has_sources_and_a_test(project) -> None:
         "src/models/my_model/variables.h",
         "src/models/my_model/variables.c",
         "src/models/my_model/equations.c",
-        "test/models/my_model/__init__.py",
-        "test/models/my_model/test_my_model.py",
+        "tests/models/my_model/__init__.py",
+        "tests/models/my_model/test_my_model.py",
     ]
     assert cli.available_models(project) == ["my_model"]
 

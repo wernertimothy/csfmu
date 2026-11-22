@@ -7,7 +7,7 @@ so they work for every model built with this template.
 import pytest
 from fmpy.fmi1 import FMICallException
 
-from test.fmu_helpers import (
+from tests.fmu_helpers import (
     changed_value,
     initialize,
     read,

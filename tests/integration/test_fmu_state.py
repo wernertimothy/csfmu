@@ -6,7 +6,7 @@ Covers fmi2GetFMUstate, fmi2SetFMUstate, fmi2FreeFMUstate and serialization.
 import pytest
 from fmpy.fmi1 import FMICallException
 
-from test.fmu_helpers import initialize, read_all, variables_with
+from tests.fmu_helpers import initialize, read_all, variables_with
 
 
 def excite(fmu, model_description) -> None:

@@ -1077,7 +1077,7 @@ if (fmi2DoStep(fmu, time, h, fmi2False) == fmi2Discard) {
 fmi2FreeFMUstate(fmu, &atStart);
 ```
 
-The integrator of this FMU works with sub-steps of a fixed size (see `maxStepSize`), so retrying with a smaller communication step size usually gives the same failure. The `fault_injection` model (`src/models/fault_injection/`) demonstrates the protocol. Its tests in `test/models/fault_injection/test_discard.py` exercise every allowed and refused call.
+The integrator of this FMU works with sub-steps of a fixed size (see `maxStepSize`), so retrying with a smaller communication step size usually gives the same failure. The `fault_injection` model (`src/models/fault_injection/`) demonstrates the protocol. Its tests in `tests/models/fault_injection/test_discard.py` exercise every allowed and refused call.
 
 #### Time Validation
 

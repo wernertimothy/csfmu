@@ -17,7 +17,7 @@ The Project is structured as follows.
   | `scripts/` | Build and packaging scripts |
   | `src/` | Core FMU and model-interface implementation |
   | `src/models/` | **Model implementations (this is where you will add your model)** |
-  | `test/` | Unit and integration tests |
+  | `tests/` | Unit and integration tests |
 
 **Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. Each model also has a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
 
@@ -477,14 +477,14 @@ Only you know what your output equation does, so you declare it with `.dependsOn
 
 If you declare nothing, the `modelDescription.xml` says that the output depends on **all** inputs. That is always safe, but tools may then report algebraic loops that do not exist. Most models compute their outputs from the states only, so `.dependsOn = ""` is the common case.
 
-The build checks that the names are inputs of your model, and the test suite (`test/integration/test_feedthrough.py`) checks your declaration against the FMU in both directions:
+The build checks that the names are inputs of your model, and the test suite (`tests/integration/test_feedthrough.py`) checks your declaration against the FMU in both directions:
 
 - An output must **not** change when an input it does not depend on is set.
 - An output **must** change right after an input it declares is set, without a simulation step in between.
 
 FMI itself only says that a declared output *may* depend on the input. The second check is stricter, so declare only real dependencies, and choose start values at which the dependency is active (e.g. a gain that is not 0, an input that is not in saturation). An undeclared output (all inputs) is not checked in this direction.
 
-The `pi_controller` model (`src/models/pi_controller/`) is the worked example: `e = r - y_m` and `u = Kp*e + Ki*x_I` both declare `.dependsOn = "r y_m"`, and `test/models/pi_controller/test_feedthrough_oracle.py` checks the values right after a set.
+The `pi_controller` model (`src/models/pi_controller/`) is the worked example: `e = r - y_m` and `u = Kp*e + Ki*x_I` both declare `.dependsOn = "r y_m"`, and `tests/models/pi_controller/test_feedthrough_oracle.py` checks the values right after a set.
 
 #### Quick Checklist
 

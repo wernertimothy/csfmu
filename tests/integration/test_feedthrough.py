@@ -2,7 +2,7 @@
 
 import pytest
 
-from test.fmu_helpers import changed_value, read, variables_with, write
+from tests.fmu_helpers import changed_value, read, variables_with, write
 
 
 def change(fmu, variable) -> None:

@@ -14,7 +14,7 @@ import math
 
 import pytest
 
-from test.fmu_helpers import advance
+from tests.fmu_helpers import advance
 
 WD = math.sqrt(3.0) / 2.0
 TOLERANCE = 1e-12  # RK4 with sub-steps of 1e-3 stays at about 1e-14

@@ -7,18 +7,18 @@ import fmpy.fmi2
 import fmpy.logging
 import pytest
 
-from test.fmu_helpers import initialize
+from tests.fmu_helpers import initialize
 
 # The model under test. "csfmu test <model>" sets it; the FMU is
 # $FMU_OUTPUT_DIR/<model>.fmu
 MODEL = os.environ.get("FMU_MODEL", "first_order")
 
-# The tests of a model are in test/models/<model>/ (csfmu new creates the folder)
+# The tests of a model are in tests/models/<model>/ (csfmu new creates the folder)
 MODEL_TESTS = (Path(__file__).parent / "models").resolve()
 
 
 def model_of(path: Path) -> str | None:
-    """The model whose test folder contains path, or None outside test/models/<model>/."""
+    """The model whose test folder contains path, or None outside tests/models/<model>/."""
     path = path.resolve()
     if path == MODEL_TESTS or not path.is_relative_to(MODEL_TESTS):
         return None

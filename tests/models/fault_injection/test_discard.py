@@ -21,7 +21,7 @@ from fmpy.fmi2 import (
     fmi2Terminated,
 )
 
-from test.fmu_helpers import advance, initialize
+from tests.fmu_helpers import advance, initialize
 
 STEP_SIZE = 0.1
 FAILING_STEP_START = 0.5

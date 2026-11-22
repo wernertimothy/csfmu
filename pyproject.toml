@@ -23,6 +23,6 @@ build-backend = "uv_build"
 module-root = "tools"
 
 [tool.pytest.ini_options]
-testpaths = ["test"]
+testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 xfail_strict = true

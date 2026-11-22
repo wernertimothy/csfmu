@@ -11,7 +11,7 @@ import pytest
 from fmpy.fmi1 import FMICallException
 from fmpy.fmi2 import fmi2Error, fmi2OK, fmi2Warning
 
-from test.fmu_helpers import advance, initialize
+from tests.fmu_helpers import advance, initialize
 
 
 def setup_messages(log: list) -> list:

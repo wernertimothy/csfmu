@@ -2,7 +2,7 @@
 
 from fmpy.fmi2 import fmi2LastSuccessfulTime
 
-from test.fmu_helpers import advance
+from tests.fmu_helpers import advance
 
 
 def test_fmu_complete_lifecycle(new_fmu) -> None:

@@ -3,7 +3,7 @@
 import pytest
 from fmpy.fmi1 import FMICallException
 
-from test.fmu_helpers import advance, initialize
+from tests.fmu_helpers import advance, initialize
 
 
 def test_variable_types_in_model_description(model_description) -> None:

@@ -169,11 +169,11 @@ endif()
 #==============================================================================
 
 add_subdirectory(examples)
-add_subdirectory(test/unit)
+add_subdirectory(tests/unit)
 
-# Model-specific C tests (optional): test/models/<model>/CMakeLists.txt
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/models/${MODEL}/CMakeLists.txt")
-    add_subdirectory(test/models/${MODEL})
+# Model-specific C tests (optional): tests/models/<model>/CMakeLists.txt
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/models/${MODEL}/CMakeLists.txt")
+    add_subdirectory(tests/models/${MODEL})
 endif()
 
 #==============================================================================

@@ -13,7 +13,7 @@ import pytest
 from fmpy.fmi1 import FMICallException
 from fmpy.fmi2 import fmi2Discard, fmi2DoStepStatus, fmi2LastSuccessfulTime
 
-from test.fmu_helpers import initialize
+from tests.fmu_helpers import initialize
 
 STEP_SIZE = 0.1
 

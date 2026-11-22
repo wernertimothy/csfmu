@@ -19,7 +19,7 @@ from fmpy.fmi2 import (
     fmi2Warning,
 )
 
-from test.fmu_helpers import do_step_status, initialize, read, set_debug_logging
+from tests.fmu_helpers import do_step_status, initialize, read, set_debug_logging
 
 
 def test_cannot_do_step_before_exiting_initialization_mode(new_fmu) -> None:
