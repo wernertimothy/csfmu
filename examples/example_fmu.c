@@ -101,12 +101,20 @@ int main(void) {
 
         /* step in time */
         fmuStatus = fmi2DoStep(fmu, time, dt, fmi2False);
+        if (fmuStatus == fmi2Discard) {
+            /* The FMU could not complete the step and rolled back to its start.
+             * Recovering means going back to a saved FMU state (see "Discarded
+             * Steps" in docs/csfmu_fmi2Reference.md); this example just stops */
+            printf("Step from t = %.2f discarded, simulation stopped.\n", time);
+            break;
+        }
         if (fmuStatus >= fmi2Error) goto cleanup;
     }
     fmuStatus = fmi2GetReal(fmu, &VR_y, 1, &y);
     if (fmuStatus >= fmi2Error) goto cleanup;
 
-    /* the FMU owns the clock: the end of the last step is its last successful time */
+    /* the FMU owns the clock: its last successful time is the end of the last
+     * completed step (after a discard, the start of the discarded step) */
     fmi2Real endTime = 0.0;
     fmuStatus = fmi2GetRealStatus(fmu, fmi2LastSuccessfulTime, &endTime);
     if (fmuStatus >= fmi2Error) goto cleanup;
