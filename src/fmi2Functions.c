@@ -369,6 +369,24 @@ static size_t firstNonFiniteState(const modelInstance* model)
 }
 
 /**
+ * Index (in the variable table) of the first Real output that is NaN or
+ * infinite, or numberOfVariables if all Real outputs are finite
+ */
+static size_t firstNonFiniteOutput(modelInstance* model)
+{
+    const modelDefinition* def = model->def;
+
+    for (size_t k = 0; k < def->numberOfVariables; k++) {
+        const modelVariable* variable = &def->variables[k];
+        if (variable->role == VAR_OUTPUT && variable->type == VAR_REAL &&
+            !isfinite(*(const double*)modelVariableAddress(model, k))) {
+            return k;
+        }
+    }
+    return def->numberOfVariables;
+}
+
+/**
  * Recompute the outputs if a variable was set since they were computed
  */
 static void refreshOutputs(myFMU2* fmu)
@@ -545,6 +563,8 @@ void fmi2FreeInstance(fmi2Component c)
  * - Validates stopTime >= startTime if defined
  * - If a stop time is defined, fmi2DoStep refuses to step beyond it
  * - Initializes the internal clock (the model's time) to startTime
+ * - Marks the outputs as stale: h(t, x, u) may depend on the time, so they
+ *   are recomputed with the new time when they are read next
  */
 fmi2Status fmi2SetupExperiment(
     fmi2Component c,
@@ -578,6 +598,9 @@ fmi2Status fmi2SetupExperiment(
     myfmu2->stopTime = stopTimeDefined ? stopTime : 0.0;
     myfmu2->model->time = startTime;
     myfmu2->model->relTol = toleranceDefined ? tolerance : modelDefaultTolerance(myfmu2->model->def);
+
+    /* The time changed, and h(t, x, u) may depend on it */
+    myfmu2->outputsAreStale = fmi2True;
 
     const char* toleranceSource = toleranceDefined ? "set by the integration tool" : "default";
     if (stopTimeDefined) {
@@ -729,7 +752,8 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
  * so none of the functions below knows anything about the model.
  *
  * Outputs are kept consistent with the other variables: every fmi2SetXXX
- * marks them as stale and every fmi2GetXXX recomputes them if needed. This
+ * (and fmi2SetupExperiment, which moves the time) marks them as stale and
+ * every fmi2GetXXX recomputes them if needed. This
  * way outputs can be read in initialization mode and a model with direct
  * feedthrough (y depends on u) answers with the inputs set last.
  ***************************************************/
@@ -1052,6 +1076,11 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  * - After every sub-step the states are checked. If one is NaN or infinite,
  *   the model is restored to currentCommunicationPoint, the function returns
  *   fmi2Discard and the FMU enters stateStepFailed
+ * - After the last sub-step the Real outputs are checked the same way. This
+ *   also lets a model without states discard a step
+ * - Outputs computed outside fmi2DoStep (when read after a set, or in
+ *   fmi2ExitInitializationMode) are not checked: FMI 2.0 has no fmi2Discard
+ *   for these functions, and the next step discards
  * - The rollback goes to the communication point and not to the last good
  *   sub-step, so fmi2LastSuccessfulTime is currentCommunicationPoint and the
  *   outputs are those of that point
@@ -1143,8 +1172,20 @@ fmi2Status fmi2DoStep(
     /* Update internal clock */
     model->time = nextCommunicationPoint;
 
-    /* Compute outputs */
+    /* Compute outputs; discard the step if one of them cannot be evaluated.
+     * The outputs are marked as up to date only after the check, so that a
+     * rollback leaves the output block and the stale flag both at t_k */
     model->getOutputs(model);
+
+    size_t failedOutput = firstNonFiniteOutput(model);
+    if (failedOutput < model->def->numberOfVariables) {
+        restoreModelData(model, model->stepStart);
+        return discardStep(myfmu2,
+                           "Output '%s' is not finite at t = %.16g. Step from %.16g to %.16g discarded, "
+                           "FMU rolled back to %.16g.",
+                           model->def->variables[failedOutput].name, nextCommunicationPoint,
+                           currentCommunicationPoint, nextCommunicationPoint, model->time);
+    }
     myfmu2->outputsAreStale = fmi2False;
 
     logCallMessage(myfmu2, "FMU stepped to %.16g.", nextCommunicationPoint);

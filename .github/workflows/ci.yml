@@ -53,10 +53,15 @@ jobs:
 
   # Run the C unit tests with AddressSanitizer (incl. leak detection) and
   # UndefinedBehaviorSanitizer; variable-length arrays are rejected because
-  # MSVC does not support them
+  # MSVC does not support them. fault_injection adds a C test of the discard
+  # and rollback path of fmi2DoStep (test/models/fault_injection/)
   sanitizers:
-    name: Sanitizers
+    name: Sanitizers (${{ matrix.model }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [mass_spring_damper, fault_injection]
     env:
       SANITIZER_FLAGS: -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
     steps:
@@ -65,7 +70,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build/sanitizers
-          -DMODEL=mass_spring_damper
+          -DMODEL=${{ matrix.model }}
           -DCMAKE_BUILD_TYPE=Debug
           "-DCMAKE_C_FLAGS=$SANITIZER_FLAGS -Werror=vla"
           "-DCMAKE_CXX_FLAGS=$SANITIZER_FLAGS"

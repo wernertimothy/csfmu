@@ -38,7 +38,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 - Outputs always reflect the inputs set last, also before a step and during initialization.
 - The communication step size can change from step to step.
 - The FMU state can be saved, restored and serialized, e.g. to repeat a step.
-- If a state becomes NaN or infinite during a step, the FMU discards the step: it returns `fmi2Discard` and is rolled back to the start of the step, so the integration tool can go back to a saved FMU state and continue.
+- If a state or a Real output becomes NaN or infinite during a step, the FMU discards the step: it returns `fmi2Discard` and is rolled back to the start of the step, so the integration tool can go back to a saved FMU state and continue.
 
 ## Demo models
 

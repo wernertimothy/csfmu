@@ -169,7 +169,7 @@ uv run csfmu test first_order
 ```
 
 1. If `build/<model>.fmu` does not exist yet, the model is built first (like `build`).
-2. The C unit tests are run with `ctest` in `build/<model>/`.
+2. The C unit tests are run with `ctest` in `build/<model>/`. This includes the model's own C tests: if `test/models/<model>/CMakeLists.txt` exists, they are built together with that model.
 3. The pytest suite in `test/` is run against `build/<model>.fmu`. csfmu passes the model to the tests through the environment variables `FMU_MODEL` and `FMU_OUTPUT_DIR`.
 
 csfmu stops at the first step that fails.

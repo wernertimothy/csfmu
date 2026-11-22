@@ -166,6 +166,11 @@ target_include_directories(model_core PUBLIC
 add_subdirectory(examples)
 add_subdirectory(test/unit)
 
+# Model-specific C tests (optional): test/models/<model>/CMakeLists.txt
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/models/${MODEL}/CMakeLists.txt")
+    add_subdirectory(test/models/${MODEL})
+endif()
+
 #==============================================================================
 # 8. modelDescription.xml generation
 #==============================================================================

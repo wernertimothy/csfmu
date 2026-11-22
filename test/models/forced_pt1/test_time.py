@@ -99,6 +99,20 @@ def test_start_time_is_honored(new_fmu, vr) -> None:
     assert fmu.getReal([vr("excitation")])[0] == 0.0
 
 
+def test_outputs_follow_the_start_time(new_fmu, vr) -> None:
+    """fmi2SetupExperiment moves the time, so outputs read before it are recomputed."""
+    fmu = new_fmu()
+    assert fmu.getReal([vr("excitation")])[0] == 0.0  # t = 0 right after instantiation
+
+    fmu.setupExperiment(startTime=0.25)
+    assert abs(fmu.getReal([vr("excitation")])[0] - 1.0) < 1e-12  # sin(pi/2)
+
+    fmu.enterInitializationMode()
+    assert abs(fmu.getReal([vr("excitation")])[0] - 1.0) < 1e-12
+    fmu.exitInitializationMode()
+    assert abs(fmu.getReal([vr("excitation")])[0] - 1.0) < 1e-12
+
+
 def test_trajectory_matches_the_analytic_solution(new_fmu, vr) -> None:
     """RK4 with h = 0.01 follows the analytic solution closely."""
     assert simulate_error(new_fmu, vr, step_size=0.01, stop_time=1.0) < 1e-9

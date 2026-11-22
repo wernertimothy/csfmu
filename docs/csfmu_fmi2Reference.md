@@ -42,7 +42,7 @@ All functions follow the same rules:
 - In the Error state every further call fails, except: `fmi2Reset` (start over), `fmi2FreeInstance`, `fmi2SetFMUstate` (go back to a snapshot), `fmi2GetXXX` and `fmi2SetDebugLogging` (diagnosis), and the functions that only handle snapshots (`fmi2FreeFMUstate`, serialization).
 - `fmi2Warning` means the call had its effect, but something is worth reporting. It does not change the state.
 - `fmi2Discard` is returned in two cases:
-  - by `fmi2DoStep` when the integration fails numerically (a state becomes NaN or infinite). The FMU is rolled back to the communication point and enters the **Step Failed** state (see [`fmi2DoStep`](#fmi2dostep)).
+  - by `fmi2DoStep` when the integration fails numerically (a state or a Real output becomes NaN or infinite). The FMU is rolled back to the communication point and enters the **Step Failed** state (see [`fmi2DoStep`](#fmi2dostep)).
   - by the status queries, for a status that is not available. This does not change the state.
 - A NULL component returns `fmi2Error` (there is no instance whose state could change).
 
@@ -342,7 +342,7 @@ if (status != fmi2OK) {
 - Must be called before `fmi2EnterInitializationMode`
 - **Tolerance**: a defined `tolerance` must be finite and greater than zero and becomes `model->relTol`. If `toleranceDefined` is false, `tolerance` is not read and the model's default applies: `defaultExperiment.tolerance` of the model definition, or `1e-6` (`MODEL_DEFAULT_TOLERANCE`) if the model suggests none. The last call before `fmi2EnterInitializationMode` counts, and `fmi2Reset` restores the default
 - The start time, stop time and tolerance are written to the log (category `logEvents`)
-- Internally stores `startTime`, `stopTime`, and initializes the internal clock to `startTime`. The clock is the model's time `model->time`, so the equations `f(t,x,u)` and `h(t,x,u)` see `t = startTime` during initialization
+- Internally stores `startTime`, `stopTime`, and initializes the internal clock to `startTime`. The clock is the model's time `model->time`, so the equations `f(t,x,u)` and `h(t,x,u)` see `t = startTime` during initialization. Outputs are recomputed with the new time when they are read next
 - If `stopTimeDefined` is true, `stopTime` must be `>= startTime`, and [`fmi2DoStep`](#fmi2dostep) later refuses to step beyond it. If it is false, `stopTime` is ignored
 - `startTime` must be finite
 - The time values are in seconds (SI units as per FMI standard)
@@ -632,7 +632,7 @@ All access functions below work the same way:
 
 Integration tools should always look up value references by variable name in the `modelDescription.xml` and never hardcode them.
 
-**Outputs are always consistent with the other variables.** Every setter marks the outputs as stale, and every getter recomputes them first if needed (by calling the model's output equation). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last. Which inputs an output depends on is declared by the model (`.dependsOn`) and published in the `ModelStructure` of the `modelDescription.xml`. The `pi_controller` model has outputs with direct feedthrough: `u` and `e` change as soon as `r` or `y_m` is set.
+**Outputs are always consistent with the other variables.** Every setter, and `fmi2SetupExperiment` (which moves the time), marks the outputs as stale, and every getter recomputes them first if needed (by calling the model's output equation). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last. Which inputs an output depends on is declared by the model (`.dependsOn`) and published in the `ModelStructure` of the `modelDescription.xml`. The `pi_controller` model has outputs with direct feedthrough: `u` and `e` change as soon as `r` or `y_m` is set.
 
 **Example for the `first_order` model:**
 
@@ -1011,7 +1011,7 @@ The heart of co-simulation - advances the FMU's internal state from time `t` to 
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Step completed successfully |
-| `fmi2Discard` | The integration failed numerically (a state became NaN or infinite). The FMU was rolled back to `currentCommunicationPoint` |
+| `fmi2Discard` | The integration failed numerically (a state or a Real output became NaN or infinite). The FMU was rolled back to `currentCommunicationPoint` |
 | `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, or step ends behind the stop time |
 
 #### FMI State Requirements
@@ -1040,6 +1040,7 @@ The communication step is divided into the smallest number of **equal** sub-step
 4. **Update time and outputs** (only if all sub-steps succeeded):
    - Set the internal clock (`model->time`) to `currentCommunicationPoint + communicationStepSize`
    - Compute outputs from final state, so they are evaluated exactly at the communication point
+   - If a Real output is NaN or infinite, the step has failed as well: the model data are restored from the buffer, the function returns `fmi2Discard` and the FMU enters **Step Failed**
 
 **Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
 
@@ -1047,7 +1048,7 @@ The communication step is divided into the smallest number of **equal** sub-step
 
 #### Discarded Steps
 
-FMI 2.0 (section 4.2.3) lets a slave report with `fmi2Discard` that it could not compute the whole communication step. This FMU does so on numerical failure only, never to stop at an event. It always rolls back to `currentCommunicationPoint`, so the master sees:
+FMI 2.0 (section 4.2.3) lets a slave report with `fmi2Discard` that it could not compute the whole communication step. This FMU does so on numerical failure only, never to stop at an event. Numerical failure means that a state becomes NaN or infinite during a sub-step, or that a Real output is NaN or infinite at the end of the step. Outputs that are computed between steps (when they are read after a set, or in `fmi2ExitInitializationMode`) are not checked; the next step then discards. The FMU always rolls back to `currentCommunicationPoint`, so the master sees:
 
 | Query | Answer after a discarded step |
 |-------|-------------------------------|
@@ -1147,7 +1148,7 @@ fmi2FreeInstance(fmu);
 - **Zero-order hold assumption**: Inputs are assumed constant during each communication step (FMI standard)
 - **Outputs computed once**: After all sub-steps complete, not after each internal step
 - **maxStepSize configurable**: Field of the model definition in the model's `variables.c`
-- **Divergence discards the step**: A step that produces NaN or infinite states returns `fmi2Discard` and rolls the FMU back to the communication point (see [Discarded Steps](#discarded-steps)). Continue with `fmi2SetFMUstate`, `fmi2Reset` or `fmi2Terminate`
+- **Divergence discards the step**: A step that produces NaN or infinite states or Real outputs returns `fmi2Discard` and rolls the FMU back to the communication point (see [Discarded Steps](#discarded-steps)). Continue with `fmi2SetFMUstate`, `fmi2Reset` or `fmi2Terminate`
 - **Never pending**: The function returns `fmi2OK`, `fmi2Discard` or `fmi2Error`, never `fmi2Pending`
 - **Synchronous only**: Blocks until computation completes (`noSetFMUStatePriorToCurrentPoint` ignored)
 - **No variable step size within DoStep**: Uses fixed sub-steps (adaptive methods would require more complex integrators)
