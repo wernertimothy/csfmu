@@ -392,7 +392,7 @@ const modelDefinition MODEL_DEFINITION = {
 | `getStateDerivatives`, `getOutputs` | Your two equations |
 | `integrate` | Numerical integration method to use, see `include/integrator.h` |
 | `maxStepSize` | Maximum internal step size for stability |
-| `defaultExperiment` | Optional suggested simulation settings. Its `.tolerance` is also the relative tolerance the FMU uses when the integration tool defines none (`1e-6` if not set) |
+| `defaultExperiment` | Optional suggested simulation settings. Its `.tolerance` is also the relative tolerance the FMU uses when the integration tool defines none or an invalid one (`1e-6` if not set) |
 
 **Solver step size matters**: For systems like the Lorenz attractor, choose `maxStepSize` small enough to maintain numerical stability. The FMU will automatically subdivide larger simulation steps.
 

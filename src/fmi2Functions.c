@@ -576,7 +576,8 @@ void fmi2FreeInstance(fmi2Component c)
  *   (model->relTol), otherwise the model's default applies (see
  *   modelDefaultTolerance()). Only adaptive integrators use it; the
  *   fixed-step integrators ignore it
- * - A defined tolerance must be finite and greater than zero
+ * - A defined tolerance that is not finite and > 0 is ignored with
+ *   fmi2Warning; the default applies
  * - Validates stopTime >= startTime if defined
  * - If a stop time is defined, fmi2DoStep refuses to step beyond it
  * - Initializes the internal clock (the model's time) to startTime
@@ -604,9 +605,15 @@ fmi2Status fmi2SetupExperiment(
         return enterErrorState(myfmu2, "stopTime %.16g must be >= startTime %.16g.", stopTime, startTime);
     }
 
-    /* Validate tolerance */
+    /* A tolerance that is not finite and > 0 is ignored with a warning. FMI 2.0
+       defines no range for it and says "An FMU for Co-Simulation might ignore
+       this argument" (fmi2SetupExperiment), so it is no reason to fail */
+    fmi2Status status = fmi2OK;
     if (toleranceDefined && !(isfinite(tolerance) && tolerance > 0.0)) {
-        return enterErrorState(myfmu2, "tolerance %.16g must be finite and greater than zero.", tolerance);
+        logWarningMessage(myfmu2, "tolerance %.16g is ignored: it must be finite and greater than zero. "
+                                  "The default tolerance applies.", tolerance);
+        toleranceDefined = fmi2False;
+        status = fmi2Warning;
     }
 
     /* Store experiment parameters */
@@ -627,7 +634,7 @@ fmi2Status fmi2SetupExperiment(
         logEventMessage(myfmu2, "FMU Experiment set up. Start = %.4f. No end defined. Tolerance = %g (%s).",
                         startTime, myfmu2->model->relTol, toleranceSource);
     }
-    return fmi2OK;
+    return status;
 }
 
 /**

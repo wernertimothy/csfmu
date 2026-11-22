@@ -4,12 +4,16 @@ import pytest
 from fmpy.fmi1 import FMICallException
 
 """
-Model-independent tests of fmi2SetupExperiment: the tolerance.
+Model-independent tests of fmi2SetupExperiment: the tolerance and the time window.
 
 A defined tolerance becomes the model's relative tolerance, otherwise the
 model's default (defaultExperiment tolerance) applies. The value is not
 published as a variable, so the tests read it from the log.
 """
+
+FMI2_OK = 0
+FMI2_WARNING = 1
+FMI2_ERROR = 3
 
 
 def setup_messages(log: list) -> list:
@@ -28,8 +32,9 @@ def test_defined_tolerance_is_used(new_fmu) -> None:
     log = []
     fmu = new_fmu(log=log)
 
-    fmu.setupExperiment(tolerance=1e-8, startTime=0.0)
+    status = fmu.setupExperiment(tolerance=1e-8, startTime=0.0)
 
+    assert status == FMI2_OK
     assert "Tolerance = 1e-08 (set by the integration tool)" in setup_messages(log)[-1]
 
     # the FMU simulates as usual
@@ -80,9 +85,38 @@ def test_reset_restores_the_default_tolerance(new_fmu, model_description) -> Non
 
 
 @pytest.mark.parametrize("tolerance", [0.0, -1e-6, math.nan, math.inf])
-def test_invalid_tolerance_is_rejected(new_fmu, tolerance) -> None:
-    """A defined tolerance must be finite and greater than zero."""
+def test_invalid_tolerance_falls_back_to_the_default(
+    new_fmu, model_description, tolerance
+) -> None:
+    """A defined tolerance that is not finite and > 0 is ignored with fmi2Warning."""
+    log = []
+    fmu = new_fmu(log=log)
+
+    status = fmu.setupExperiment(tolerance=tolerance, startTime=0.0)
+
+    assert status == FMI2_WARNING
+    ignored = [entry for entry in log if "is ignored" in entry[2]]
+    assert len(ignored) == 1, log
+    assert ignored[0][:2] == (FMI2_WARNING, "logStatusWarning")
+    expected = f"Tolerance = {default_tolerance(model_description):g} (default)"
+    assert expected in setup_messages(log)[-1]
+
+    # the experiment continues
+    fmu.enterInitializationMode()
+    fmu.exitInitializationMode()
+    fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.01)
+
+
+@pytest.mark.parametrize(
+    "start_time, stop_time",
+    [(math.nan, None), (math.inf, None), (1.0, 0.5), (0.0, math.nan)],
+    ids=["start_nan", "start_inf", "stop_before_start", "stop_nan"],
+)
+def test_invalid_time_window_is_rejected(new_fmu, start_time, stop_time) -> None:
+    """startTime and stopTime define the experiment, so there is no fallback for them."""
     fmu = new_fmu()
 
-    with pytest.raises(FMICallException):
-        fmu.setupExperiment(tolerance=tolerance, startTime=0.0)
+    with pytest.raises(FMICallException) as failure:
+        fmu.setupExperiment(startTime=start_time, stopTime=stop_time)
+
+    assert failure.value.status == FMI2_ERROR

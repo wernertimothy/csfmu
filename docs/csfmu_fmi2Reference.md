@@ -309,7 +309,8 @@ Informs the FMU about the simulation time window and numerical tolerances before
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Experiment setup successful |
-| `fmi2Error` | Invalid parameters (`startTime` not finite, `stopTime < startTime`, defined `tolerance` not finite or not > 0) or wrong state |
+| `fmi2Warning` | Experiment set up, but the defined `tolerance` is not finite or not > 0. It is ignored and the default tolerance applies |
+| `fmi2Error` | Invalid time window (`startTime` not finite, `stopTime < startTime`) or wrong state |
 
 #### FMI State Requirements
 **Can be called in**: **Instantiated** state (after `fmi2Instantiate`, before `fmi2EnterInitializationMode`)
@@ -340,7 +341,7 @@ if (status != fmi2OK) {
 
 #### Notes
 - Must be called before `fmi2EnterInitializationMode`
-- **Tolerance**: a defined `tolerance` must be finite and greater than zero and becomes `model->relTol`. If `toleranceDefined` is false, `tolerance` is not read and the model's default applies: `defaultExperiment.tolerance` of the model definition, or `1e-6` (`MODEL_DEFAULT_TOLERANCE`) if the model suggests none. The last call before `fmi2EnterInitializationMode` counts, and `fmi2Reset` restores the default
+- **Tolerance**: a defined `tolerance` becomes `model->relTol`. One that is not finite and greater than zero is ignored: the function returns `fmi2Warning` (logged in `logStatusWarning`), and the default applies as if `toleranceDefined` were false. FMI 2.0 defines no range for the tolerance and allows a Co-Simulation FMU to ignore it, so this is no reason to fail. If `toleranceDefined` is false, `tolerance` is not read and the model's default applies: `defaultExperiment.tolerance` of the model definition, or `1e-6` (`MODEL_DEFAULT_TOLERANCE`) if the model suggests none. The last call before `fmi2EnterInitializationMode` counts, and `fmi2Reset` restores the default
 - The start time, stop time and tolerance are written to the log (category `logEvents`)
 - Internally stores `startTime`, `stopTime`, and initializes the internal clock to `startTime`. The clock is the model's time `model->time`, so the equations `f(t,x,u)` and `h(t,x,u)` see `t = startTime` during initialization. Outputs are recomputed with the new time when they are read next
 - If `stopTimeDefined` is true, `stopTime` must be `>= startTime`, and [`fmi2DoStep`](#fmi2dostep) later refuses to step beyond it. If it is false, `stopTime` is ignored
