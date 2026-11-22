@@ -508,7 +508,7 @@ The contract is:
 * On entry **model->time** is the time **t** at the start of the step, and **model->stateDerivatives** contains the derivatives at **t** and the current state (pre-computed before the call)
 * The function must update **model->states** in-place with the result of the integration step
 * If your method needs intermediate derivative evaluations (like multi-stage methods), call **model->getStateDerivatives(model)** internally after temporarily modifying **model->states** and setting **model->time** to the time of that stage. Otherwise a model that depends on time loses the order of your method
-* On return **model->time** must be **t + stepSize**
+* On return **model->time** must be **t + stepSize**. The FMU checks this after every sub-step: an integrator that leaves another time (beyond rounding) makes `fmi2DoStep` fail with `fmi2Error`
 * For intermediate results use **model->scratch**. It holds `MODEL_SCRATCH_VECTORS` (5) vectors of length nx and is allocated once per instance. Do not use variable-length arrays (`double k1[nx]`): MSVC does not support them
 
 First, add your implementation to `src/integrator.c` and its declaration to `include/integrator.h`.

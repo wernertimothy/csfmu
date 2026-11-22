@@ -50,10 +50,25 @@ target_include_directories(test_rungeKutta4 PRIVATE
     ${CMAKE_SOURCE_DIR}/external/unity/src
 )
 
+# Integrator time contract, checked by fmi2DoStep. The FMI wrapper is linked
+# against a model definition of the test itself (instead of the selected
+# model), so the test is built for every model
+add_executable(test_fmi2_integratorContract
+    test_fmi2_integratorContract.c
+    ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c
+)
+target_link_libraries(test_fmi2_integratorContract PRIVATE model_core unity)
+target_include_directories(test_fmi2_integratorContract PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/external/fmi2/src
+    ${CMAKE_SOURCE_DIR}/external/unity/src
+)
+
 # Math library (not part of the C library on Linux, does not exist for MSVC)
 if(UNIX)
     target_link_libraries(test_eulerForward PRIVATE m)
     target_link_libraries(test_rungeKutta4 PRIVATE m)
+    target_link_libraries(test_fmi2_integratorContract PRIVATE m)
 endif()
 
 # modelDescription.xml generator, linked against a model definition that uses
@@ -81,6 +96,7 @@ add_test(NAME test_freeModel COMMAND test_freeModel)
 add_test(NAME test_modelData COMMAND test_modelData)
 add_test(NAME test_eulerForward COMMAND test_eulerForward)
 add_test(NAME test_rungeKutta4 COMMAND test_rungeKutta4)
+add_test(NAME test_fmi2_integratorContract COMMAND test_fmi2_integratorContract)
 
 # The generated modelDescription.xml must be equal to the handwritten one
 add_test(NAME test_modelDescription_golden

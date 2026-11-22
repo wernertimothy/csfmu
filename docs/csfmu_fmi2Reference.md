@@ -1013,7 +1013,7 @@ The heart of co-simulation - advances the FMU's internal state from time `t` to 
 | `fmi2OK` | Step completed successfully |
 | `fmi2Warning` | Step completed, but `currentCommunicationPoint` differed from the FMU's internal clock by more than rounding (still within the tolerance). The FMU continued from `currentCommunicationPoint` (see [Time Validation](#time-validation)) |
 | `fmi2Discard` | The integration failed numerically (a state or a Real output became NaN or infinite). The FMU was rolled back to `currentCommunicationPoint` |
-| `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, or step ends behind the stop time |
+| `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, step ends behind the stop time, or the integrator left `model->time` at another time than the end of the sub-step (see [Algorithm](#algorithm-sub-stepping-for-numerical-stability)) |
 
 #### FMI State Requirements
 **Can be called in**: **Step Complete** (after `fmi2ExitInitializationMode`, before `fmi2Terminate`)
@@ -1036,6 +1036,7 @@ The communication step is divided into the smallest number of **equal** sub-step
 3. **Execute sub-steps**:
    - Take `numberOfSteps` steps of size `actualStepSize`
    - Each step: set `model->time = currentCommunicationPoint + k * actualStepSize` → compute derivatives → integrate states (the integrator sets the stage times itself)
+   - After each sub-step: the integrator must have left `model->time` at the end of the sub-step (its contract in `include/model.h`), up to `1e-6` of the sub-step or rounding. Otherwise the integrator is broken, and the function fails with `fmi2Error`. The model keeps the values the integrator left, and the outputs are recomputed from them when they are read
    - After each sub-step: if a state is NaN or infinite, the integration has failed. The model data are restored from the buffer, so the FMU is back at `currentCommunicationPoint` (not at the last good sub-step). The function returns `fmi2Discard` and the FMU enters **Step Failed**
 
 4. **Update time and outputs** (only if all sub-steps succeeded):

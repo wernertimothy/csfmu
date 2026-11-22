@@ -15,6 +15,10 @@
    and passes silently; a larger one (still within TIME_TOLERANCE) is reported */
 #define CLOCK_WARNING_FRACTION 1e-6
 
+/* Allowed deviation of model->time from t + h after an integrator step,
+   as a fraction of the step size h */
+#define INTEGRATOR_TIME_FRACTION 1e-6
+
 /* Tolerance on the number of sub-steps (absorbs rounding in stepSize / maxStepSize) */
 #define SUBSTEP_TOLERANCE 1e-9
 
@@ -1084,6 +1088,11 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  * - Refuses to step beyond the stop time of the experiment (if defined)
  * - Inputs are held constant during the step
  * - The model owns the time: model->time is the internal clock
+ * - Enforces the integrator contract (integrateFn in model.h): after every
+ *   sub-step model->time must be its end, up to INTEGRATOR_TIME_FRACTION of
+ *   the sub-step or rounding (roundingTolerance()). Otherwise the integrator
+ *   is broken: the function fails with fmi2Error, the model keeps the values
+ *   the integrator left, and the outputs are recomputed from them when read
  * - Computes outputs after integration via getOutputs()
  *
  * Numerical failure (FMI 2.0, section 4.2.3: "fmi2Discard ... the slave
@@ -1182,9 +1191,23 @@ fmi2Status fmi2DoStep(
 
     /* Perform sub-steps */
     for (size_t k = 0; k < (size_t)numberOfSteps; k++) {
-        model->time = currentCommunicationPoint + (fmi2Real)k * actualStepSize;
+        fmi2Real subStepStart = currentCommunicationPoint + (fmi2Real)k * actualStepSize;
+        model->time = subStepStart;
         model->getStateDerivatives(model);
         model->integrate(model, actualStepSize);
+
+        /* Enforce the integrator contract: on return model->time is t + h. A
+         * violation is a programming error, not a numerical failure. The model is
+         * left as the integrator left it (for diagnosis); the outputs are marked
+         * stale, so that values read in the error state match the other variables */
+        fmi2Real expectedTime = subStepStart + actualStepSize;
+        if (!(fabs(model->time - expectedTime) <=
+              fmax(INTEGRATOR_TIME_FRACTION * actualStepSize, roundingTolerance(expectedTime)))) {
+            myfmu2->outputsAreStale = fmi2True;
+            return enterErrorState(myfmu2, "The integrator left model->time at %.16g instead of %.16g "
+                                           "(t + h). See the integrator contract in include/model.h.",
+                                   model->time, expectedTime);
+        }
 
         /* Discard the step if the integration diverged */
         size_t failed = firstNonFiniteState(model);

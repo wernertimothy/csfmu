@@ -73,6 +73,8 @@ typedef void (*stateDerivativesFn)(modelInstance* model);
  * Contract: on entry model->time is t and model->stateDerivatives holds
  * f(t, x, u). Before every further derivative evaluation the integrator sets
  * model->time to the time of that stage. On return model->time is t + stepSize.
+ * fmi2DoStep checks this after every sub-step (up to rounding) and fails with
+ * fmi2Error otherwise.
  *
  * @param model Pointer to the model instance to integrate
  * @param stepSize Time step for integration (dt)
