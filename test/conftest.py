@@ -72,6 +72,11 @@ def vr(model_description):
 # that is freed after its test would then be called by the next FMU that logs
 # (e.g. a failed fmi2Instantiate, which logs even with logging off) and crash
 # the test process. So every registered logger is kept alive for the session.
+#
+# The single global target also means that the messages of every FMU in the
+# process go to the log list registered last. A test should therefore create
+# at most one logging FMU, and count log entries only if no other FMU of the
+# test can log (a failed fmi2Instantiate logs even with logging off).
 _REGISTERED_CALLBACKS: list = []
 
 
@@ -107,7 +112,8 @@ def new_fmu(unzipdir: Path, model_description):
 
     def instantiate(instance_name: str = "test_instance", log: list | None = None):
         """Create an FMU. If a list is given as log, logging is switched on
-        and every message is appended to it as (status, category, message)."""
+        and every message is appended to it as (status, category, message)
+        (at most one logging FMU per test, see logging_callbacks)."""
         fmu = fmpy.fmi2.FMU2Slave(
             guid=model_description.guid,
             unzipDirectory=unzipdir,
