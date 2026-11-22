@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -36,13 +37,13 @@
 }
 
 
-int main() {
+int main(void) {
 
     /* simualtion config */
-    double dt   = 0.01;  ///> sample time
-    double T    = 1.0;   ///> final simulation time
-    double time = 0.0;   ///> current time of simulation
-    
+    double dt        = 0.01;  ///> sample time
+    double T         = 1.0;   ///> final simulation time
+    double startTime = 0.0;   ///> start time of the simulation
+
     /* begin fmu config */
     fmi2String instanceName        = "csfmu";
     fmi2Type   fmuType             = fmi2CoSimulation;
@@ -62,7 +63,7 @@ int main() {
     if (!fmu) goto cleanup;
 
     /* initialize fmu */
-    fmi2Status fmuStatus = fmi2SetupExperiment(fmu, fmi2False, 0.0, time, fmi2True, T);
+    fmi2Status fmuStatus = fmi2SetupExperiment(fmu, fmi2False, 0.0, startTime, fmi2True, T);
     if (fmuStatus >= fmi2Error) goto cleanup;
 
     fmuStatus = fmi2EnterInitializationMode(fmu);
@@ -83,8 +84,11 @@ int main() {
     fmuStatus = fmi2SetDebugLogging(fmu, fmi2False, 0, NULL);
     if (fmuStatus >= fmi2Error) goto cleanup;
 
-    int N = (int) T/dt;
-    for (int k=0; k<N; k++) {
+    int N = (int)lround(T / dt);  ///> number of steps
+    for (int n = 0; n < N; n++) {
+        /* communication point, computed from n so that rounding errors do not accumulate */
+        double time = startTime + n * dt;
+
         /* log current state */
         fmuStatus = fmi2GetReal(fmu, &VR_y, 1, &y);
         if (fmuStatus >= fmi2Error) goto cleanup;
@@ -98,12 +102,15 @@ int main() {
         /* step in time */
         fmuStatus = fmi2DoStep(fmu, time, dt, fmi2False);
         if (fmuStatus >= fmi2Error) goto cleanup;
-
-        time += dt;
     }
     fmuStatus = fmi2GetReal(fmu, &VR_y, 1, &y);
     if (fmuStatus >= fmi2Error) goto cleanup;
-    printf("t = %.2f, y = %.2f\n", time, y);
+
+    /* the FMU owns the clock: the end of the last step is its last successful time */
+    fmi2Real endTime = 0.0;
+    fmuStatus = fmi2GetRealStatus(fmu, fmi2LastSuccessfulTime, &endTime);
+    if (fmuStatus >= fmi2Error) goto cleanup;
+    printf("t = %.2f, y = %.2f\n", endTime, y);
 
     /* activate logging */
     fmuStatus = fmi2SetDebugLogging(fmu, fmi2True, 0, NULL);

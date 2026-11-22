@@ -31,6 +31,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 
 - The models are integrated with fixed-step explicit methods: `eulerForward` and `rungeKutta4` (see `include/integrator.h`). They suit non-stiff systems.
 - Every communication step is split into equal sub-steps that are not larger than the model's `maxStepSize`. You choose `maxStepSize` small enough for your model to integrate stably, and the integration tool can use any communication step size.
+- Results depend slightly on the communication step size, because each communication step is divided into its own sub-steps. If every communication step is an integer multiple of `maxStepSize`, the sub-step grid is the same however the master groups its steps (up to rounding).
 
 ## Interaction with the integration tool
 

@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include "model.h"
@@ -14,7 +15,7 @@
  * the integrator is an explicit euler forward
  */
 
-int main() {
+int main(void) {
 
     /* begin model config */
 
@@ -44,8 +45,8 @@ int main() {
     double dt   = 0.01;  ///> sample time
     double T    = 1.0;   ///> final simulation time (the current time is model->time)
     
-    int N = (int) T/dt;
-    for (int k=0; k<N; k++) {
+    int N = (int)lround(T / dt);  ///> number of steps
+    for (int n = 0; n < N; n++) {
         /* log current state */
         printf("t = %.2f, y = %.2f\n", model->time, outputs->y);
 
