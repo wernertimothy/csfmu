@@ -1,33 +1,13 @@
+"""Model-independent tests of the declared dependencies of the outputs (dependsOn)."""
+
 import pytest
 
-
-def read(fmu, variable):
-    """Return the current value of a variable of any type."""
-    getter = {
-        "Real": fmu.getReal,
-        "Integer": fmu.getInteger,
-        "Boolean": fmu.getBoolean,
-    }[variable.type]
-    return getter([variable.valueReference])[0]
+from test.fmu_helpers import changed_value, read, variables_with, write
 
 
-def change(fmu, variable):
-    """Set a variable of any type to a value that differs from its current one."""
-    value = read(fmu, variable)
-
-    if variable.type == "Real":
-        # Stay within the bounds of the variable
-        step = (
-            -1.0
-            if variable.max is not None and value + 1.0 > float(variable.max)
-            else 1.0
-        )
-        fmu.setReal([variable.valueReference], [value + step])
-    elif variable.type == "Integer":
-        step = -1 if variable.max is not None and value + 1 > int(variable.max) else 1
-        fmu.setInteger([variable.valueReference], [value + step])
-    else:
-        fmu.setBoolean([variable.valueReference], [not value])
+def change(fmu, variable) -> None:
+    """Set a variable to a value that differs from its current one."""
+    write(fmu, variable, changed_value(variable, read(fmu, variable)))
 
 
 def test_outputs_ignore_inputs_they_do_not_depend_on(
@@ -41,11 +21,7 @@ def test_outputs_ignore_inputs_they_do_not_depend_on(
     when only this input is set. This is checked right after initialization
     and again after a step.
     """
-    inputs = [
-        variable
-        for variable in model_description.modelVariables
-        if variable.causality == "input"
-    ]
+    inputs = variables_with(model_description, "input")
 
     # (output, input) pairs that are declared as independent
     independent = [
@@ -88,11 +64,7 @@ def test_outputs_follow_inputs_they_depend_on(
     which the dependency is active. An output without a declaration (all
     inputs) is a safe over-approximation and is not checked.
     """
-    inputs = [
-        variable
-        for variable in model_description.modelVariables
-        if variable.causality == "input"
-    ]
+    inputs = variables_with(model_description, "input")
 
     # (output, input) pairs that are declared as dependent
     dependent = [

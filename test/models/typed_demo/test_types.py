@@ -1,24 +1,9 @@
+"""Tests of Integer and Boolean variables with the typed_demo model."""
+
 import pytest
 from fmpy.fmi1 import FMICallException
 
-
-@pytest.fixture(autouse=True)
-def only_for_typed_demo(model_description) -> None:
-    if model_description.modelName != "typed_demo":
-        pytest.skip(
-            f"Test specific to typed_demo model, got {model_description.modelName}"
-        )
-
-
-def step(
-    fmu, duration: float, step_size: float = 0.01, start_time: float = 0.0
-) -> float:
-    """Advance the FMU by duration and return the new time."""
-    time = start_time
-    for _ in range(round(duration / step_size)):
-        fmu.doStep(currentCommunicationPoint=time, communicationStepSize=step_size)
-        time += step_size
-    return time
+from test.fmu_helpers import advance, initialize
 
 
 def test_variable_types_in_model_description(model_description) -> None:
@@ -89,7 +74,7 @@ def test_integer_variable_cannot_be_accessed_as_real_or_boolean(new_fmu, vr) -> 
 
 def test_ramp_runs_while_enabled(initialized_fmu, vr) -> None:
     """dx/dt = rate * direction * boost = 1 with the start values."""
-    step(initialized_fmu, 2.5)
+    advance(initialized_fmu, 2.5)
 
     assert initialized_fmu.getReal([vr("y")])[0] == pytest.approx(2.5, abs=1e-9)
     assert initialized_fmu.getInteger([vr("level")]) == [2]
@@ -97,9 +82,9 @@ def test_ramp_runs_while_enabled(initialized_fmu, vr) -> None:
 
 
 def test_boolean_input_stops_the_ramp(initialized_fmu, vr) -> None:
-    time = step(initialized_fmu, 1.0)
+    time = advance(initialized_fmu, 1.0)
     initialized_fmu.setBoolean([vr("enable")], [False])
-    step(initialized_fmu, 1.0, start_time=time)
+    advance(initialized_fmu, 1.0, start=time)
 
     assert initialized_fmu.getReal([vr("y")])[0] == pytest.approx(1.0, abs=1e-9)
 
@@ -107,12 +92,10 @@ def test_boolean_input_stops_the_ramp(initialized_fmu, vr) -> None:
 def test_integer_input_and_parameter_scale_the_ramp(new_fmu, vr) -> None:
     fmu = new_fmu()
     fmu.setInteger([vr("direction")], [-1])
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
+    initialize(fmu)
     fmu.setInteger([vr("boost")], [3])
 
-    step(fmu, 1.5)
+    advance(fmu, 1.5)
 
     # y = -4.5, away from an integer so that rounding errors cannot change floor(y)
     assert fmu.getReal([vr("y")])[0] == pytest.approx(-4.5, abs=1e-9)
@@ -124,11 +107,9 @@ def test_boolean_output_and_boolean_parameter(new_fmu, vr) -> None:
     fmu = new_fmu()
     fmu.setBoolean([vr("clamp")], [True])
     fmu.setReal([vr("limit")], [2.0])
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
+    initialize(fmu)
 
-    step(fmu, 3.0)
+    advance(fmu, 3.0)
 
     assert fmu.getBoolean([vr("limit_reached")]) == [True]
     assert fmu.getReal([vr("y")])[0] == pytest.approx(2.0, abs=1e-9)
@@ -144,6 +125,6 @@ def test_fixed_parameter_cannot_be_set_after_initialization(
 
 def test_tunable_parameter_can_be_set_after_initialization(initialized_fmu, vr) -> None:
     initialized_fmu.setReal([vr("rate")], [2.0])
-    step(initialized_fmu, 1.0)
+    advance(initialized_fmu, 1.0)
 
     assert initialized_fmu.getReal([vr("y")])[0] == pytest.approx(2.0, abs=1e-9)

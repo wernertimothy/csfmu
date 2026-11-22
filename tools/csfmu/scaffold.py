@@ -315,38 +315,31 @@ void ${camel}Outputs(modelInstance* model)
 }
 """)
 
-TEST_FMI_COMPLIANCE = Template('''\
-from pathlib import Path
+TEST_MODEL = Template('''\
+"""Tests of the ${name} model.
 
-import fmpy
+The template model is an integrator with gain: dx/dt = k*u, y = x. Adapt the
+tests when you change the equations, and check each result against a known
+solution, as the tests of the demo models in test/models/ do.
+
+The tests in test/integration/ check the FMI behavior of every model. The
+tests in this folder are only collected when the ${name} model is tested.
+"""
+
 import pytest
-from fmpy.validation import validate_fmu
+
+from test.fmu_helpers import advance
 
 
-@pytest.fixture(autouse=True)
-def only_${name}(model_description) -> None:
-    """Skip these tests if the FMU under test is not the ${name} model."""
-    if model_description.modelName != "${name}":
-        pytest.skip(
-            f"Test specific to ${name} model, got {model_description.modelName}"
-        )
+def test_output_integrates_the_input(initialized_fmu, vr) -> None:
+    """For a constant input the output grows linearly: y(t) = k*u*t."""
+    fmu = initialized_fmu
+    k = fmu.getReal([vr("k")])[0]
+    fmu.setReal([vr("u")], [0.5])
 
+    end = advance(fmu, 1.0)
 
-def test_model_description_is_valid(path_to_fmu: Path) -> None:
-    """The modelDescription.xml follows the FMI 2.0 schema, variable naming and model structure rules."""
-    model_description = fmpy.read_model_description(
-        path_to_fmu,
-        validate=True,
-        validate_variable_names=True,
-        validate_model_structure=True,
-    )
-    assert model_description is not None
-
-
-def test_fmu_is_valid(path_to_fmu: Path) -> None:
-    """FMPy finds no problems in the FMU."""
-    problems = validate_fmu(path_to_fmu)
-    assert not problems, f"FMPy reports problems: {problems}"
+    assert fmu.getReal([vr("y")])[0] == pytest.approx(k * 0.5 * end, abs=1e-12)
 ''')
 
 
@@ -354,7 +347,7 @@ def create_model(root: Path, name: str) -> list[Path]:
     """Create the files of a new model from the template and return their paths.
 
     Creates src/models/<name>/ with an integrator (dx/dt = k*u, y = x) and
-    test/models/<name>/ with FMI compliance tests. Neither folder may exist.
+    test/models/<name>/ with a starter test of the model. Neither folder may exist.
     """
     values = {
         "name": name,
@@ -369,7 +362,7 @@ def create_model(root: Path, name: str) -> list[Path]:
         model_dir / "variables.c": VARIABLES_C.substitute(values),
         model_dir / "equations.c": EQUATIONS_C.substitute(values),
         test_dir / "__init__.py": "",
-        test_dir / "test_fmi_compliance.py": TEST_FMI_COMPLIANCE.substitute(values),
+        test_dir / f"test_{name}.py": TEST_MODEL.substitute(values),
     }
 
     model_dir.mkdir(parents=True)

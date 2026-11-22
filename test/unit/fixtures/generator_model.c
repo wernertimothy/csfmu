@@ -16,12 +16,6 @@ static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
 static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
 
-#ifdef INVALID_DEPENDENCY
-#define DEPENDENCIES_OF_Y "no_such_input"
-#else
-#define DEPENDENCIES_OF_Y ""
-#endif
-
 static const modelVariable VARIABLES[] = {
     /* parameters: all types, bounds, nominal, fixed, renamed, undefined unit */
     { PARAM(gain),    .start = 2.5, .unit = "N/m", .min = SOME(0.0), .max = SOME(100.0), .nominal = 10.0,
@@ -37,7 +31,7 @@ static const modelVariable VARIABLES[] = {
     { INPUT(select), .start = -2 },
 
     /* outputs: no, some (not in table order) and undeclared dependencies */
-    { OUTPUT(y),      .dependsOn = DEPENDENCIES_OF_Y },
+    { OUTPUT(y),      .dependsOn = "" },
     { OUTPUT(e),      .dependsOn = "w u" },
     { OUTPUT(z) },
     { OUTPUT(count),  .dependsOn = "select" },

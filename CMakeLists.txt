@@ -159,6 +159,11 @@ target_include_directories(model_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Math library (not part of the C library on Linux, does not exist for MSVC)
+if(UNIX)
+    target_link_libraries(model_core PUBLIC m)
+endif()
+
 #==============================================================================
 # 7. Subdirectories
 #==============================================================================

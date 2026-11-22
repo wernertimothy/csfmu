@@ -1,10 +1,12 @@
-import ctypes
+"""Model-independent tests of the generated modelDescription.xml."""
+
 from pathlib import Path
 
 import fmpy
+from fmpy.fmi2 import fmi2OK
 from fmpy.validation import validate_fmu
 
-FMI2_OK = 0
+from test.fmu_helpers import set_debug_logging
 
 
 def test_fmu_model_description_is_valid(path_to_fmu: Path) -> None:
@@ -40,6 +42,5 @@ def test_declared_log_categories_are_known(new_fmu, model_description) -> None:
     assert names, "the modelDescription.xml declares no log categories"
 
     for name in names:
-        categories = (ctypes.c_char_p * 1)(name.encode("utf-8"))
-        status = fmu.dll.fmi2SetDebugLogging(fmu.component, 1, 1, categories)
-        assert status == FMI2_OK, f"log category '{name}' is not known to the FMU"
+        status = set_debug_logging(fmu, [name])
+        assert status == fmi2OK, f"log category '{name}' is not known to the FMU"

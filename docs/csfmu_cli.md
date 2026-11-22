@@ -62,10 +62,10 @@ The following files are created:
   | `src/models/<model>/variables.c` | The variable table and the model definition, with a freshly generated GUID |
   | `src/models/<model>/equations.c` | The state and output equations |
   | `test/models/<model>/__init__.py` | Makes the tests a Python package |
-  | `test/models/<model>/test_fmi_compliance.py` | FMI compliance checks of the FMU with FMPy |
+  | `test/models/<model>/test_<model>.py` | A starter test that checks the integrator against its exact solution |
 
 The model builds and passes all tests as it is. Replace the integrator with your own equations; [getting started][] explains the three model files in detail.
-The test file only checks FMI compliance. It is the place for your own model-specific tests, which are skipped automatically when another model is tested.
+The FMI behavior of every model is checked by the tests in `test/integration/`. `test/models/<model>/` is the place for the tests of your own equations; they are only collected when this model is tested.
 
 `new` only creates files. It does not build or test anything; it tells you the next steps instead:
 
@@ -177,7 +177,7 @@ csfmu stops at the first step that fails.
 Everything after `--` is passed on to pytest, for example to run only some of the tests with verbose output:
 
 ```bash
-uv run csfmu test my_model -- -k compliance -v
+uv run csfmu test my_model -- -k fmu_state -v
 ```
 
 Note that `test` does not rebuild an existing FMU. After changing a model, run `build` first, or `clean` the build folder.

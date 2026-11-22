@@ -7,6 +7,47 @@ import fmpy.fmi2
 import fmpy.logging
 import pytest
 
+from test.fmu_helpers import initialize
+
+# The model under test. "csfmu test <model>" sets it; the FMU is
+# $FMU_OUTPUT_DIR/<model>.fmu
+MODEL = os.environ.get("FMU_MODEL", "first_order")
+
+# The tests of a model are in test/models/<model>/ (csfmu new creates the folder)
+MODEL_TESTS = (Path(__file__).parent / "models").resolve()
+
+
+def model_of(path: Path) -> str | None:
+    """The model whose test folder contains path, or None outside test/models/<model>/."""
+    path = path.resolve()
+    if path == MODEL_TESTS or not path.is_relative_to(MODEL_TESTS):
+        return None
+    folder = path.relative_to(MODEL_TESTS).parts[0]
+    return folder if (MODEL_TESTS / folder).is_dir() else None
+
+
+def pytest_ignore_collect(collection_path: Path, config) -> bool | None:
+    """Do not collect the test folders of the other models."""
+    if (
+        collection_path.is_dir()
+        and collection_path.parent.resolve() == MODEL_TESTS
+        and collection_path.name != MODEL
+    ):
+        return True
+    return None  # never False: that would override --ignore and friends
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    """Skip tests of another model that were named on the command line.
+
+    pytest_ignore_collect does not apply to paths given explicitly.
+    """
+    for item in items:
+        model = model_of(item.path)
+        if model is not None and model != MODEL:
+            reason = f"tests of {model}, but the FMU under test is {MODEL}"
+            item.add_marker(pytest.mark.skip(reason=reason))
+
 
 @pytest.fixture(scope="session")
 def path_to_project_root() -> Path:
@@ -24,9 +65,8 @@ def path_to_fmu(path_to_project_root: Path) -> Path:
         FMU_MODEL      - model name (default: "first_order")
         FMU_OUTPUT_DIR - directory containing the .fmu (default: "build/")
     """
-    model_name = os.environ.get("FMU_MODEL", "first_order")
     fmu_dir = os.environ.get("FMU_OUTPUT_DIR", str(path_to_project_root / "build"))
-    path_to_fmu = Path(fmu_dir) / f"{model_name}.fmu"
+    path_to_fmu = Path(fmu_dir) / f"{MODEL}.fmu"
     assert path_to_fmu.is_file(), f"FMU not found at {path_to_fmu}"
     return path_to_fmu
 
@@ -136,8 +176,4 @@ def new_fmu(unzipdir: Path, model_description):
 @pytest.fixture
 def initialized_fmu(new_fmu):
     """Return an FMU that has completed initialization with default values."""
-    fmu = new_fmu()
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
-    return fmu
+    return initialize(new_fmu())

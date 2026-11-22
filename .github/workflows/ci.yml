@@ -104,3 +104,64 @@ jobs:
         env:
           CSFMU_REQUIRE_TWO_FMUS: "1"
         run: uv run pytest test/integration/test_two_fmus.py -v
+
+  # Tests of the csfmu tool, which do not depend on a model. Creating a model
+  # with "csfmu new" and testing it catches a scaffold template that no
+  # longer fits the modelDefinition API
+  cli:
+    name: CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Unit tests of the CLI
+        run: uv run pytest tools/tests
+
+      - name: Create, build and test a new model
+        run: |
+          uv run csfmu new scaffold_probe
+          uv run csfmu test scaffold_probe
+
+  # Line coverage of src/ over the C and Python tests of every model. Report
+  # only, there is no threshold. CMake takes CFLAGS, CXXFLAGS and LDFLAGS from
+  # the environment when it configures a build folder for the first time
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    env:
+      CFLAGS: --coverage
+      CXXFLAGS: --coverage
+      LDFLAGS: --coverage
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      # The coverage runtime adds gcov symbols to the exports of the FMU, so
+      # the exported-symbols check runs in the test job only
+      - name: Build and test all models with coverage
+        run: |
+          for model in $(uv run csfmu list); do
+            echo "::group::$model"
+            uv run csfmu test "$model" -- --deselect test/integration/test_exported_symbols.py::test_only_fmi2_functions_are_exported
+            echo "::endgroup::"
+          done
+
+      - name: Coverage report
+        run: |
+          mkdir -p coverage
+          uvx gcovr --root . --filter src/ --txt coverage/summary.txt --html-details coverage/index.html build/
+          { echo '```'; cat coverage/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/

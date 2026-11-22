@@ -1,28 +1,18 @@
+"""Model-independent tests of FMU state handling.
+
+Covers fmi2GetFMUstate, fmi2SetFMUstate, fmi2FreeFMUstate and serialization.
+"""
+
 import pytest
 from fmpy.fmi1 import FMICallException
 
-"""
-Model-independent tests of FMU state handling (fmi2GetFMUstate,
-fmi2SetFMUstate, fmi2FreeFMUstate and serialization).
-"""
-
-GETTERS = {"Real": "getReal", "Integer": "getInteger", "Boolean": "getBoolean"}
-SETTERS = {"Real": "setReal", "Integer": "setInteger", "Boolean": "setBoolean"}
-
-
-def all_values(fmu, model_description) -> dict:
-    """Read every variable of the FMU."""
-    return {
-        v.name: getattr(fmu, GETTERS[v.type])([v.valueReference])[0]
-        for v in model_description.modelVariables
-    }
+from test.fmu_helpers import initialize, read_all, variables_with
 
 
 def excite(fmu, model_description) -> None:
     """Set every Real input to a non-zero value so that the model moves."""
-    for variable in model_description.modelVariables:
-        if variable.causality == "input" and variable.type == "Real":
-            fmu.setReal([variable.valueReference], [0.5])
+    for variable in variables_with(model_description, "input", "Real"):
+        fmu.setReal([variable.valueReference], [0.5])
 
 
 def run(
@@ -35,7 +25,7 @@ def run(
             currentCommunicationPoint=start + k * step_size,
             communicationStepSize=step_size,
         )
-        trajectory.append(all_values(fmu, model_description))
+        trajectory.append(read_all(fmu, model_description))
     return trajectory
 
 
@@ -52,39 +42,33 @@ def test_set_fmu_state_repeats_the_trajectory(
     run(initialized_fmu, model_description, start=0.0, steps=5)
 
     state = initialized_fmu.getFMUstate()
-    at_snapshot = all_values(initialized_fmu, model_description)
+    at_snapshot = read_all(initialized_fmu, model_description)
     first = run(initialized_fmu, model_description, start=0.05)
 
     initialized_fmu.setFMUstate(state)
-    assert all_values(initialized_fmu, model_description) == at_snapshot
+    assert read_all(initialized_fmu, model_description) == at_snapshot
     second = run(initialized_fmu, model_description, start=0.05)
 
     assert first == second
     initialized_fmu.freeFMUstate(state)
 
 
-def test_fmu_state_includes_the_state_machine(new_fmu, model_description) -> None:
+def test_fmu_state_includes_the_state_machine(new_fmu) -> None:
     """A snapshot taken before initialization brings the FMU back to that point."""
     fmu = new_fmu()
     state = fmu.getFMUstate()
 
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
+    initialize(fmu)
     fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.1)
 
     fmu.setFMUstate(state)
 
     # the FMU is in the instantiated state again
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
+    initialize(fmu)
     fmu.freeFMUstate(state)
 
 
-def test_set_fmu_state_recovers_from_an_error(
-    initialized_fmu, model_description
-) -> None:
+def test_set_fmu_state_recovers_from_an_error(initialized_fmu) -> None:
     """A snapshot is the way to continue after an error without a reset."""
     initialized_fmu.doStep(currentCommunicationPoint=0.0, communicationStepSize=0.1)
     state = initialized_fmu.getFMUstate()
@@ -113,14 +97,14 @@ def test_existing_fmu_state_is_reused(initialized_fmu, model_description) -> Non
     address = state.value
 
     run(initialized_fmu, model_description, start=0.0, steps=5)
-    expected = all_values(initialized_fmu, model_description)
+    expected = read_all(initialized_fmu, model_description)
     initialized_fmu.fmi2GetFMUstate(initialized_fmu.component, state)
     assert state.value == address
 
     run(initialized_fmu, model_description, start=0.05, steps=5)
     initialized_fmu.setFMUstate(state)
 
-    assert all_values(initialized_fmu, model_description) == expected
+    assert read_all(initialized_fmu, model_description) == expected
     initialized_fmu.freeFMUstate(state)
 
 

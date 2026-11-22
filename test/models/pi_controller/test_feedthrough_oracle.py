@@ -1,7 +1,4 @@
-import pytest
-
-"""
-Tests of direct feedthrough (ROADMAP P0.4) with the pi_controller model:
+"""Tests of direct feedthrough (ROADMAP P0.4) with the pi_controller model.
 
     e = r - y_m,  dx_I/dt = e,  u = Kp*e + Ki*x_I
 
@@ -13,15 +10,6 @@ they must react to fmi2SetReal without a step.
 KP = 2.0
 KI = 1.0
 TOLERANCE = 1e-12
-
-
-@pytest.fixture(autouse=True)
-def only_pi_controller(model_description) -> None:
-    """Skip these tests if the FMU under test is not the pi_controller model."""
-    if model_description.modelName != "pi_controller":
-        pytest.skip(
-            f"Test specific to pi_controller model, got {model_description.modelName}"
-        )
 
 
 def outputs(fmu, vr) -> tuple[float, float]:

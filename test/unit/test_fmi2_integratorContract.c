@@ -6,6 +6,9 @@
  * The FMI wrapper (src/fmi2Functions.c) is linked against the model
  * definition below instead of a real model. Its integrator can be told to
  * break the contract, so the test needs no broken model in src/models/.
+ *
+ * The same fixture covers calls that FMPy cannot make, such as
+ * fmi2Instantiate without callbacks.
  */
 
 #include <math.h>
@@ -234,6 +237,29 @@ void test_timeOffBeyondRounding_failsWithError(void)
     TEST_ASSERT_EQUAL_INT(fmi2Error, fmi2DoStep(fmu, 1.0e6, 1.0e-6, fmi2False));
 }
 
+/***************************************************
+ * Instantiation without callbacks
+ ***************************************************/
+
+/* Without a logger the FMU cannot report anything, so it does not start */
+void test_instantiate_withoutCallbacks_returnsNull(void)
+{
+    TEST_ASSERT_NULL(fmi2Instantiate("contract", fmi2CoSimulation, MODEL_DEFINITION.guid, "", NULL,
+                                     fmi2False, fmi2False));
+}
+
+void test_instantiate_withoutLogger_returnsNull(void)
+{
+    const fmi2CallbackFunctions noLogger = {
+        .logger         = NULL,
+        .allocateMemory = calloc,
+        .freeMemory     = free,
+    };
+
+    TEST_ASSERT_NULL(fmi2Instantiate("contract", fmi2CoSimulation, MODEL_DEFINITION.guid, "", &noLogger,
+                                     fmi2False, fmi2False));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -242,5 +268,7 @@ int main(void)
     RUN_TEST(test_errorState_outputsMatchTheVariables);
     RUN_TEST(test_timeOffByRounding_isAccepted);
     RUN_TEST(test_timeOffBeyondRounding_failsWithError);
+    RUN_TEST(test_instantiate_withoutCallbacks_returnsNull);
+    RUN_TEST(test_instantiate_withoutLogger_returnsNull);
     return UNITY_END();
 }

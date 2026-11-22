@@ -1,15 +1,8 @@
+"""Tests of the initial conditions of the pendulum_on_cart model."""
+
 from pathlib import Path
 
-import pytest
 from fmpy import simulate_fmu
-
-
-@pytest.fixture(autouse=True)
-def only_for_pendulum_on_cart(model_description) -> None:
-    if model_description.modelName != "pendulum_on_cart":
-        pytest.skip(
-            f"Test specific to pendulum_on_cart model, got {model_description.modelName}"
-        )
 
 
 def test_initial_outputs_reflect_initial_states(initialized_fmu, vr) -> None:

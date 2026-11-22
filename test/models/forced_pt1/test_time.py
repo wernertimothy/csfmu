@@ -1,10 +1,4 @@
-import math
-
-import numpy as np
-import pytest
-
-"""
-Tests of time in the model layer (ROADMAP P0.1) with the forced_pt1 model:
+"""Tests of time in the model layer (ROADMAP P0.1) with the forced_pt1 model.
 
     tau * dx/dt = -x + k*u + a*sin(omega*t),  y = x,  excitation = a*sin(omega*t)
 
@@ -13,14 +7,11 @@ With u = 0 and x(0) = 0 the solution is
     x(t) = a / (1 + (omega*tau)^2) * [sin(omega*t) - omega*tau*cos(omega*t) + omega*tau*exp(-t/tau)]
 """
 
+import math
 
-@pytest.fixture(autouse=True)
-def only_forced_pt1(model_description) -> None:
-    """Skip these tests if the FMU under test is not the forced_pt1 model."""
-    if model_description.modelName != "forced_pt1":
-        pytest.skip(
-            f"Test specific to forced_pt1 model, got {model_description.modelName}"
-        )
+import numpy as np
+
+from test.fmu_helpers import advance, initialize
 
 
 def parameters(fmu, vr) -> dict:
@@ -41,20 +32,13 @@ def exact_x(t: float, tau: float, a: float, omega: float) -> float:
 
 def simulate_error(new_fmu, vr, step_size: float, stop_time: float) -> float:
     """Simulate from 0 to stop_time with a fixed communication step and return |y - x_exact|."""
-    fmu = new_fmu(f"h_{step_size}")
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
+    fmu = initialize(new_fmu(f"h_{step_size}"))
     p = parameters(fmu, vr)
 
-    steps = round(stop_time / step_size)
-    for k in range(steps):
-        fmu.doStep(
-            currentCommunicationPoint=k * step_size, communicationStepSize=step_size
-        )
+    end = advance(fmu, stop_time, step_size)
 
     y = fmu.getReal([vr("y")])[0]
-    return abs(y - exact_x(steps * step_size, p["tau"], p["a"], p["omega"]))
+    return abs(y - exact_x(end, p["tau"], p["a"], p["omega"]))
 
 
 def convergence_order(step_sizes, errors) -> float:
@@ -82,10 +66,7 @@ def test_outputs_are_evaluated_at_the_communication_point(initialized_fmu, vr) -
 
 def test_start_time_is_honored(new_fmu, vr) -> None:
     """fmi2SetupExperiment sets the model time, fmi2Reset sets it back to 0."""
-    fmu = new_fmu()
-    fmu.setupExperiment(startTime=0.25)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
+    fmu = initialize(new_fmu(), startTime=0.25)
 
     # a = 1, omega = 2*pi: sin(pi/2) = 1
     assert abs(fmu.getReal([vr("excitation")])[0] - 1.0) < 1e-12
@@ -93,9 +74,7 @@ def test_start_time_is_honored(new_fmu, vr) -> None:
     assert abs(fmu.getReal([vr("excitation")])[0] - 0.0) < 1e-12
 
     fmu.reset()
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
+    initialize(fmu)
     assert fmu.getReal([vr("excitation")])[0] == 0.0
 
 

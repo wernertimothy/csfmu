@@ -6,6 +6,5 @@
 # sanitizer job covers it
 add_executable(test_fmi2_discard test_fmi2_discard.c)
 target_link_libraries(test_fmi2_discard PRIVATE ${LIB_NAME}_static unity)
-target_include_directories(test_fmi2_discard PRIVATE ${CMAKE_SOURCE_DIR}/external/unity/src)
 
 add_test(NAME test_fmi2_discard COMMAND test_fmi2_discard)

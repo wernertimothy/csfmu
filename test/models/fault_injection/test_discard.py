@@ -1,10 +1,4 @@
-import math
-
-import pytest
-from fmpy.fmi1 import FMICallException
-
-"""
-Tests of discarded steps (ROADMAP P0.3) with the fault_injection model:
+"""Tests of discarded steps (ROADMAP P0.3) with the fault_injection model.
 
     dx/dt = -x/tau,  y = x,  and dx/dt = NaN for t >= t_fail if fail is set
 
@@ -14,39 +8,31 @@ its 5th of 10 sub-steps. The FMU must discard the whole step and roll back to
 t = 0.5, not to the last good sub-step.
 """
 
-FMI2_DISCARD = 2
-FMI2_ERROR = 3
+import math
 
-# fmi2StatusKind
-FMI2_DO_STEP_STATUS = 0
-FMI2_LAST_SUCCESSFUL_TIME = 2
-FMI2_TERMINATED = 3
+import pytest
+from fmpy.fmi1 import FMICallException
+from fmpy.fmi2 import (
+    fmi2Discard,
+    fmi2DoStepStatus,
+    fmi2Error,
+    fmi2LastSuccessfulTime,
+    fmi2OK,
+    fmi2Terminated,
+)
+
+from test.fmu_helpers import advance, initialize
 
 STEP_SIZE = 0.1
 FAILING_STEP_START = 0.5
-
-
-@pytest.fixture(autouse=True)
-def only_fault_injection(model_description) -> None:
-    """Skip these tests if the FMU under test is not the fault_injection model."""
-    if model_description.modelName != "fault_injection":
-        pytest.skip(
-            f"Test specific to fault_injection model, got {model_description.modelName}"
-        )
 
 
 def faulty_fmu(new_fmu, vr, log: list | None = None):
     """Return an initialized FMU with the fault switched on, stepped to t = 0.5."""
     fmu = new_fmu(log=log)
     fmu.setBoolean([vr("fail")], [True])
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
-
-    for k in range(round(FAILING_STEP_START / STEP_SIZE)):
-        fmu.doStep(
-            currentCommunicationPoint=k * STEP_SIZE, communicationStepSize=STEP_SIZE
-        )
+    initialize(fmu)
+    advance(fmu, FAILING_STEP_START, step_size=STEP_SIZE)
     return fmu
 
 
@@ -57,7 +43,7 @@ def step_into_the_fault(fmu) -> FMICallException:
             currentCommunicationPoint=FAILING_STEP_START,
             communicationStepSize=STEP_SIZE,
         )
-    assert failure.value.status == FMI2_DISCARD
+    assert failure.value.status == fmi2Discard
     return failure.value
 
 
@@ -70,9 +56,9 @@ def test_discarded_step_rolls_back_to_the_communication_point(new_fmu, vr) -> No
     step_into_the_fault(fmu)
 
     # the master learns what happened and where the FMU stands
-    assert fmu.getStatus(FMI2_DO_STEP_STATUS) == FMI2_DISCARD
-    assert fmu.getRealStatus(FMI2_LAST_SUCCESSFUL_TIME) == FAILING_STEP_START
-    assert fmu.getBooleanStatus(FMI2_TERMINATED) == 0  # retry possible
+    assert fmu.getStatus(fmi2DoStepStatus) == fmi2Discard
+    assert fmu.getRealStatus(fmi2LastSuccessfulTime) == FAILING_STEP_START
+    assert not fmu.getBooleanStatus(fmi2Terminated)  # retry possible
 
     # the FMU is back at t = 0.5, not at the last good sub-step
     y = fmu.getReal([vr("y")])[0]
@@ -86,7 +72,7 @@ def test_discarded_step_rolls_back_to_the_communication_point(new_fmu, vr) -> No
         currentCommunicationPoint=FAILING_STEP_START, communicationStepSize=STEP_SIZE
     )
 
-    assert fmu.getStatus(FMI2_DO_STEP_STATUS) == 0  # fmi2OK
+    assert fmu.getStatus(fmi2DoStepStatus) == fmi2OK
     assert abs(fmu.getReal([vr("y")])[0] - math.exp(-0.6)) < 1e-9
     fmu.freeFMUstate(state)
 
@@ -105,8 +91,8 @@ def test_retry_with_the_fault_moved_reaches_the_failing_step(new_fmu, vr) -> Non
 
     with pytest.raises(FMICallException) as failure:
         fmu.doStep(currentCommunicationPoint=0.6, communicationStepSize=STEP_SIZE)
-    assert failure.value.status == FMI2_DISCARD
-    assert fmu.getRealStatus(FMI2_LAST_SUCCESSFUL_TIME) == 0.6
+    assert failure.value.status == fmi2Discard
+    assert fmu.getRealStatus(fmi2LastSuccessfulTime) == 0.6
     fmu.freeFMUstate(state)
 
 
@@ -121,7 +107,7 @@ def test_step_is_refused_until_the_state_is_restored(new_fmu, vr) -> None:
             currentCommunicationPoint=FAILING_STEP_START,
             communicationStepSize=STEP_SIZE / 2,
         )
-    assert failure.value.status == FMI2_ERROR
+    assert failure.value.status == fmi2Error
 
     fmu.setFMUstate(state)
     fmu.setBoolean([vr("fail")], [False])
@@ -138,7 +124,7 @@ def test_variables_cannot_be_set_after_a_discard(new_fmu, vr) -> None:
 
     with pytest.raises(FMICallException) as failure:
         fmu.setBoolean([vr("fail")], [False])
-    assert failure.value.status == FMI2_ERROR
+    assert failure.value.status == fmi2Error
 
 
 def test_terminate_is_allowed_after_a_discard(new_fmu, vr) -> None:
@@ -154,13 +140,8 @@ def test_reset_is_allowed_after_a_discard(new_fmu, vr) -> None:
     step_into_the_fault(fmu)
 
     fmu.reset()
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
-    fmu.exitInitializationMode()
-    for k in range(10):
-        fmu.doStep(
-            currentCommunicationPoint=k * STEP_SIZE, communicationStepSize=STEP_SIZE
-        )
+    initialize(fmu)
+    advance(fmu, 1.0, step_size=STEP_SIZE)
 
 
 def test_discard_is_logged(new_fmu, vr) -> None:
@@ -169,7 +150,7 @@ def test_discard_is_logged(new_fmu, vr) -> None:
     fmu = faulty_fmu(new_fmu, vr, log=log)
     step_into_the_fault(fmu)
 
-    discards = [entry for entry in log if entry[0] == FMI2_DISCARD]
+    discards = [entry for entry in log if entry[0] == fmi2Discard]
     assert len(discards) == 1, log
     _, category, message = discards[0]
     assert category == "logStatusWarning"
@@ -185,11 +166,11 @@ def test_snapshot_taken_after_a_discard_keeps_the_failed_state(new_fmu, vr) -> N
     failed = fmu.getFMUstate()
 
     fmu.setFMUstate(before)
-    assert fmu.getStatus(FMI2_DO_STEP_STATUS) == 0  # fmi2OK
+    assert fmu.getStatus(fmi2DoStepStatus) == fmi2OK
 
     fmu.setFMUstate(failed)
-    assert fmu.getStatus(FMI2_DO_STEP_STATUS) == FMI2_DISCARD
-    assert fmu.getRealStatus(FMI2_LAST_SUCCESSFUL_TIME) == FAILING_STEP_START
+    assert fmu.getStatus(fmi2DoStepStatus) == fmi2Discard
+    assert fmu.getRealStatus(fmi2LastSuccessfulTime) == FAILING_STEP_START
 
     fmu.freeFMUstate(before)
     fmu.freeFMUstate(failed)
