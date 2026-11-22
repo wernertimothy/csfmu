@@ -66,12 +66,22 @@ def vr(model_description):
     return value_reference_of
 
 
+# FMPy's native logger proxy has a single global target (s_logger in its
+# logging library): every addLoggerProxy() call redirects it to the logger
+# just registered, also for FMUs that use FMPy's defaultCallbacks. A logger
+# that is freed after its test would then be called by the next FMU that logs
+# (e.g. a failed fmi2Instantiate, which logs even with logging off) and crash
+# the test process. So every registered logger is kept alive for the session.
+_REGISTERED_CALLBACKS: list = []
+
+
 def logging_callbacks(log: list) -> fmpy.fmi2.fmi2CallbackFunctions:
     """Return FMI callbacks whose logger appends every message to log.
 
     The FMU passes its messages as "%s" plus a variadic argument, which ctypes
     cannot hand to Python. FMPy's native logger proxy formats the message
-    first. The FMU keeps a reference to the callbacks, so they stay alive.
+    first. The callbacks stay alive until the end of the session (see
+    _REGISTERED_CALLBACKS).
     """
 
     def logger(component, instanceName, status, category, message):
@@ -82,6 +92,7 @@ def logging_callbacks(log: list) -> fmpy.fmi2.fmi2CallbackFunctions:
     callbacks.allocateMemory = fmpy.fmi2.fmi2CallbackAllocateMemoryTYPE(fmpy.calloc)
     callbacks.freeMemory = fmpy.fmi2.fmi2CallbackFreeMemoryTYPE(fmpy.free)
     fmpy.logging.addLoggerProxy(byref(callbacks))
+    _REGISTERED_CALLBACKS.append(callbacks)
     return callbacks
 
 

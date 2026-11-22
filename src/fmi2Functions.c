@@ -1,3 +1,4 @@
+#include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -9,6 +10,10 @@
 
 /* Relative tolerance for comparing points in time */
 #define TIME_TOLERANCE 1e-9
+
+/* A clock difference below this fraction of the communication step size is rounding
+   and passes silently; a larger one (still within TIME_TOLERANCE) is reported */
+#define CLOCK_WARNING_FRACTION 1e-6
 
 /* Tolerance on the number of sub-steps (absorbs rounding in stepSize / maxStepSize) */
 #define SUBSTEP_TOLERANCE 1e-9
@@ -339,6 +344,14 @@ static fmi2Status notSupported(fmi2Component c, const char* functionName)
 static fmi2Real timeTolerance(fmi2Real time)
 {
     return TIME_TOLERANCE * fmax(1.0, fabs(time));
+}
+
+/**
+ * Rounding allowance for two values of the time t: a few units in the last place
+ */
+static fmi2Real roundingTolerance(fmi2Real time)
+{
+    return 8.0 * DBL_EPSILON * fmax(1.0, fabs(time));
 }
 
 /**
@@ -1063,7 +1076,11 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *
  * Implementation notes:
  * - Supports variable communication step sizes (not all tools do)
- * - Validates internal clock matches environment clock
+ * - Validates that the internal clock matches the environment clock. A
+ *   difference up to rounding (roundingTolerance()) or up to
+ *   CLOCK_WARNING_FRACTION of the step size passes silently; a larger one
+ *   up to timeTolerance() is accepted with fmi2Warning, and the FMU continues
+ *   from currentCommunicationPoint; beyond that the call fails with fmi2Error
  * - Refuses to step beyond the stop time of the experiment (if defined)
  * - Inputs are held constant during the step
  * - The model owns the time: model->time is the internal clock
@@ -1147,6 +1164,19 @@ fmi2Status fmi2DoStep(
     }
     fmi2Real actualStepSize = communicationStepSize / numberOfSteps;
 
+    /* A clock difference beyond rounding is accepted, but reported: the FMU
+       continues from the environment's clock. Checked after all arguments are
+       validated, so that a rejected call only reports its error */
+    fmi2Status status = fmi2OK;
+    fmi2Real clockDifference = fabs(model->time - currentCommunicationPoint);
+    if (clockDifference > fmax(CLOCK_WARNING_FRACTION * communicationStepSize, roundingTolerance(model->time))) {
+        logWarningMessage(myfmu2, "FMU internal clock (%.16g) differs from environment clock (%.16g) by %.3g, "
+                                  "%.3g of the step size. The FMU continues from the environment clock.",
+                          model->time, currentCommunicationPoint, clockDifference,
+                          clockDifference / communicationStepSize);
+        status = fmi2Warning;
+    }
+
     /* Remember the communication point to roll back a failed step */
     saveModelData(model, model->stepStart);
 
@@ -1189,7 +1219,7 @@ fmi2Status fmi2DoStep(
     myfmu2->outputsAreStale = fmi2False;
 
     logCallMessage(myfmu2, "FMU stepped to %.16g.", nextCommunicationPoint);
-    return fmi2OK;
+    return status;
 }
 
 /**

@@ -1011,6 +1011,7 @@ The heart of co-simulation - advances the FMU's internal state from time `t` to 
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Step completed successfully |
+| `fmi2Warning` | Step completed, but `currentCommunicationPoint` differed from the FMU's internal clock by more than rounding (still within the tolerance). The FMU continued from `currentCommunicationPoint` (see [Time Validation](#time-validation)) |
 | `fmi2Discard` | The integration failed numerically (a state or a Real output became NaN or infinite). The FMU was rolled back to `currentCommunicationPoint` |
 | `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, or step ends behind the stop time |
 
@@ -1080,7 +1081,15 @@ The integrator of this FMU works with sub-steps of a fixed size (see `maxStepSiz
 
 Before stepping, the function validates:
 
-- **Clock**: `currentCommunicationPoint` must match the FMU's internal clock. The tolerance is relative (`1e-9 * max(1, |time|)`), so the check also works at large simulation times. Because the clock is set to the end of the step as seen by the integration tool, rounding errors do not accumulate over the steps.
+- **Clock**: `currentCommunicationPoint` must match the FMU's internal clock. Because the clock is set to the end of the step as seen by the integration tool (`currentCommunicationPoint + communicationStepSize`), rounding errors do not accumulate over the steps. A master that advances its time with `t += h` therefore matches the clock exactly, and one that computes `t = t0 + k*h` differs by rounding only. The difference `d = |time - currentCommunicationPoint|` falls into one of three bands:
+
+  | Difference | Result |
+  |------------|--------|
+  | `d <= max(1e-6 * h, 8 * DBL_EPSILON * max(1, abs(time)))` (rounding, or a negligible fraction of the step) | Accepted silently |
+  | `d <= 1e-9 * max(1, abs(time))` | Accepted with `fmi2Warning` and a log message (category `logStatusWarning`). The step starts at `currentCommunicationPoint`, so the FMU continues from the integration tool's clock |
+  | larger | `fmi2Error` |
+
+  The tolerance is relative, so the check also works at large simulation times.
 - **Stop time**: If a stop time was defined in `fmi2SetupExperiment`, the step must not end behind it (same tolerance).
 
 #### Usage Example
@@ -1149,7 +1158,7 @@ fmi2FreeInstance(fmu);
 - **Outputs computed once**: After all sub-steps complete, not after each internal step
 - **maxStepSize configurable**: Field of the model definition in the model's `variables.c`
 - **Divergence discards the step**: A step that produces NaN or infinite states or Real outputs returns `fmi2Discard` and rolls the FMU back to the communication point (see [Discarded Steps](#discarded-steps)). Continue with `fmi2SetFMUstate`, `fmi2Reset` or `fmi2Terminate`
-- **Never pending**: The function returns `fmi2OK`, `fmi2Discard` or `fmi2Error`, never `fmi2Pending`
+- **Never pending**: The function returns `fmi2OK`, `fmi2Warning`, `fmi2Discard` or `fmi2Error`, never `fmi2Pending`
 - **Synchronous only**: Blocks until computation completes (`noSetFMUStatePriorToCurrentPoint` ignored)
 - **No variable step size within DoStep**: Uses fixed sub-steps (adaptive methods would require more complex integrators)
 

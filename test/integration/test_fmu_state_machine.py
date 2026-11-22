@@ -10,6 +10,15 @@ on the FMU is in the error state: it can only be reset or freed (reading
 variables stays possible).
 """
 
+FMI2_OK = 0
+FMI2_WARNING = 1
+
+
+def do_step(fmu, time: float, step_size: float) -> int:
+    """fmi2DoStep returning its status. FMU2Slave.doStep drops it and raises only
+    for statuses above fmi2Warning, so the low-level call is used."""
+    return fmu.fmi2DoStep(fmu.component, time, step_size, fmpy.fmi2.fmi2True)
+
 
 def test_cannot_do_step_before_exiting_initialization_mode(new_fmu) -> None:
     """fmi2DoStep is not allowed in initialization mode."""
@@ -100,7 +109,7 @@ def test_can_step_exactly_to_stop_time(new_fmu) -> None:
 
     time = 0.0
     for _ in range(10):
-        fmu.doStep(currentCommunicationPoint=time, communicationStepSize=0.1)
+        assert do_step(fmu, time, 0.1) == FMI2_OK
         time += 0.1  # ends at 0.9999999999999999
 
 
@@ -130,8 +139,50 @@ def test_clock_does_not_drift_at_large_times(new_fmu) -> None:
 
     time = start
     for _ in range(200):
-        fmu.doStep(currentCommunicationPoint=time, communicationStepSize=0.001)
+        assert do_step(fmu, time, 0.001) == FMI2_OK
         time += 0.001
+
+
+@pytest.mark.parametrize("start", [0.0, 1.0e6])
+@pytest.mark.parametrize("master", ["accumulated", "multiplied"])
+def test_master_clock_rounding_is_silent(new_fmu, start, master) -> None:
+    """The usual master clocks (t += h and t = t0 + k*h) differ from the FMU clock
+    by rounding at most, so every step returns fmi2OK and no clock warning."""
+    step_size = 1e-3
+    fmu = new_fmu()
+    fmu.setupExperiment(startTime=start)
+    fmu.enterInitializationMode()
+    fmu.exitInitializationMode()
+
+    time = start
+    for k in range(10_000):
+        if master == "multiplied":
+            time = start + k * step_size
+        assert do_step(fmu, time, step_size) == FMI2_OK, f"step {k} at t = {time!r}"
+        if master == "accumulated":
+            time += step_size
+
+
+def test_clock_difference_beyond_rounding_is_reported(new_fmu) -> None:
+    """A mismatch within the tolerance but far above rounding is accepted with fmi2Warning."""
+    log = []
+    fmu = new_fmu(log=log)
+    fmu.setupExperiment(startTime=1000.0)
+    fmu.enterInitializationMode()
+    fmu.exitInitializationMode()
+
+    def clock_warnings() -> list:
+        return [entry for entry in log if "differs from environment clock" in entry[2]]
+
+    # tolerance at t = 1000 is 1e-6; the warning threshold for h = 1e-3 is 1e-9
+    assert do_step(fmu, 1000.0 + 1e-7, 1e-3) == FMI2_WARNING
+    warnings = clock_warnings()
+    assert len(warnings) == 1, log
+    assert warnings[0][:2] == (FMI2_WARNING, "logStatusWarning")
+
+    # the FMU continued from the environment clock, so the next step matches exactly
+    assert do_step(fmu, 1000.0 + 1e-7 + 1e-3, 1e-3) == FMI2_OK
+    assert len(clock_warnings()) == 1
 
 
 def test_model_exchange_is_rejected(unzipdir, model_description) -> None:
