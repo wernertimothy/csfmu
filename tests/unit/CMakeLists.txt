@@ -30,6 +30,11 @@ csfmu_unit_test(test_rungeKutta4)
 csfmu_unit_test(test_fmi2_integratorContract ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
 target_include_directories(test_fmi2_integratorContract PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
 
+# Internals block in the FMU state, the serialized FMU state, fmi2Reset and
+# the rollback of a discarded step, with a model definition of the test itself
+csfmu_unit_test(test_fmi2_internals ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
+target_include_directories(test_fmi2_internals PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
+
 # Checks of the model definition in the modelDescription.xml generator. The
 # test includes src/fmi2ModelDescription.c to reach its static functions
 csfmu_unit_test(test_validateDefinition)

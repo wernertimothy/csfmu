@@ -127,7 +127,8 @@ typedef enum {
  * Holds everything that changes during a simulation. Instance name,
  * callbacks and log level belong to the instance and are not part of it.
  * The struct contains no pointers, so its bytes are also the serialized
- * form of the FMU state. The current time is part of the model data.
+ * form of the FMU state. The current time and the model's unpublished
+ * internals are part of the model data.
  */
 typedef struct {
     uint32_t      magic;     /* SNAPSHOT_MAGIC */

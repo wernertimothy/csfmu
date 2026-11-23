@@ -6,6 +6,7 @@ typedef struct { double gain; int mode; bool enabled; double internal; } Params;
 typedef struct { double u; bool reset; } Inputs;
 typedef struct { double y; int count; } Outputs;
 typedef struct { double x1; double x2; } States;
+typedef struct { double cache; int counter; } Internals;
 
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
@@ -31,6 +32,7 @@ static const modelDefinition DEFINITION = {
     .sizeOfParams        = sizeof(Params),
     .sizeOfInputs        = sizeof(Inputs),
     .sizeOfOutputs       = sizeof(Outputs),
+    .sizeOfInternals     = sizeof(Internals),
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
@@ -38,11 +40,14 @@ static const modelDefinition DEFINITION = {
     .defaultExperiment   = { .tolerance = 1e-4 },
 };
 
-/* A model without parameters, inputs and outputs */
+/* A model without parameters, inputs, outputs and internals */
 static const modelDefinition ONLY_STATES = { .numberOfStates = 2 };
 
 /* A model without states */
 static const modelDefinition NO_STATES = { .sizeOfParams = sizeof(Params) };
+
+/* A model that consists of nothing but its internals */
+static const modelDefinition ONLY_INTERNALS = { .sizeOfInternals = sizeof(Internals) };
 
 static modelInstance* model;
 
@@ -59,6 +64,7 @@ void test_newModel_allocatesMemory(void) {
     TEST_ASSERT_NOT_NULL(model->params);
     TEST_ASSERT_NOT_NULL(model->inputs);
     TEST_ASSERT_NOT_NULL(model->outputs);
+    TEST_ASSERT_NOT_NULL(model->internals);
     TEST_ASSERT_NOT_NULL(model->states);
     TEST_ASSERT_NOT_NULL(model->stateDerivatives);
     TEST_ASSERT_NOT_NULL(model->scratch);
@@ -93,8 +99,9 @@ void test_newModel_appliesStartValuesOfAllTypes(void) {
 }
 
 void test_newModel_zeroesEverythingWithoutStartValue(void) {
-    const Params*  p   = model->params;
-    const Outputs* out = model->outputs;
+    const Params*    p         = model->params;
+    const Outputs*   out       = model->outputs;
+    const Internals* internals = model->internals;
 
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->time);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, p->internal);  /* not published */
@@ -102,6 +109,8 @@ void test_newModel_zeroesEverythingWithoutStartValue(void) {
     TEST_ASSERT_EQUAL_INT(0, out->count);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->stateDerivatives[0]);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->stateDerivatives[1]);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->cache);  /* internals have no start values */
+    TEST_ASSERT_EQUAL_INT(0, internals->counter);
 }
 
 void test_newModel_statesAreAVectorOfDoubles(void) {
@@ -117,6 +126,7 @@ void test_newModel_handlesEmptyBlocks(void) {
     TEST_ASSERT_NULL(m->params);
     TEST_ASSERT_NULL(m->inputs);
     TEST_ASSERT_NULL(m->outputs);
+    TEST_ASSERT_NULL(m->internals);
     TEST_ASSERT_NOT_NULL(m->states);
 
     freeModel(m);
@@ -135,9 +145,10 @@ void test_newModel_handlesModelWithoutStates(void) {
 }
 
 void test_resetModel_restoresStartValues(void) {
-    Params*  p   = model->params;
-    Inputs*  in  = model->inputs;
-    Outputs* out = model->outputs;
+    Params*    p         = model->params;
+    Inputs*    in        = model->inputs;
+    Outputs*   out       = model->outputs;
+    Internals* internals = model->internals;
 
     /* arrange: change everything */
     model->time = 99.0;
@@ -150,6 +161,8 @@ void test_resetModel_restoresStartValues(void) {
     out->count = 99;
     model->states[0] = 99.0;
     model->stateDerivatives[1] = 99.0;
+    internals->cache = 99.0;
+    internals->counter = 99;
     model->integrate = NULL;
 
     /* act */
@@ -166,6 +179,8 @@ void test_resetModel_restoresStartValues(void) {
     TEST_ASSERT_EQUAL_INT(0, out->count);
     TEST_ASSERT_EQUAL_DOUBLE(4.0, model->states[0]);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->stateDerivatives[1]);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->cache);
+    TEST_ASSERT_EQUAL_INT(0, internals->counter);
     TEST_ASSERT_TRUE(model->integrate == integrator);
 }
 
@@ -230,7 +245,7 @@ void test_newModel_allocatesTheRollbackBuffer(void) {
     /* stepStart holds a full copy of the model data, even for a model that
      * consists of nothing but its time and tolerance */
     static const modelDefinition EMPTY = { 0 };
-    const modelDefinition* definitions[] = { &DEFINITION, &ONLY_STATES, &NO_STATES, &EMPTY };
+    const modelDefinition* definitions[] = { &DEFINITION, &ONLY_STATES, &NO_STATES, &ONLY_INTERNALS, &EMPTY };
 
     for (size_t k = 0; k < ARRAY_LEN(definitions); k++) {
         modelInstance* m = newModel(definitions[k]);

@@ -1241,7 +1241,7 @@ if (fmi2GetRealStatus(fmu, fmi2LastSuccessfulTime, &lastTime) == fmi2OK) {
 
 Functions for taking a snapshot of the FMU and returning to it later (capability flags `canGetAndSetFMUstate` and `canSerializeFMUstate`). Typical uses are step rejection in a master algorithm, repeating a simulation from an intermediate point and saving a simulation to disk.
 
-A snapshot contains everything that changes during a simulation: all variables (parameters, inputs, outputs, states), the internal clock, the experiment settings and the state of the FMU state machine. Instance name, callbacks and log level belong to the instance and are not part of it.
+A snapshot contains everything that changes during a simulation: all variables (parameters, inputs, outputs, states), the model's unpublished internals, the internal clock, the experiment settings and the state of the FMU state machine. Instance name, callbacks and log level belong to the instance and are not part of it.
 
 ### fmi2GetFMUstate
 

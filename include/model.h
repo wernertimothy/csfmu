@@ -199,6 +199,9 @@ typedef struct {
     size_t sizeOfParams;    /**< sizeof(Params), 0 if the model has no parameters */
     size_t sizeOfInputs;    /**< sizeof(Inputs), 0 if the model has no inputs */
     size_t sizeOfOutputs;   /**< sizeof(Outputs), 0 if the model has no outputs */
+    size_t sizeOfInternals; /**< sizeof(Internals), 0 if the model has no internals. Internals are
+                                 memory of the model that is not published: zeroed by
+                                 resetModel() and part of the model data (see saveModelData()) */
     size_t numberOfStates;  /**< Number of continuous states (nx) */
 
     stateDerivativesFn getStateDerivatives;  /**< dx/dt = f(t,x,u) */
@@ -216,6 +219,7 @@ typedef struct {
  * - A pointer to the model definition
  * - The current time t and the relative tolerance
  * - Storage blocks for parameters, inputs and outputs (model-specific structs)
+ * - A storage block for the internals (model-specific struct, not published)
  * - State and state derivative vectors
  * - Work memory for the integrator (content is undefined between calls; it is
  *   neither reset by resetModel() nor part of saveModelData())
@@ -235,7 +239,9 @@ struct modelInstance {
     void* params;                            /**< Parameter block [def->sizeOfParams bytes] */
     void* inputs;                            /**< Input block [def->sizeOfInputs bytes] */
     void* outputs;                           /**< Output block [def->sizeOfOutputs bytes] */
-    double* states;                          /**< Array of current state values [nx] */
+    void* internals;                         /**< Internals block [def->sizeOfInternals bytes], not published.
+                                                  The state and output equations only read it */
+    double* states;                         /**< Array of current state values [nx] */
     double* stateDerivatives;                /**< Array of computed state derivatives [nx] */
     double* scratch;                         /**< Work memory for the integrator [MODEL_SCRATCH_VECTORS * nx] */
     void* stepStart;                         /**< Model data at the start of the current step, written by
@@ -271,9 +277,10 @@ modelInstance* newModel(const modelDefinition* def);
  * @brief Brings a model instance back to its state right after newModel().
  *
  * Sets the time to 0 and the relative tolerance to the model's default
- * (see modelDefaultTolerance()), zeroes all storage blocks, writes the start value of every variable in
- * the definition's variable table and (re-)binds the function pointers
- * from the definition. This function is NULL-safe.
+ * (see modelDefaultTolerance()), zeroes all storage blocks (including the
+ * internals, which have no start values), writes the start value of every
+ * variable in the definition's variable table and (re-)binds the function
+ * pointers from the definition. This function is NULL-safe.
  *
  * @param model Pointer to the model instance to reset. May be NULL.
  */
@@ -307,7 +314,8 @@ void* modelVariableAddress(modelInstance* model, size_t index);
  * @brief Returns the number of bytes needed to store the data of a model.
  *
  * The data of a model are its time, its relative tolerance, its parameter,
- * input and output blocks, its states and its state derivatives.
+ * input and output blocks, its states, its state derivatives and its
+ * internals.
  *
  * @param def Definition of the model
  *
@@ -321,8 +329,10 @@ size_t modelDataSize(const modelDefinition* def);
  *
  * Together with restoreModelData() this allows taking a snapshot of a model
  * and returning to it later. The buffer is a plain copy of the time, the
- * relative tolerance and the storage blocks, so it is only valid for the same model definition on the same
- * platform.
+ * relative tolerance and the storage blocks (including the internals), so it
+ * is only valid for the same model definition on the same platform. For the
+ * same reason the internals hold plain values and fixed-size arrays only: a
+ * pointer would be copied, not the memory it points to.
  *
  * @param model  Pointer to the model instance
  * @param buffer Buffer of at least modelDataSize(model->def) bytes

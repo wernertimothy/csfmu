@@ -80,7 +80,7 @@ Let's take a look at these files one by one in detail.
 
 ### `variables.h`
 
-This header declares the storage of your model as four plain structs. The struct names are fixed, the fields are up to you:
+This header declares the storage of your model as plain structs. The struct names are fixed, the fields are up to you:
 
 | Struct | Content | Allowed field types |
 |--------|---------|---------------------|
@@ -88,6 +88,7 @@ This header declares the storage of your model as four plain structs. The struct
 | `Inputs` | Input signals | `double`, `int`, `bool` |
 | `Outputs` | Output signals | `double`, `int`, `bool` |
 | `States` | Continuous states | `double` only |
+| `Internals` | Memory of the model that is not published (see [below](#internals)) | Plain values and fixed-size arrays |
 
 Leave out a struct your model does not need (the Lorenz attractor has no inputs).
 
@@ -134,6 +135,22 @@ void lorenzAttractorOutputs(modelInstance* model);
 #endif
 ```
 
+#### Internals
+
+`Internals` holds memory that your model needs but does not publish: the integration tool can neither read nor set it, and it does not appear in the `modelDescription.xml`. Declare the struct in `variables.h` and give its size in the model definition with `.sizeOfInternals = sizeof(Internals)`.
+
+```c
+/* internals (not published) */
+typedef struct {
+    double table[256];  /* plain values and fixed-size arrays */
+    int    count;
+} Internals;
+```
+
+- The internals are zero when the FMU is instantiated and after a reset. They have no start values, since they are not listed in the variable table.
+- The internals are part of the FMU state: saving, restoring and serializing the FMU state include them, and a discarded step rolls them back together with the states. They are copied byte by byte, so they hold plain values and fixed-size arrays and no pointers: a pointer would be copied, but not the memory it points to.
+- The state and output equations only read `model->internals`. The integrator may call them any number of times per step, so a value written there would depend on the integrator.
+
 ---
 
 ### `equations.c` (or `equations.cpp`)
@@ -158,6 +175,7 @@ The model instance gives you access to the storage of your model:
 | `model->params` | `void*` | your `Params` struct |
 | `model->inputs` | `void*` | your `Inputs` struct |
 | `model->outputs` | `void*` | your `Outputs` struct |
+| `model->internals` | `void*` | your `Internals` struct (read-only in the equations, see [Internals](#internals)) |
 | `model->states` | `double*` | the state vector |
 | `model->stateDerivatives` | `double*` | the state derivatives, same layout as the states |
 
@@ -342,7 +360,7 @@ Things to know:
 1. **The order of the entries is free.** Group them however you find readable.
 2. **Names must be unique.** By default a variable is published under its field name. Here `Outputs` and `States` both have a field `x`, so the states are published under a different name with `STATE_AS(field, "name")`. The same exists as `PARAM_AS`, `INPUT_AS` and `OUTPUT_AS`.
 3. **Every state must be listed.** All fields of `States` have to appear in the table. The start value of a state is its initial condition.
-4. **List every parameter, input and output too.** Only listed variables appear in the `modelDescription.xml`. The build does not stop you from leaving out a field of `Params`, `Inputs` or `Outputs`, but such a field cannot be reached from outside and stays at zero: an input that is never set, an output nobody can read, a parameter without a start value.
+4. **List every parameter, input and output too.** Only listed variables appear in the `modelDescription.xml`. The build does not stop you from leaving out a field of `Params`, `Inputs` or `Outputs`, but such a field cannot be reached from outside and stays at zero: an input that is never set, an output nobody can read, a parameter without a start value. Memory that your model needs but does not publish belongs into [`Internals`](#internals).
 
 If you break rule 2 or 3, the build stops with a message that tells you what to fix.
 
@@ -387,7 +405,7 @@ const modelDefinition MODEL_DEFINITION = {
 | `description`, `version` | Optional meta data |
 | `variables`, `numberOfVariables` | The variable table |
 | `units`, `numberOfUnits` | Optional table that defines your units in SI base units (see below) |
-| `sizeOfParams`, `sizeOfInputs`, `sizeOfOutputs` | `sizeof` of the respective struct. Leave out what your model does not have |
+| `sizeOfParams`, `sizeOfInputs`, `sizeOfOutputs`, `sizeOfInternals` | `sizeof` of the respective struct. Leave out what your model does not have |
 | `numberOfStates` | Number of states, `NUMBER_OF_DOUBLES(States)` |
 | `getStateDerivatives`, `getOutputs` | Your two equations |
 | `integrate` | Numerical integration method to use, see `include/integrator.h` |

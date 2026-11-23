@@ -46,6 +46,7 @@ modelInstance* newModel(const modelDefinition* def)
     if (!allocateBlock(&model->params, def->sizeOfParams) ||
         !allocateBlock(&model->inputs, def->sizeOfInputs) ||
         !allocateBlock(&model->outputs, def->sizeOfOutputs) ||
+        !allocateBlock(&model->internals, def->sizeOfInternals) ||
         !allocateBlock((void**)&model->states, sizeOfStates) ||
         !allocateBlock((void**)&model->stateDerivatives, sizeOfStates) ||
         !allocateBlock((void**)&model->scratch, MODEL_SCRATCH_VECTORS * sizeOfStates) ||
@@ -90,6 +91,9 @@ void resetModel(modelInstance* model)
     }
     if (def->sizeOfOutputs > 0) {
         memset(model->outputs, 0, def->sizeOfOutputs);
+    }
+    if (def->sizeOfInternals > 0) {
+        memset(model->internals, 0, def->sizeOfInternals);
     }
     if (sizeOfStates > 0) {
         memset(model->states, 0, sizeOfStates);
@@ -183,7 +187,8 @@ static char* copyBlock(char* position, void* block, size_t size, bool save)
  * Copies all storage blocks to (save) or from (restore) a buffer.
  *
  * Using one function for both directions guarantees that the blocks are
- * written and read in the same order.
+ * written and read in the same order. New blocks are appended at the end,
+ * so a model that does not use them keeps the same buffer layout.
  */
 static void copyModelData(modelInstance* model, char* buffer, bool save)
 {
@@ -197,7 +202,8 @@ static void copyModelData(modelInstance* model, char* buffer, bool save)
     position = copyBlock(position, model->inputs, def->sizeOfInputs, save);
     position = copyBlock(position, model->outputs, def->sizeOfOutputs, save);
     position = copyBlock(position, model->states, sizeOfStates, save);
-    copyBlock(position, model->stateDerivatives, sizeOfStates, save);
+    position = copyBlock(position, model->stateDerivatives, sizeOfStates, save);
+    copyBlock(position, model->internals, def->sizeOfInternals, save);
 }
 
 size_t modelDataSize(const modelDefinition* def)
@@ -207,7 +213,7 @@ size_t modelDataSize(const modelDefinition* def)
     }
 
     return 2 * sizeof(double) + def->sizeOfParams + def->sizeOfInputs + def->sizeOfOutputs +
-           2 * def->numberOfStates * sizeof(double);
+           2 * def->numberOfStates * sizeof(double) + def->sizeOfInternals;
 }
 
 /**
@@ -249,6 +255,7 @@ void freeModel(modelInstance* model)
     free(model->params);
     free(model->inputs);
     free(model->outputs);
+    free(model->internals);
     free(model->states);
     free(model->stateDerivatives);
     free(model->scratch);

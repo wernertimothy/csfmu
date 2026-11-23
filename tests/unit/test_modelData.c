@@ -7,6 +7,7 @@ typedef struct { double gain; int mode; bool enabled; } Params;
 typedef struct { double u; bool reset; } Inputs;
 typedef struct { double y; int count; } Outputs;
 typedef struct { double x1; double x2; } States;
+typedef struct { double cache; int counter; bool flag; double table[4]; } Internals;
 
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
@@ -31,14 +32,18 @@ static const modelDefinition DEFINITION = {
     .sizeOfParams        = sizeof(Params),
     .sizeOfInputs        = sizeof(Inputs),
     .sizeOfOutputs       = sizeof(Outputs),
+    .sizeOfInternals     = sizeof(Internals),
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
     .integrate           = integrator,
 };
 
-/* A model without parameters, inputs and outputs */
+/* A model without parameters, inputs, outputs and internals */
 static const modelDefinition ONLY_STATES = { .numberOfStates = 2 };
+
+/* A model that consists of nothing but its internals */
+static const modelDefinition ONLY_INTERNALS = { .sizeOfInternals = sizeof(Internals) };
 
 static modelInstance* model;
 static void* buffer;
@@ -58,6 +63,7 @@ static void changeEverything(modelInstance* m) {
     Params*  p   = m->params;
     Inputs*  in  = m->inputs;
     Outputs* out = m->outputs;
+    Internals* internals = m->internals;
 
     m->time = 100.0;
     m->relTol = 1e-3;
@@ -72,10 +78,29 @@ static void changeEverything(modelInstance* m) {
     m->states[1] = 93.0;
     m->stateDerivatives[0] = 92.0;
     m->stateDerivatives[1] = 91.0;
+    internals->cache = 90.0;
+    internals->counter = 89;
+    internals->flag = true;
+    for (size_t k = 0; k < ARRAY_LEN(internals->table); k++) {
+        internals->table[k] = 88.0 - (double)k;
+    }
+}
+
+/* The internals as changeEverything() leaves them */
+static void assertInternalsChanged(const modelInstance* m) {
+    const Internals* internals = m->internals;
+
+    TEST_ASSERT_EQUAL_DOUBLE(90.0, internals->cache);
+    TEST_ASSERT_EQUAL_INT(89, internals->counter);
+    TEST_ASSERT_TRUE(internals->flag);
+    for (size_t k = 0; k < ARRAY_LEN(internals->table); k++) {
+        TEST_ASSERT_EQUAL_DOUBLE(88.0 - (double)k, internals->table[k]);
+    }
 }
 
 void test_modelDataSize_isTheSumOfAllBlocks(void) {
-    size_t expected = 2 * sizeof(double) + sizeof(Params) + sizeof(Inputs) + sizeof(Outputs) + 2 * sizeof(States);
+    size_t expected = 2 * sizeof(double) + sizeof(Params) + sizeof(Inputs) + sizeof(Outputs) + 2 * sizeof(States) +
+                      sizeof(Internals);
     TEST_ASSERT_EQUAL_size_t(expected, modelDataSize(&DEFINITION));
 }
 
@@ -115,6 +140,7 @@ void test_restoreModelData_bringsBackEveryBlock(void) {
     TEST_ASSERT_EQUAL_DOUBLE(93.0, model->states[1]);
     TEST_ASSERT_EQUAL_DOUBLE(92.0, model->stateDerivatives[0]);
     TEST_ASSERT_EQUAL_DOUBLE(91.0, model->stateDerivatives[1]);
+    assertInternalsChanged(model);
 }
 
 void test_saveModelData_doesNotChangeTheModel(void) {
@@ -138,13 +164,60 @@ void test_modelData_canBeRestoredIntoAnotherInstance(void) {
     TEST_ASSERT_EQUAL_DOUBLE(1e-3, other->relTol);
     TEST_ASSERT_EQUAL_DOUBLE(99.0, p->gain);
     TEST_ASSERT_EQUAL_DOUBLE(93.0, other->states[1]);
+    assertInternalsChanged(other);
 
     freeModel(other);
+}
+
+void test_resetModel_zeroesTheInternals(void) {
+    const Internals* internals = model->internals;
+
+    changeEverything(model);
+    resetModel(model);
+
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->cache);
+    TEST_ASSERT_EQUAL_INT(0, internals->counter);
+    TEST_ASSERT_FALSE(internals->flag);
+    for (size_t k = 0; k < ARRAY_LEN(internals->table); k++) {
+        TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->table[k]);
+    }
+}
+
+void test_resetModel_keepsTheInternalsBlock(void) {
+    /* The block is zeroed in place, so pointers to it stay valid */
+    void* before = model->internals;
+
+    resetModel(model);
+
+    TEST_ASSERT_EQUAL_PTR(before, model->internals);
+}
+
+void test_modelData_handlesAModelWithOnlyInternals(void) {
+    modelInstance* m = newModel(&ONLY_INTERNALS);
+    void* data = malloc(modelDataSize(&ONLY_INTERNALS));
+    Internals* internals = m->internals;
+
+    TEST_ASSERT_EQUAL_size_t(2 * sizeof(double) + sizeof(Internals), modelDataSize(&ONLY_INTERNALS));
+
+    internals->counter = 7;
+    internals->table[3] = 0.25;
+    saveModelData(m, data);
+    resetModel(m);
+    TEST_ASSERT_EQUAL_INT(0, internals->counter);
+    restoreModelData(m, data);
+
+    TEST_ASSERT_EQUAL_INT(7, internals->counter);
+    TEST_ASSERT_EQUAL_DOUBLE(0.25, internals->table[3]);
+
+    free(data);
+    freeModel(m);
 }
 
 void test_modelData_handlesEmptyBlocks(void) {
     modelInstance* m = newModel(&ONLY_STATES);
     double data[6];
+
+    TEST_ASSERT_NULL(m->internals);
 
     m->time = 0.5;
     m->relTol = 1e-9;
@@ -182,6 +255,9 @@ int main(void) {
     RUN_TEST(test_restoreModelData_bringsBackEveryBlock);
     RUN_TEST(test_saveModelData_doesNotChangeTheModel);
     RUN_TEST(test_modelData_canBeRestoredIntoAnotherInstance);
+    RUN_TEST(test_resetModel_zeroesTheInternals);
+    RUN_TEST(test_resetModel_keepsTheInternalsBlock);
+    RUN_TEST(test_modelData_handlesAModelWithOnlyInternals);
     RUN_TEST(test_modelData_handlesEmptyBlocks);
     RUN_TEST(test_modelData_handlesNull);
 
