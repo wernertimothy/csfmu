@@ -1,3 +1,5 @@
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "model.h"
@@ -126,6 +128,9 @@ void resetModel(modelInstance* model)
     model->getStateDerivatives = def->getStateDerivatives;
     model->integrate = def->integrate;
     model->getOutputs = def->getOutputs;
+
+    /* No error so far */
+    model->message[0] = '\0';
 }
 
 double modelDefaultTolerance(const modelDefinition* def)
@@ -135,6 +140,48 @@ double modelDefaultTolerance(const modelDefinition* def)
     }
 
     return def->defaultExperiment.tolerance;
+}
+
+void computeCalculatedParameters(modelInstance* model)
+{
+    if (model && model->def->calculateParameters) {
+        model->def->calculateParameters(model);
+    }
+}
+
+/**
+ * Implementation notes for initializeModel():
+ * - The calculated parameters are computed first, so that the model's
+ *   initialize function can use them
+ */
+simStatus initializeModel(modelInstance* model)
+{
+    if (!model) {
+        return SIM_ERROR;
+    }
+
+    computeCalculatedParameters(model);
+
+    if (!model->def->initialize) {
+        return SIM_OK;
+    }
+    return model->def->initialize(model);
+}
+
+/**
+ * Implementation notes for modelError():
+ * - vsnprintf() truncates a message that does not fit and always
+ *   terminates it
+ */
+simStatus modelError(modelInstance* model, const char* format, ...)
+{
+    if (model && format) {
+        va_list args;
+        va_start(args, format);
+        vsnprintf(model->message, sizeof(model->message), format, args);
+        va_end(args);
+    }
+    return SIM_ERROR;
 }
 
 /**
@@ -166,6 +213,9 @@ void* modelVariableAddress(modelInstance* model, size_t index)
             break;
         case VAR_LOCAL:
             block = model->locals;
+            break;
+        case VAR_CALCULATED_PARAMETER:
+            block = model->params;
             break;
     }
 

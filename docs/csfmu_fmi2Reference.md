@@ -466,7 +466,7 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c);
 ```
 
 #### Description
-Moves the FMU from the instantiated state into initialization mode. The function does not change any variable: all variables received their start values in `fmi2Instantiate` (or `fmi2Reset`), and values the integration tool has set since then are kept. The integration tool can continue to set parameters, inputs and states by calling `fmi2SetReal`, `fmi2SetInteger`, etc. before calling `fmi2ExitInitializationMode` to finalize initialization.
+Moves the FMU from the instantiated state into initialization mode. The function does not change any variable: all variables received their start values in `fmi2Instantiate` (or `fmi2Reset`), and values the integration tool has set since then are kept. The integration tool can continue to set parameters, inputs and states (except states published with `initial="approx"`) by calling `fmi2SetReal`, `fmi2SetInteger`, etc. before calling `fmi2ExitInitializationMode` to finalize initialization.
 
 #### Parameters
 | Name | Type | Description |
@@ -490,8 +490,8 @@ Moves the FMU from the instantiated state into initialization mode. The function
 | `fmi2Instantiate` / `fmi2Reset` | Every variable is set to the start value declared in the model's variable table |
 | Instantiated state | Integration tool may set parameters, inputs and states |
 | `fmi2EnterInitializationMode` | Nothing (values are kept) |
-| Initialization mode | Integration tool may set parameters, inputs and states |
-| `fmi2ExitInitializationMode` | Outputs are computed from the initial values |
+| Initialization mode | Integration tool may set parameters, inputs and states with `initial="exact"` |
+| `fmi2ExitInitializationMode` | The model is initialized (calculated parameters, its initialize function), then the outputs are computed from the initial values |
 
 #### Usage Example
 ```c
@@ -546,7 +546,7 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c);
 ```
 
 #### Description
-Completes the initialization phase and transitions the FMU from initialization mode to initialized/step mode. The outputs are computed from the initial states, inputs and parameters, so they are valid at the first communication point. After this function returns successfully, the FMU is ready to execute simulation steps via `fmi2DoStep`. This is the final step before beginning the simulation loop. No more initialization-time variable setting is allowed after this call.
+Completes the initialization phase and transitions the FMU from initialization mode to initialized/step mode. First the model is initialized: its calculated parameters are computed, then its initialize function runs (if it has one), which may replace the start values of states published with `initial="approx"` (e.g. by a steady state). Then the outputs are computed from the initial states, inputs and parameters, so they are valid at the first communication point. After this function returns successfully, the FMU is ready to execute simulation steps via `fmi2DoStep`. This is the final step before beginning the simulation loop. No more initialization-time variable setting is allowed after this call.
 
 #### Parameters
 | Name | Type | Description |
@@ -557,7 +557,7 @@ Completes the initialization phase and transitions the FMU from initialization m
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Successfully exited initialization mode and ready for stepping |
-| `fmi2Error` | NULL component or FMU not in initialization mode |
+| `fmi2Error` | NULL component, FMU not in initialization mode, or the model cannot start: its initialize function reported an error (the model's reason is logged, e.g. `Initialization failed: init_mode 3 is neither 1 (fixed_start) nor 2 (steady_state).`) or left a state that is not finite. The FMU enters the Error state |
 
 #### FMI State Requirements
 **Can be called in**: **Initialization Mode** (after `fmi2EnterInitializationMode`)
@@ -601,6 +601,7 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 
 #### Notes
 - **Initial outputs**: Calls the model's output equation once, so that `fmi2GetReal` returns y(t0) = h(x0, u0) right after initialization
+- **The model initializes once**: Calculated parameters, then the model's initialize function, then the outputs. A failure is `fmi2Error` (FMI 2.0 has no way to repeat this call, so there is no `fmi2Discard`)
 - **States and fixed parameters are frozen**: After this call, states and parameters declared as `VAR_FIXED` can no longer be set
 - **No parameter validation**: The FMU trusts that the integration tool has set all required values during initialization mode
 - **Finalization point**: After this call, `fmi2EnterInitializationMode` cannot be called again without calling `fmi2Reset` first
@@ -629,12 +630,14 @@ All access functions below work the same way:
 | Parameter (`VAR_TUNABLE`, default) | Instantiated, Initialization Mode, Step Complete |
 | Parameter (`VAR_FIXED`) | Instantiated, Initialization Mode |
 | State | Instantiated, Initialization Mode |
+| State with `initial="approx"` | Instantiated |
+| Calculated parameter | Never |
 | Output | Never |
 | Local variable | Never |
 
 Integration tools should always look up value references by variable name in the `modelDescription.xml` and never hardcode them.
 
-**Outputs and local variables are always consistent with the other variables.** Every setter, and `fmi2SetupExperiment` (which moves the time), marks them as stale, and every getter recomputes them first if needed (by calling the model's output equation, which computes both). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last. Which inputs an output depends on is declared by the model (`.dependsOn`) and published in the `ModelStructure` of the `modelDescription.xml`. The `pi_controller` model has outputs with direct feedthrough: `u` and `e` change as soon as `r` or `y_m` is set.
+**Outputs, local variables and calculated parameters are always consistent with the other variables.** Every setter, and `fmi2SetupExperiment` (which moves the time), marks them as stale, and every getter recomputes them first if needed (by calling the model's calculateParameters function, then its output equation, which computes outputs and local variables). `fmi2DoStep` also recomputes the calculated parameters first if a variable was set since the last step. Calculated parameters are listed as `InitialUnknowns` in the `ModelStructure`. Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last. Which inputs an output depends on is declared by the model (`.dependsOn`) and published in the `ModelStructure` of the `modelDescription.xml`. The `pi_controller` model has outputs with direct feedthrough: `u` and `e` change as soon as `r` or `y_m` is set.
 
 **Example for the `first_order` model:**
 

@@ -19,6 +19,7 @@ where **t** is the time, **x** are the states, **u** are the inputs and **y** ar
 - `f` and `h` may depend explicitly on time. `model->time` is the time of the integrator stage inside `f` and the communication point inside `h`.
 - `h` may use the inputs directly (direct feedthrough). You declare which inputs an output depends on with `.dependsOn`, and the `modelDescription.xml` publishes it.
 - Besides the outputs, `h` may compute **local variables**: values that can be read from outside but are no outputs, such as a heat flow or an error term.
+- The initial states are the start values, or the model computes them when the initialization is finished, e.g. a steady state. Parameters that follow from other parameters (such as a time constant `R*C`) can be published as **calculated parameters**.
 
 How to write the two equations is explained in [getting started](csfmu_gettingStarted.md#equationsc-or-equationscpp).
 
@@ -27,6 +28,8 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 - **Parameters**, **inputs**, **outputs** and **local variables** can be of type `double`, `int` or `bool`.
 - Local variables are computed by the output equation and published read-only (`causality="local"`). They are always consistent with the other variables, like outputs.
 - Parameters are tunable (they can be changed between simulation steps) or fixed (`.variability = VAR_FIXED`, they can only be set before the simulation starts).
+- Calculated parameters are computed from the parameters and published read-only (`causality="calculatedParameter"`). They are consistent with the parameters in every state of the FMU, also during the initialization.
+- A state whose start value the model may replace during the initialization is published with `initial="approx"`; it can be set before the initialization starts.
 - **States** are of type `double`, because the integrators work on a vector of doubles.
 
 ## Integration
@@ -56,6 +59,6 @@ The repository ships demo models, each of which showcases a certain feature. Use
 | [`forced_pt1`](../src/models/forced_pt1/) | Explicit time dependence in both equations (`model->time`). The integrator evaluates every stage at its own time |
 | [`pi_controller`](../src/models/pi_controller/) | Direct feedthrough: its outputs react to an input as soon as it is set, without a simulation step (`.dependsOn`) |
 | [`fault_injection`](../src/models/fault_injection/) | A model without inputs, and a numerical failure on request: the FMU discards the step and rolls back (`fmi2Discard`) |
-| [`thermal_mass`](../src/models/thermal_mass/) | A local variable (`Q_loss`, the heat loss to the ambient) that can be read but not set, next to fixed and tunable parameters with SI units |
+| [`thermal_mass`](../src/models/thermal_mass/) | A local variable (`Q_loss`, the heat loss to the ambient) that can be read but not set; a calculated parameter (`tau = R*C`); an initialization that can start in steady state (`init_mode`), with a state published as `initial="approx"` |
 
 When the template learns a new kind of model, this page and the list of demo models are extended.

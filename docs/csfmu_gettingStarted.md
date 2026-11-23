@@ -84,7 +84,7 @@ This header declares the storage of your model as plain structs. The struct name
 
 | Struct | Content | Allowed field types |
 |--------|---------|---------------------|
-| `Params` | Model parameters | `double`, `int`, `bool` |
+| `Params` | Model parameters, and the parameters your model calculates from them (see [Initialization](#initialization)) | `double`, `int`, `bool` |
 | `Inputs` | Input signals | `double`, `int`, `bool` |
 | `Outputs` | Output signals | `double`, `int`, `bool` |
 | `Locals` | Computed values that can be read from outside, but are no outputs (see [Local variables](#local-variables)) | `double`, `int`, `bool` |
@@ -274,6 +274,56 @@ void thermalMassOutputs(modelInstance* model)
 
 The output equation runs at the communication points and whenever a variable was set since, so local variables are always consistent with the other variables, exactly like outputs. It does not run at the stages of the integrator, so the state equation never reads `model->locals`: a term that both equations need goes into a helper function, as `heatLoss` above.
 
+#### Initialization
+
+Two optional functions let your model prepare a simulation. You list them in the model definition (`.calculateParameters` and `.initialize`) next to your two equations.
+
+**Calculated parameters** are values that follow from the parameters, such as a time constant `tau = R*C`. Declare them as fields of `Params` with `CALCULATED_PARAM(field)` and compute them in a function that reads nothing but the parameters:
+
+```c
+/* variables.c */
+{ CALCULATED_PARAM(tau), .unit = "s", .variability = VAR_FIXED, .description = "Time constant tau = R*C" },
+
+/* equations.c */
+void thermalMassParameters(modelInstance* model)
+{
+    Params* p = model->params;
+    p->tau = p->R * p->C;
+}
+```
+
+The FMU calls it whenever a parameter may have changed: before a variable is read after a set, before the initialization, and at the start of a step after a set. So `tau` is always consistent with `R` and `C`, also while the integration tool is still setting them, and your equations can read `p->tau` like any parameter. The integration tool can read a calculated parameter, but never set it. Give it `.variability = VAR_FIXED` if it only depends on fixed parameters, otherwise leave the default `VAR_TUNABLE`.
+
+**The initialize function** runs once per simulation, when the initialization is finished (`fmi2ExitInitializationMode`): after all start values and parameters are set and the calculated parameters are computed, before the outputs of the first communication point. It can set initial states that the model computes itself, such as a steady state, and the [internals](#internals). It returns `SIM_OK`, or explains with `modelError` why the model cannot start:
+
+```c
+simStatus thermalMassInitialize(modelInstance* model)
+{
+    const Params* p  = model->params;
+    const Inputs* in = model->inputs;
+    States*       x  = (States*)model->states;
+
+    switch (p->init_mode) {
+        case THERMAL_MASS_FIXED_START:
+            return SIM_OK;                       /* T keeps its start value */
+        case THERMAL_MASS_STEADY_STATE:
+            x->T = p->T_amb + p->R * in->P;      /* dT/dt = 0 */
+            return SIM_OK;
+        default:
+            return modelError(model, "init_mode %d is neither %d (fixed_start) nor %d (steady_state).",
+                              p->init_mode, THERMAL_MASS_FIXED_START, THERMAL_MASS_STEADY_STATE);
+    }
+}
+```
+
+`modelError` takes a `printf`-like message; the FMU fails the initialization and logs it. A state that the initialize function may replace is declared with `.initial = VAR_APPROX`:
+
+```c
+{ STATE(T), .start = 293.15, .unit = "K", .initial = VAR_APPROX, .description = "Temperature of the mass" },
+```
+
+Its start value is then published as a guess (`initial="approx"`): the integration tool can set it only before the initialization starts, and must not expect it to survive. The `thermal_mass` model (`src/models/thermal_mass/`) uses all three parts.
+
 #### C++ Models
 
 You can also implement your equations in C++ by naming the file `equations.cpp`. This lets you use classes, the C++ standard library, templates, and other C++ features inside your model.
@@ -355,6 +405,7 @@ Every variable you want to be visible from outside gets one entry. The entry sta
 | Macro | Declares a field of | Role |
 |-------|---------------------|------|
 | `PARAM(field)` | `Params` | parameter |
+| `CALCULATED_PARAM(field)` | `Params` | calculated parameter (see [Initialization](#initialization)) |
 | `INPUT(field)` | `Inputs` | input |
 | `OUTPUT(field)` | `Outputs` | output |
 | `LOCAL(field)` | `Locals` | local variable |
@@ -371,7 +422,8 @@ After the macro you can add optional properties:
 | `.description` | Human readable description | `.description = "Prandtl number"` |
 | `.min`, `.max` | Bounds | `.min = SOME(0.0)` |
 | `.nominal` | Nominal value (real variables) | `.nominal = 1.0` |
-| `.variability` | Parameters only: `VAR_TUNABLE` (default) or `VAR_FIXED` | `.variability = VAR_FIXED` |
+| `.variability` | Parameters and calculated parameters only: `VAR_TUNABLE` (default) or `VAR_FIXED` | `.variability = VAR_FIXED` |
+| `.initial` | States only: `VAR_EXACT` (default) or `VAR_APPROX` if the initialize function may replace the start value (see [Initialization](#initialization)) | `.initial = VAR_APPROX` |
 | `.dependsOn` | Outputs only: the inputs the output depends on directly (see [below](#direct-feedthrough)) | `.dependsOn = ""` |
 
 ```c
@@ -395,7 +447,7 @@ static const modelVariable VARIABLES[] = {
 Things to know:
 
 1. **The order of the entries is free.** Group them however you find readable.
-2. **Names must be unique.** By default a variable is published under its field name. Here `Outputs` and `States` both have a field `x`, so the states are published under a different name with `STATE_AS(field, "name")`. The same exists as `PARAM_AS`, `INPUT_AS`, `OUTPUT_AS` and `LOCAL_AS`.
+2. **Names must be unique.** By default a variable is published under its field name. Here `Outputs` and `States` both have a field `x`, so the states are published under a different name with `STATE_AS(field, "name")`. The same exists as `PARAM_AS`, `CALCULATED_PARAM_AS`, `INPUT_AS`, `OUTPUT_AS` and `LOCAL_AS`.
 3. **Every state must be listed.** All fields of `States` have to appear in the table. The start value of a state is its initial condition.
 4. **List every parameter, input, output and local variable too.** Only listed variables appear in the `modelDescription.xml`. The build does not stop you from leaving out a field of `Params`, `Inputs`, `Outputs` or `Locals`, but such a field cannot be reached from outside: an input that is never set, an output nobody can read, a parameter without a start value. Memory that your model needs but does not publish belongs into [`Internals`](#internals).
 
@@ -447,6 +499,7 @@ const modelDefinition MODEL_DEFINITION = {
 | `getStateDerivatives`, `getOutputs` | Your two equations |
 | `integrate` | Numerical integration method to use, see `include/integrator.h` |
 | `maxStepSize` | Maximum internal step size for stability |
+| `calculateParameters`, `initialize` | Optional: computes the calculated parameters, and prepares the simulation (see [Initialization](#initialization)). `calculateParameters` is required if the model has calculated parameters |
 | `defaultExperiment` | Optional suggested simulation settings. Its `.tolerance` is also the relative tolerance the FMU uses when the integration tool defines none or an invalid one (`1e-6` if not set) |
 
 **Solver step size matters**: For systems like the Lorenz attractor, choose `maxStepSize` small enough to maintain numerical stability. The FMU will automatically subdivide larger simulation steps.
@@ -499,9 +552,10 @@ You do not write this file. During the build, a small program (`src/fmi2ModelDes
 | Role | causality | variability | initial |
 |------|-----------|-------------|---------|
 | parameter | `parameter` | `tunable` or `fixed` | `exact` |
+| calculated parameter | `calculatedParameter` | `tunable` or `fixed` | `calculated` |
 | input | `input` | `continuous` (real) or `discrete` (integer, boolean) | |
 | output | `output` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
-| state | `local` | `continuous` | `exact` |
+| state | `local` | `continuous` | `exact` (`approx` with `.initial = VAR_APPROX`) |
 | local variable | `local` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
 
 The model name becomes the `modelIdentifier`, which is also the name of the binary inside the FMU. The `.name` of your model definition must therefore be equal to the name of your model folder; the build stops if it is not.
@@ -516,7 +570,7 @@ result = simulate_fmu(
 )
 ```
 
-Since the states are published, initial conditions can be set from outside like any other start value. Parameters marked `VAR_FIXED` and states can be set until the initialization is finished; inputs and tunable parameters also between steps. Outputs and local variables are computed by the model and can never be set. States and local variables share the causality `local`; `initial` tells them apart.
+Since the states are published, initial conditions can be set from outside like any other start value. Parameters marked `VAR_FIXED` and states can be set until the initialization is finished; inputs and tunable parameters also between steps. A state declared with `.initial = VAR_APPROX` can only be set before the initialization starts. Outputs, local variables and calculated parameters are computed by the model and can never be set. States and local variables share the causality `local`; `initial` tells them apart.
 
 #### Direct feedthrough
 

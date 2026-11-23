@@ -11,6 +11,7 @@
  * - The role of a variable determines causality, variability and initial.
  * - Local variables are published (readable), but are not part of the
  *   ModelStructure.
+ * - Calculated parameters are initial unknowns of the ModelStructure.
  * - The inputs an output depends on directly (dependsOn) become the
  *   dependencies of the output in the ModelStructure.
  * - The capability flags and log categories describe fmi2Functions.c and
@@ -68,8 +69,19 @@ static size_t sizeOfBlock(const modelDefinition* def, varRole role)
         case VAR_OUTPUT:    return def->sizeOfOutputs;
         case VAR_STATE:     return def->numberOfStates * sizeof(double);
         case VAR_LOCAL:     return def->sizeOfLocals;
+        case VAR_CALCULATED_PARAMETER: return def->sizeOfParams;
     }
     return 0;
+}
+
+/**
+ * Whether variables of the given role publish a start value. Outputs, local
+ * variables and calculated parameters are computed by the model
+ * (initial="calculated"), so they have none.
+ */
+static bool hasStartValue(varRole role)
+{
+    return role == VAR_PARAMETER || role == VAR_INPUT || role == VAR_STATE;
 }
 
 /**
@@ -258,8 +270,11 @@ static int validateDependencies(const modelDefinition* def, const modelVariable*
  * - Every variable lies inside its storage block
  * - The states cover the state vector exactly (every double of the struct
  *   States is published once)
- * - Start values lie within [min, max]
+ * - Start values lie within [min, max] (for variables that have one)
  * - dependsOn is only used by outputs and names inputs of this model
+ * - initial = VAR_APPROX is only used by states, and only if the model has
+ *   an initialize function that can replace the start value
+ * - A model with calculated parameters has a calculateParameters function
  */
 static int validateDefinition(const modelDefinition* def, const char* modelIdentifier)
 {
@@ -296,6 +311,7 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
     }
 
     size_t numberOfStateVariables = 0;
+    bool hasCalculatedParameters = false;
 
     for (size_t k = 0; k < def->numberOfVariables; k++) {
         const modelVariable* variable = &def->variables[k];
@@ -310,8 +326,8 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
         for (size_t j = 0; j < k; j++) {
             if (def->variables[j].name && strcmp(def->variables[j].name, variable->name) == 0) {
                 fprintf(stderr, "error: variable name '%s' is used more than once "
-                                "(use PARAM_AS, INPUT_AS, OUTPUT_AS, LOCAL_AS or STATE_AS to publish "
-                                "a field under a different name)\n", variable->name);
+                                "(use PARAM_AS, CALCULATED_PARAM_AS, INPUT_AS, OUTPUT_AS, LOCAL_AS or "
+                                "STATE_AS to publish a field under a different name)\n", variable->name);
                 problems++;
             }
         }
@@ -341,16 +357,39 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
         }
 
         /* Start value must respect the bounds */
-        if ((variable->min.set && variable->start < variable->min.value) ||
-            (variable->max.set && variable->start > variable->max.value)) {
+        if (hasStartValue(variable->role) &&
+            ((variable->min.set && variable->start < variable->min.value) ||
+             (variable->max.set && variable->start > variable->max.value))) {
             fprintf(stderr, "error: start value of '%s' lies outside [min, max]\n", variable->name);
             problems++;
+        }
+
+        /* Only the initialization of a state can replace its start value */
+        if (variable->initial == VAR_APPROX) {
+            if (variable->role != VAR_STATE) {
+                fprintf(stderr, "error: '%s' is not a state, only states can have .initial = VAR_APPROX\n",
+                        variable->name);
+                problems++;
+            } else if (!def->initialize) {
+                fprintf(stderr, "error: state '%s' has .initial = VAR_APPROX, but the model has no initialize "
+                                "function that could replace its start value\n", variable->name);
+                problems++;
+            }
+        }
+
+        if (variable->role == VAR_CALCULATED_PARAMETER) {
+            hasCalculatedParameters = true;
         }
 
         /* Dependencies must be inputs of this model */
         if (variable->dependsOn) {
             problems += validateDependencies(def, variable);
         }
+    }
+
+    if (hasCalculatedParameters && !def->calculateParameters) {
+        fprintf(stderr, "error: the model has calculated parameters but no calculateParameters function\n");
+        problems++;
     }
 
     if (numberOfStateVariables != def->numberOfStates) {
@@ -444,6 +483,7 @@ static const char* roleTitle(varRole role)
         case VAR_OUTPUT:    return "Outputs";
         case VAR_STATE:     return "States";
         case VAR_LOCAL:     return "Locals";
+        case VAR_CALCULATED_PARAMETER: return "Calculated parameters";
     }
     return "";
 }
@@ -453,18 +493,21 @@ static const char* roleTitle(varRole role)
  *
  * Mapping of the variable's role to FMI attributes:
  *
- *   role       causality   variability           initial      start
- *   parameter  parameter   tunable / fixed       exact        yes
- *   input      input       continuous / discrete -            yes
- *   output     output      continuous / discrete calculated   no
- *   state      local       continuous            exact        yes
- *   local      local       continuous / discrete calculated   no
+ *   role        causality            variability           initial       start
+ *   parameter   parameter            tunable / fixed       exact         yes
+ *   calculated  calculatedParameter  tunable / fixed       calculated    no
+ *   parameter
+ *   input       input                continuous / discrete -             yes
+ *   output      output               continuous / discrete calculated    no
+ *   state       local                continuous            exact/approx  yes
+ *   local       local                continuous / discrete calculated    no
  *
  * Real inputs, outputs and locals are continuous, Integer and Boolean ones
  * are discrete (FMI 2.0 only allows continuous for Real variables). States
  * and local variables share causality "local"; initial tells them apart: a
- * state can be set before the simulation (exact), a local variable is
- * computed by the model (calculated).
+ * state can be set before the simulation (exact; approx only before the
+ * initialization, which may replace it), a local variable is computed by
+ * the model (calculated).
  */
 static void writeScalarVariable(FILE* file, const modelVariable* variable, size_t valueReference)
 {
@@ -489,10 +532,16 @@ static void writeScalarVariable(FILE* file, const modelVariable* variable, size_
             break;
         case VAR_STATE:
             causality = "local";
-            initial = "exact";
+            initial = (variable->initial == VAR_APPROX) ? "approx" : "exact";
             break;
         case VAR_LOCAL:
             causality = "local";
+            initial = "calculated";
+            hasStart = false;
+            break;
+        case VAR_CALCULATED_PARAMETER:
+            causality = "calculatedParameter";
+            variability = (variable->variability == VAR_FIXED) ? "fixed" : "tunable";
             initial = "calculated";
             hasStart = false;
             break;
@@ -548,21 +597,25 @@ static void writeScalarVariable(FILE* file, const modelVariable* variable, size_
 }
 
 /**
- * Write a list of Unknown elements, one per output
+ * Write a list of Unknown elements, one per variable whose role is
+ * included (outputs in <Outputs>; outputs and calculated parameters in
+ * <InitialUnknowns>)
  *
- * The index refers to the position in ModelVariables (1-based).
+ * The index refers to the position in ModelVariables (1-based), so the list
+ * is in ascending order as FMI 2.0 requires.
  *
  * With dependencies, the inputs an output depends on directly are written
  * as declared by the model (dependsOn). An output that declares nothing
  * gets no dependencies attribute, which means "depends on all knowns".
  */
-static void writeOutputUnknowns(FILE* file, const modelDefinition* def, const char* element,
-                                bool withDependencies)
+static void writeUnknowns(FILE* file, const modelDefinition* def, const char* element,
+                          bool withCalculatedParameters, bool withDependencies)
 {
     bool opened = false;
 
     for (size_t k = 0; k < def->numberOfVariables; k++) {
-        if (def->variables[k].role != VAR_OUTPUT) {
+        varRole role = def->variables[k].role;
+        if (role != VAR_OUTPUT && !(withCalculatedParameters && role == VAR_CALCULATED_PARAMETER)) {
             continue;
         }
         if (!opened) {
@@ -668,12 +721,12 @@ static void writeModelDescription(FILE* file, const modelDefinition* def)
 
     /* Model structure (the initial unknowns also depend on parameters and
        states, which dependsOn does not describe: "depends on all knowns").
-       Local variables are not listed: FMI 2.0, section 2.2.8 (ModelStructure)
-       lists outputs in <Outputs>, and outputs, calculated parameters and (for
-       Model Exchange) states and derivatives in <InitialUnknowns> */
+       FMI 2.0, section 2.2.8 (ModelStructure) lists outputs in <Outputs>, and
+       outputs, calculated parameters and (for Model Exchange) states and
+       derivatives in <InitialUnknowns>. Local variables are not listed */
     fputs("    <ModelStructure>\n", file);
-    writeOutputUnknowns(file, def, "Outputs", true);
-    writeOutputUnknowns(file, def, "InitialUnknowns", false);
+    writeUnknowns(file, def, "Outputs", false, true);
+    writeUnknowns(file, def, "InitialUnknowns", true, false);
     fputs("    </ModelStructure>\n\n", file);
 
     fputs("</fmiModelDescription>\n", file);

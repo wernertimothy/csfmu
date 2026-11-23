@@ -55,6 +55,22 @@ typedef struct modelInstance modelInstance;
 #define MODEL_DEFAULT_TOLERANCE 1e-6
 
 /**
+ * @brief Size of the message buffer of a model instance (see modelError()).
+ */
+#define MODEL_MESSAGE_SIZE 256
+
+/**
+ * @brief Result of a model-layer computation that can fail.
+ *
+ * FMI-agnostic; the FMI adapter maps it to its own status codes.
+ */
+typedef enum {
+    SIM_OK,       /**< Done */
+    SIM_DISCARD,  /**< Numerical failure that the caller may recover from (e.g. with a smaller step) */
+    SIM_ERROR     /**< The model or its setup is invalid; the reason is in model->message */
+} simStatus;
+
+/**
  * @brief Function pointer type for computing state derivatives.
  *
  * Model-specific implementations compute dx/dt = f(t, x, u) and store
@@ -95,6 +111,34 @@ typedef void (*integrateFn)(modelInstance* model, double stepSize);
 typedef void (*outputsFn)(modelInstance* model);
 
 /**
+ * @brief Function pointer type for computing the calculated parameters.
+ *
+ * Model-specific implementations compute the calculated parameters (see
+ * CALCULATED_PARAM()) from the parameters and store them in model->params.
+ * They read nothing but the parameters, because the function is called
+ * whenever a parameter may have changed: before a variable is read after a
+ * set, before the initialization and at the start of a step after a set.
+ *
+ * @param model Pointer to the model instance
+ */
+typedef void (*calculateParametersFn)(modelInstance* model);
+
+/**
+ * @brief Function pointer type for the initialization of a model.
+ *
+ * Called once per simulation when the initialization is finished
+ * (fmi2ExitInitializationMode): after all start values and parameters are
+ * set and the calculated parameters are computed, before the outputs are
+ * computed for the first communication point. It may set the states that
+ * are declared with .initial = VAR_APPROX, and the internals.
+ *
+ * @param model Pointer to the model instance
+ *
+ * @return SIM_OK, or the result of modelError() if the model cannot start
+ */
+typedef simStatus (*initializeFn)(modelInstance* model);
+
+/**
  * @brief Data type of a model variable.
  *
  * Corresponds to the C type of the struct field the variable lives in.
@@ -116,8 +160,10 @@ typedef enum {
     VAR_INPUT,      /**< Set from outside, lives in model->inputs */
     VAR_OUTPUT,     /**< Computed by the output equation, lives in model->outputs */
     VAR_STATE,      /**< Continuous state, lives in model->states */
-    VAR_LOCAL       /**< Computed by the output equation and published read-only, but not
+    VAR_LOCAL,      /**< Computed by the output equation and published read-only, but not
                          part of the interface (no output), lives in model->locals */
+    VAR_CALCULATED_PARAMETER  /**< Computed from the parameters by calculateParameters and
+                                   published read-only, lives in model->params */
 } varRole;
 
 /**
@@ -127,6 +173,15 @@ typedef enum {
     VAR_TUNABLE,  /**< May be changed between simulation steps (default) */
     VAR_FIXED     /**< May only be changed before the simulation starts */
 } varVariability;
+
+/**
+ * @brief How a state is initialized.
+ */
+typedef enum {
+    VAR_EXACT,   /**< The state starts with its start value (default) */
+    VAR_APPROX   /**< The start value is a guess: the model's initialize function may
+                      replace it (e.g. by a steady state) */
+} varInitial;
 
 /**
  * @brief Optional real value (used for bounds that may be absent).
@@ -142,7 +197,7 @@ typedef struct {
 /**
  * @brief Description of one model variable.
  *
- * Declared with the PARAM(), INPUT(), OUTPUT(), LOCAL() and STATE() macros, which
+ * Declared with the PARAM(), CALCULATED_PARAM(), INPUT(), OUTPUT(), LOCAL() and STATE() macros, which
  * fill in name, type, role and offset from the struct field itself.
  */
 typedef struct {
@@ -156,7 +211,8 @@ typedef struct {
     optReal        min;          /**< Lower bound (optional) */
     optReal        max;          /**< Upper bound (optional) */
     double         nominal;      /**< Nominal value, 0 = not set (real variables only) */
-    varVariability variability;  /**< Parameters only, defaults to VAR_TUNABLE */
+    varVariability variability;  /**< Parameters and calculated parameters only, defaults to VAR_TUNABLE */
+    varInitial     initial;      /**< States only, defaults to VAR_EXACT */
     const char*    dependsOn;    /**< Outputs only: names of the inputs the output depends on
                                       directly, separated by spaces. "" = none,
                                       NULL (default) = all inputs */
@@ -215,6 +271,10 @@ typedef struct {
     integrateFn        integrate;            /**< Numerical integration method */
     double             maxStepSize;          /**< Largest allowed integration step */
 
+    calculateParametersFn calculateParameters;  /**< Calculated parameters (optional, required
+                                                     if the model has calculated parameters) */
+    initializeFn          initialize;           /**< Initialization (optional) */
+
     modelExperiment defaultExperiment;  /**< Suggested simulation settings */
 } modelDefinition;
 
@@ -232,6 +292,7 @@ typedef struct {
  *   neither reset by resetModel() nor part of saveModelData())
  * - A buffer for rolling back a failed step (see stepStart)
  * - Function pointers for model equations and integration
+ * - A message buffer that explains the last error (see modelError())
  *
  * Memory layout is managed by newModel() and freeModel().
  *
@@ -250,7 +311,7 @@ struct modelInstance {
                                                   by the output equation together with the outputs */
     void* internals;                         /**< Internals block [def->sizeOfInternals bytes], not published.
                                                   The state and output equations only read it */
-    double* states;                         /**< Array of current state values [nx] */
+    double* states;                          /**< Array of current state values [nx] */
     double* stateDerivatives;                /**< Array of computed state derivatives [nx] */
     double* scratch;                         /**< Work memory for the integrator [MODEL_SCRATCH_VECTORS * nx] */
     void* stepStart;                         /**< Model data at the start of the current step, written by
@@ -259,6 +320,8 @@ struct modelInstance {
     stateDerivativesFn getStateDerivatives;  /**< Function to compute dx/dt = f(t,x,u) */
     integrateFn integrate;                   /**< Function to perform time integration */
     outputsFn getOutputs;                    /**< Function to compute y = h(t,x,u) */
+    char message[MODEL_MESSAGE_SIZE];        /**< Reason of the last SIM_ERROR (see modelError()), "" if
+                                                  none. Cleared by resetModel(), not part of the model data */
 };
 
 /**
@@ -288,8 +351,9 @@ modelInstance* newModel(const modelDefinition* def);
  * Sets the time to 0 and the relative tolerance to the model's default
  * (see modelDefaultTolerance()), zeroes all storage blocks (including the
  * internals, which have no start values), writes the start value of every
- * variable in the definition's variable table and (re-)binds the function
- * pointers from the definition. This function is NULL-safe.
+ * variable in the definition's variable table, (re-)binds the function
+ * pointers from the definition and clears the message. This function is
+ * NULL-safe.
  *
  * @param model Pointer to the model instance to reset. May be NULL.
  */
@@ -304,6 +368,44 @@ void resetModel(modelInstance* model);
  *         MODEL_DEFAULT_TOLERANCE (also if def is NULL)
  */
 double modelDefaultTolerance(const modelDefinition* def);
+
+/**
+ * @brief Computes the calculated parameters of a model.
+ *
+ * Calls def->calculateParameters if the model has one, otherwise does
+ * nothing. It may be called any number of times.
+ *
+ * @param model Pointer to the model instance
+ */
+void computeCalculatedParameters(modelInstance* model);
+
+/**
+ * @brief Initializes a model for a simulation.
+ *
+ * Computes the calculated parameters, then calls def->initialize if the
+ * model has one. Call it once per simulation, after all start values and
+ * parameters are set and before the outputs are computed for the first time.
+ *
+ * @param model Pointer to the model instance
+ *
+ * @return SIM_OK, or the status of the model's initialize function (the
+ *         reason is in model->message)
+ */
+simStatus initializeModel(modelInstance* model);
+
+/**
+ * @brief Reports why a model cannot continue.
+ *
+ * Formats the message like printf into model->message (truncated to
+ * MODEL_MESSAGE_SIZE) and returns SIM_ERROR, so that a model function can
+ * fail with "return modelError(model, ...)".
+ *
+ * @param model  Pointer to the model instance
+ * @param format printf-like format of the message
+ *
+ * @return SIM_ERROR
+ */
+simStatus modelError(modelInstance* model, const char* format, ...);
 
 /**
  * @brief Returns the address of a variable's storage.
@@ -425,6 +527,10 @@ extern const modelDefinition MODEL_DEFINITION;
 /** Declares a field of the struct Params as a parameter. */
 #define PARAM(field)           MODEL_VARIABLE(VAR_PARAMETER, Params, field, #field, MODEL_VARIABLE_TYPES)
 
+/** Declares a field of the struct Params as a calculated parameter (computed, published read-only). */
+#define CALCULATED_PARAM(field) \
+    MODEL_VARIABLE(VAR_CALCULATED_PARAMETER, Params, field, #field, MODEL_VARIABLE_TYPES)
+
 /** Declares a field of the struct Inputs as an input. */
 #define INPUT(field)           MODEL_VARIABLE(VAR_INPUT, Inputs, field, #field, MODEL_VARIABLE_TYPES)
 
@@ -446,6 +552,8 @@ extern const modelDefinition MODEL_DEFINITION;
 #define INPUT_AS(field, name)  MODEL_VARIABLE(VAR_INPUT, Inputs, field, name, MODEL_VARIABLE_TYPES)
 #define OUTPUT_AS(field, name) MODEL_VARIABLE(VAR_OUTPUT, Outputs, field, name, MODEL_VARIABLE_TYPES)
 #define LOCAL_AS(field, name)  MODEL_VARIABLE(VAR_LOCAL, Locals, field, name, MODEL_VARIABLE_TYPES)
+#define CALCULATED_PARAM_AS(field, name) \
+    MODEL_VARIABLE(VAR_CALCULATED_PARAMETER, Params, field, name, MODEL_VARIABLE_TYPES)
 #define STATE_AS(field, name)  MODEL_VARIABLE(VAR_STATE, States, field, name, double: VAR_REAL)
 
 /** Sets an optional bound: .min = SOME(0.0) */

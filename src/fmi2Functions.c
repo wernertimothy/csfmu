@@ -173,6 +173,10 @@ typedef struct {
 #define STATE_fmi2GetString  STATE_fmi2GetReal
 /* Fixed parameters and states may only be set before the simulation starts */
 #define STATE_setBeforeSimulation (stateInstantiated | stateInitializationMode)
+/* A state with initial="approx" may only be set before the initialization
+ * (FMI 2.0, section 4.2.4, state machine table: in Initialization Mode only
+ * variables with initial="exact" and inputs can be set) */
+#define STATE_setBeforeInitialization (stateInstantiated)
 #define STATE_fmi2DoStep (stateStepComplete)
 #define STATE_fmi2Terminate (stateStepComplete | stateStepFailed)
 #define STATE_fmi2Reset (STATE_any)
@@ -414,12 +418,14 @@ static const char* resultKind(const modelVariable* variable)
 }
 
 /**
- * Recompute the outputs and the local variables if a variable was set since
- * they were computed (the output equation computes both)
+ * Recompute the calculated parameters, the outputs and the local variables
+ * if a variable was set since they were computed (the output equation
+ * computes the outputs and the locals, and may use the calculated parameters)
  */
 static void refreshOutputs(myFMU2* fmu)
 {
     if (fmu->outputsAreStale) {
+        computeCalculatedParameters(fmu->model);
         fmu->model->getOutputs(fmu->model);
         fmu->outputsAreStale = fmi2False;
     }
@@ -733,7 +739,7 @@ fmi2Status fmi2SetDebugLogging(
  *   fmi2Instantiate (or fmi2Reset), so values the integration tool has set
  *   since then are kept
  * - The integration tool can keep overriding parameters and states until
- *   fmi2ExitInitializationMode
+ *   fmi2ExitInitializationMode, except states with initial="approx"
  * - A missing fmi2SetupExperiment is tolerated: the experiment then starts
  *   at time 0 and has no stop time
  */
@@ -757,6 +763,16 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c)
  * Transitions to step mode, ready for simulation.
  *
  * Implementation notes:
+ * - Initializes the model (initializeModel()): computes the calculated
+ *   parameters, then calls the model's initialize function, which may set
+ *   the states with initial="approx" (e.g. to a steady state)
+ * - If the model cannot start, the function fails with fmi2Error and logs
+ *   the model's reason. A numerical failure (SIM_DISCARD) is an error here
+ *   too: FMI 2.0 has no way to repeat fmi2ExitInitializationMode. The model
+ *   keeps the values the initialization left; the outputs are marked stale,
+ *   so that values read in the error state match the other variables
+ * - A state that is not finite after the initialization is an error as well,
+ *   since every step would be discarded
  * - Computes the outputs from the initial states, inputs and parameters,
  *   so that outputs are valid at the first communication point
  */
@@ -767,8 +783,26 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
         return fmi2Error;
     }
 
+    modelInstance* model = myfmu2->model;
+
+    /* Initialize the model */
+    model->message[0] = '\0';
+    if (initializeModel(model) != SIM_OK) {
+        myfmu2->outputsAreStale = fmi2True;
+        return enterErrorState(myfmu2, "Initialization failed: %s",
+                               model->message[0] != '\0' ? model->message
+                                                         : "the model's initialize function reported an error.");
+    }
+
+    size_t failed = firstNonFiniteState(model);
+    if (failed < model->def->numberOfStates) {
+        myfmu2->outputsAreStale = fmi2True;
+        return enterErrorState(myfmu2, "Initialization failed: state '%s' is not finite.",
+                               stateName(model->def, failed));
+    }
+
     /* Compute initial outputs */
-    myfmu2->model->getOutputs(myfmu2->model);
+    model->getOutputs(model);
     myfmu2->outputsAreStale = fmi2False;
 
     /* Transition state */
@@ -786,9 +820,10 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
  * modelDescription.xml). The table tells type, role and storage location,
  * so none of the functions below knows anything about the model.
  *
- * Outputs and local variables are kept consistent with the other variables:
- * every fmi2SetXXX (and fmi2SetupExperiment, which moves the time) marks
- * them as stale and every fmi2GetXXX recomputes them if needed. This
+ * Outputs, local variables and calculated parameters are kept consistent
+ * with the other variables: every fmi2SetXXX (and fmi2SetupExperiment, which
+ * moves the time) marks them as stale and every fmi2GetXXX recomputes them
+ * if needed. This
  * way outputs can be read in initialization mode and a model with direct
  * feedthrough (y depends on u) answers with the inputs set last.
  ***************************************************/
@@ -840,7 +875,8 @@ static myFMU2* enterVariableAccess(
  * Checks that the value reference exists, that the variable has the
  * expected type and, for write access, that the variable may be set in the
  * current FMU state:
- * - Outputs and local variables can never be set
+ * - Outputs, local variables and calculated parameters can never be set
+ * - States with initial="approx" can only be set before the initialization
  * - States and fixed parameters can only be set before the simulation
  *   starts (until fmi2ExitInitializationMode)
  * - Inputs and tunable parameters can be set whenever setting is allowed
@@ -872,6 +908,17 @@ static void* resolveVariable(myFMU2* fmu, fmi2ValueReference vr, varType expecte
         }
         if (variable->role == VAR_LOCAL) {
             enterErrorState(fmu, "Variable '%s' is a local variable and cannot be set.", variable->name);
+            return NULL;
+        }
+        if (variable->role == VAR_CALCULATED_PARAMETER) {
+            enterErrorState(fmu, "Variable '%s' is a calculated parameter and cannot be set.", variable->name);
+            return NULL;
+        }
+
+        if (variable->role == VAR_STATE && variable->initial == VAR_APPROX &&
+            !(fmu->state & STATE_setBeforeInitialization)) {
+            enterErrorState(fmu, "Variable '%s' has initial=\"approx\" and can only be set before "
+                                 "fmi2EnterInitializationMode.", variable->name);
             return NULL;
         }
 
@@ -996,9 +1043,10 @@ fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *
  * Implementation notes:
  * - Looks up each value reference in the model's variable table
- * - Every variable (parameter, input, output, local, state) can be read
- * - Outputs and local variables are recomputed first if a variable was set
- *   since the last computation
+ * - Every variable (parameter, calculated parameter, input, output, local,
+ *   state) can be read
+ * - Calculated parameters, outputs and local variables are recomputed first
+ *   if a variable was set since the last computation
  */
 fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Real value[])
 {
@@ -1109,6 +1157,8 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *   from currentCommunicationPoint; beyond that the call fails with fmi2Error
  * - Refuses to step beyond the stop time of the experiment (if defined)
  * - Inputs are held constant during the step
+ * - If a variable was set since the last step, the calculated parameters are
+ *   recomputed first, so that the state equation sees them up to date
  * - The model owns the time: model->time is the internal clock
  * - Enforces the integrator contract (integrateFn in model.h): after every
  *   sub-step model->time must be its end, up to INTEGRATOR_TIME_FRACTION of
@@ -1206,6 +1256,12 @@ fmi2Status fmi2DoStep(
                           model->time, currentCommunicationPoint, clockDifference,
                           clockDifference / communicationStepSize);
         status = fmi2Warning;
+    }
+
+    /* A parameter set since the last step may change the calculated
+       parameters, which the state equation may use */
+    if (myfmu2->outputsAreStale) {
+        computeCalculatedParameters(model);
     }
 
     /* Remember the communication point to roll back a failed step */

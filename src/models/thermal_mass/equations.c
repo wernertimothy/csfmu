@@ -56,3 +56,46 @@ void thermalMassOutputs(modelInstance* model)
     out->T_out     = x->T;
     locals->Q_loss = heatLoss(p, x);
 }
+
+/**
+ * Calculated parameters: tau = R*C
+ *
+ * Reads nothing but the parameters: it is called whenever a parameter may
+ * have changed, also before the initialization.
+ */
+void thermalMassParameters(modelInstance* model)
+{
+    Params* p = model->params;
+
+    p->tau = p->R * p->C;
+}
+
+/**
+ * Initialization, called once when the initialization is finished
+ *
+ *     fixed_start:  T keeps its start value
+ *     steady_state: T = T_amb + R*P, so that dT/dt = 0 for the initial P
+ *
+ * Implementation notes:
+ * - T is declared with .initial = VAR_APPROX in variables.c, because this
+ *   function may replace its start value
+ * - init_mode is checked here: the bounds in the variable table are
+ *   published, but the FMU does not enforce them
+ */
+simStatus thermalMassInitialize(modelInstance* model)
+{
+    const Params* p  = model->params;
+    const Inputs* in = model->inputs;
+    States*       x  = (States*)model->states;
+
+    switch (p->init_mode) {
+        case THERMAL_MASS_FIXED_START:
+            return SIM_OK;
+        case THERMAL_MASS_STEADY_STATE:
+            x->T = p->T_amb + p->R * in->P;
+            return SIM_OK;
+        default:
+            return modelError(model, "init_mode %d is neither %d (fixed_start) nor %d (steady_state).",
+                              p->init_mode, THERMAL_MASS_FIXED_START, THERMAL_MASS_STEADY_STATE);
+    }
+}

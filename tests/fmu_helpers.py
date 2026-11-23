@@ -61,15 +61,25 @@ def variables_with(model_description, causality: str, type: str | None = None) -
 
 
 def states(model_description) -> list:
-    """The states: local variables with initial="exact", which can be set before the simulation.
+    """The states: local variables with a start value (initial="exact" or "approx").
 
     States and local variables share causality="local"; initial tells them apart.
     """
     return [
         v
         for v in model_description.modelVariables
-        if v.causality == "local" and v.initial == "exact"
+        if v.causality == "local" and v.initial in ("exact", "approx")
     ]
+
+
+def approx_states(model_description) -> list:
+    """The states whose start value the initialization may replace (initial="approx")."""
+    return [v for v in states(model_description) if v.initial == "approx"]
+
+
+def calculated_parameters(model_description) -> list:
+    """The calculated parameters: computed from the parameters, read-only."""
+    return variables_with(model_description, "calculatedParameter")
 
 
 def local_variables(model_description) -> list:
@@ -82,15 +92,30 @@ def local_variables(model_description) -> list:
 
 
 def settable_before_initialization(model_description) -> list:
-    """The variables the integration tool may set up to fmi2ExitInitializationMode.
+    """The variables the integration tool may set before fmi2EnterInitializationMode.
 
-    These are the parameters, the inputs and the states, but not the local variables.
+    These are the parameters, the inputs and all states, but not the local
+    variables and the calculated parameters (FMI 2.0, section 4.2.4).
     """
     settable = {id(v) for v in states(model_description)}
     return [
         v
         for v in model_description.modelVariables
         if v.causality in ("parameter", "input") or id(v) in settable
+    ]
+
+
+def settable_in_initialization_mode(model_description) -> list:
+    """The variables the integration tool may set in initialization mode.
+
+    These are the parameters, the inputs and the states with initial="exact"
+    (FMI 2.0, section 4.2.4): a state with initial="approx" can only be set before.
+    """
+    approx = {id(v) for v in approx_states(model_description)}
+    return [
+        v
+        for v in settable_before_initialization(model_description)
+        if id(v) not in approx
     ]
 
 

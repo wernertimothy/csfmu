@@ -7,7 +7,7 @@
 
 #include "model.h"
 
-typedef struct { double gain; int mode; bool enabled; double offset; } Params;
+typedef struct { double gain; int mode; bool enabled; double offset; double scaled_gain; int doubled; } Params;
 typedef struct { double u; double w; bool reset; int select; } Inputs;
 typedef struct { double y; double e; double z; int count; bool active; } Outputs;
 typedef struct { double rate; int level; bool saturated; double ratio; } Locals;
@@ -16,6 +16,8 @@ typedef struct { double x1; double x2; } States;
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
 static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
+static void calculateParameters(modelInstance* m) { (void)m; }
+static simStatus initialize(modelInstance* m) { (void)m; return SIM_OK; }
 
 static const modelVariable VARIABLES[] = {
     /* parameters: all types, bounds, nominal, fixed, renamed, undefined unit */
@@ -45,9 +47,13 @@ static const modelVariable VARIABLES[] = {
     { LOCAL(saturated) },
     { LOCAL_AS(ratio, "ratio_value") },
 
-    /* states */
+    /* states: exact (default) and approx */
     { STATE(x1), .start = 4.0 },
-    { STATE_AS(x2, "second_state"), .start = -1.0, .unit = "N/m" },
+    { STATE_AS(x2, "second_state"), .start = -1.0, .unit = "N/m", .initial = VAR_APPROX },
+
+    /* calculated parameters: tunable and fixed, bounds, renamed */
+    { CALCULATED_PARAM(scaled_gain), .unit = "N/m", .min = SOME(0.0), .description = "Gain times 10" },
+    { CALCULATED_PARAM_AS(doubled, "doubled_mode"), .variability = VAR_FIXED },
 };
 
 static const modelUnit UNITS[] = {
@@ -75,4 +81,7 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = outputEquation,
     .integrate           = integrator,
     .maxStepSize         = 0.01,
+
+    .calculateParameters = calculateParameters,
+    .initialize          = initialize,
 };

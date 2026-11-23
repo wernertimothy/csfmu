@@ -8,11 +8,14 @@ import pytest
 from fmpy.fmi1 import FMICallException
 
 from tests.fmu_helpers import (
+    approx_states,
+    calculated_parameters,
     changed_value,
     initialize,
     local_variables,
     read,
     settable_before_initialization,
+    settable_in_initialization_mode,
     start_value,
     states,
     variables_with,
@@ -50,9 +53,13 @@ def test_values_set_before_initialization_survive(new_fmu, model_description) ->
     """
     Values set in the instantiated state must not be overwritten by
     fmi2EnterInitializationMode. This is how fmpy applies start_values.
+
+    A state with initial="approx" is only a guess: the initialization may
+    replace it, so it is set but not expected to survive.
     """
     fmu = new_fmu()
     settable = settable_before_initialization(model_description)
+    approx = {v.name for v in approx_states(model_description)}
     expected = {}
 
     for variable in settable:
@@ -62,13 +69,14 @@ def test_values_set_before_initialization_survive(new_fmu, model_description) ->
     initialize(fmu)
 
     for variable in settable:
-        assert read(fmu, variable) == expected[variable.name], variable.name
+        if variable.name not in approx:
+            assert read(fmu, variable) == expected[variable.name], variable.name
 
 
 def test_values_can_be_set_in_initialization_mode(new_fmu, model_description) -> None:
-    """Parameters, inputs and states can be set during initialization mode."""
+    """Parameters, inputs and states with initial="exact" can be set during initialization mode."""
     fmu = new_fmu()
-    settable = settable_before_initialization(model_description)
+    settable = settable_in_initialization_mode(model_description)
     expected = {}
 
     fmu.setupExperiment(startTime=0.0)
@@ -97,6 +105,50 @@ def test_states_cannot_be_set_after_initialization(
     state = states(model_description)[0]
     with pytest.raises(FMICallException):
         write(initialized_fmu, state, 1.0)
+
+
+def test_approx_states_cannot_be_set_in_initialization_mode(
+    new_fmu, model_description
+) -> None:
+    """A state with initial="approx" can only be set before the initialization (FMI 2.0, 4.2.4)."""
+    approx = approx_states(model_description)
+    if not approx:
+        pytest.skip("the model has no state with initial=approx")
+
+    for variable in approx:
+        fmu = new_fmu()
+        write(fmu, variable, changed_value(variable))  # allowed when instantiated
+        fmu.setupExperiment(startTime=0.0)
+        fmu.enterInitializationMode()
+        with pytest.raises(FMICallException):
+            write(fmu, variable, changed_value(variable))
+
+
+def test_calculated_parameters_cannot_be_set(new_fmu, model_description) -> None:
+    """Calculated parameters are computed by the model and can never be set."""
+    calculated = calculated_parameters(model_description)
+    if not calculated:
+        pytest.skip("the model has no calculated parameters")
+
+    for variable in calculated:
+        fmu = new_fmu()
+        with pytest.raises(FMICallException):
+            write(fmu, variable, changed_value(variable, read(fmu, variable)))
+
+
+def test_calculated_parameters_are_initial_unknowns(model_description) -> None:
+    """Calculated parameters are published as initial unknowns (FMI 2.0, section 2.2.8)."""
+    calculated = calculated_parameters(model_description)
+    if not calculated:
+        pytest.skip("the model has no calculated parameters")
+
+    initial_unknowns = {
+        unknown.variable.name for unknown in model_description.initialUnknowns
+    }
+    for variable in calculated:
+        assert variable.initial == "calculated", variable.name
+        assert variable.start is None, variable.name
+        assert variable.name in initial_unknowns, variable.name
 
 
 def test_local_variables_have_no_start_value(model_description) -> None:
@@ -182,24 +234,33 @@ def test_variables_can_be_read_in_initialization_mode(
     Every variable can be read during initialization mode. Outputs are
     computed from the values set so far, so they already equal the outputs
     at the first communication point.
+
+    Unless the model has states with initial="approx": their initialization
+    at the end of initialization mode may move them, and the outputs with them.
     """
     fmu = new_fmu()
     outputs = variables_with(model_description, "output")
 
     fmu.setupExperiment(startTime=0.0)
     fmu.enterInitializationMode()
-    for variable in settable_before_initialization(model_description):
+    for variable in settable_in_initialization_mode(model_description):
         write(fmu, variable, changed_value(variable))
     during_initialization = [read(fmu, output) for output in outputs]
     fmu.exitInitializationMode()
 
-    assert [read(fmu, output) for output in outputs] == during_initialization
+    after_initialization = [read(fmu, output) for output in outputs]
+    if not approx_states(model_description):
+        assert after_initialization == during_initialization
 
 
 def test_outputs_follow_values_set_before_initialization(
     new_fmu, model_description
 ) -> None:
-    """Outputs read in the instantiated state reflect the values set so far."""
+    """Outputs read in the instantiated state reflect the values set so far.
+
+    Unless the model has states with initial="approx", which the
+    initialization may move (see test_variables_can_be_read_in_initialization_mode).
+    """
     fmu = new_fmu()
     outputs = variables_with(model_description, "output")
 
@@ -209,4 +270,6 @@ def test_outputs_follow_values_set_before_initialization(
 
     initialize(fmu)
 
-    assert [read(fmu, output) for output in outputs] == before_initialization
+    after_initialization = [read(fmu, output) for output in outputs]
+    if not approx_states(model_description):
+        assert after_initialization == before_initialization

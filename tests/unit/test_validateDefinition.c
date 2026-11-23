@@ -20,7 +20,7 @@
 
 #define IDENTIFIER "validation_model"
 
-typedef struct { double gain; int mode; } Params;
+typedef struct { double gain; double scaled; int mode; } Params;
 typedef struct { double u; double w; } Inputs;
 typedef struct { double y; } Outputs;
 typedef struct { double ratio; int level; } Locals;
@@ -29,20 +29,23 @@ typedef struct { double x1; double x2; } States;
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
 static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
+static void calculateParameters(modelInstance* m) { (void)m; }
+static simStatus initialize(modelInstance* m) { (void)m; return SIM_OK; }
 
 /* Indices into the variable table; X2 is last, so it can be left out */
-enum { GAIN, MODE, U, W, Y, RATIO, LEVEL, X1, X2, NUMBER_OF_VARIABLES };
+enum { GAIN, MODE, SCALED, U, W, Y, RATIO, LEVEL, X1, X2, NUMBER_OF_VARIABLES };
 
 static const modelVariable VARIABLES[NUMBER_OF_VARIABLES] = {
-    [GAIN]  = { PARAM(gain), .start = 1.0, .min = SOME(0.0), .max = SOME(10.0) },
-    [MODE]  = { PARAM(mode), .start = 1 },
-    [U]     = { INPUT(u) },
-    [W]     = { INPUT(w) },
-    [Y]     = { OUTPUT(y), .dependsOn = "u w" },
-    [RATIO] = { LOCAL(ratio) },
-    [LEVEL] = { LOCAL(level) },
-    [X1]    = { STATE(x1) },
-    [X2]    = { STATE(x2) },
+    [GAIN]   = { PARAM(gain), .start = 1.0, .min = SOME(0.0), .max = SOME(10.0) },
+    [MODE]   = { PARAM(mode), .start = 1 },
+    [SCALED] = { CALCULATED_PARAM(scaled) },
+    [U]      = { INPUT(u) },
+    [W]      = { INPUT(w) },
+    [Y]      = { OUTPUT(y), .dependsOn = "u w" },
+    [RATIO]  = { LOCAL(ratio) },
+    [LEVEL]  = { LOCAL(level) },
+    [X1]     = { STATE(x1), .initial = VAR_APPROX },
+    [X2]     = { STATE(x2) },
 };
 
 static const modelUnit UNITS[] = {
@@ -66,6 +69,8 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = outputEquation,
     .integrate           = integrator,
     .maxStepSize         = 1e-3,
+    .calculateParameters = calculateParameters,
+    .initialize          = initialize,
 };
 
 /* Mutable copies of the definition and its tables */
@@ -170,8 +175,8 @@ void test_rejectsNameUsedTwice(void)
 
 void test_rejectsVariableOutsideItsStorageBlock(void)
 {
-    /* mode (an int at offset 8) no longer fits, gain still does */
-    def.sizeOfParams = sizeof(double);
+    /* mode (the last field) no longer fits, gain and scaled still do */
+    def.sizeOfParams = offsetof(Params, mode);
     TEST_ASSERT_EQUAL_INT(1, problems());
 }
 
@@ -186,6 +191,28 @@ void test_rejectsLocalNameUsedTwice(void)
 {
     variables[LEVEL].name = "y";
     TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsCalculatedParameterOutsideTheParameterBlock(void)
+{
+    variables[SCALED].offset = sizeof(Params);
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsCalculatedParameterWithoutCalculateParameters(void)
+{
+    def.calculateParameters = NULL;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_acceptsBoundsOnVariablesWithoutStartValue(void)
+{
+    /* outputs, locals and calculated parameters publish no start value, so
+     * the start value of the table (0) is not checked against the bounds */
+    variables[SCALED].min = (optReal)SOME(1.0);
+    variables[Y].min = (optReal)SOME(1.0);
+    variables[RATIO].max = (optReal)SOME(-1.0);
+    TEST_ASSERT_EQUAL_INT(0, problems());
 }
 
 void test_rejectsStartValueOutsideTheBounds(void)
@@ -207,6 +234,25 @@ void test_acceptsStartValueOnTheBounds(void)
 /***************************************************
  * States
  ***************************************************/
+
+void test_rejectsApproxOnAVariableThatIsNoState(void)
+{
+    variables[GAIN].initial = VAR_APPROX;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsApproxStateWithoutInitialize(void)
+{
+    def.initialize = NULL;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_acceptsExactStatesWithoutInitialize(void)
+{
+    variables[X1].initial = VAR_EXACT;
+    def.initialize = NULL;
+    TEST_ASSERT_EQUAL_INT(0, problems());
+}
 
 void test_rejectsStateNotAlignedToTheStateVector(void)
 {
@@ -252,6 +298,18 @@ void test_rejectsDependsOnOfALocal(void)
 void test_rejectsDependencyOnALocal(void)
 {
     variables[Y].dependsOn = "u ratio";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsDependsOnOfACalculatedParameter(void)
+{
+    variables[SCALED].dependsOn = "u";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsDependencyOnACalculatedParameter(void)
+{
+    variables[Y].dependsOn = "u scaled";
     TEST_ASSERT_EQUAL_INT(1, problems());
 }
 
@@ -310,9 +368,15 @@ int main(void)
     RUN_TEST(test_rejectsVariableOutsideItsStorageBlock);
     RUN_TEST(test_rejectsLocalOutsideItsStorageBlock);
     RUN_TEST(test_rejectsLocalNameUsedTwice);
+    RUN_TEST(test_rejectsCalculatedParameterOutsideTheParameterBlock);
+    RUN_TEST(test_rejectsCalculatedParameterWithoutCalculateParameters);
+    RUN_TEST(test_acceptsBoundsOnVariablesWithoutStartValue);
     RUN_TEST(test_rejectsStartValueOutsideTheBounds);
     RUN_TEST(test_acceptsStartValueOnTheBounds);
 
+    RUN_TEST(test_rejectsApproxOnAVariableThatIsNoState);
+    RUN_TEST(test_rejectsApproxStateWithoutInitialize);
+    RUN_TEST(test_acceptsExactStatesWithoutInitialize);
     RUN_TEST(test_rejectsStateNotAlignedToTheStateVector);
     RUN_TEST(test_rejectsStateDeclaredTwice);
     RUN_TEST(test_rejectsUndeclaredState);
@@ -321,6 +385,8 @@ int main(void)
     RUN_TEST(test_rejectsDependsOnOfAVariableThatIsNoOutput);
     RUN_TEST(test_rejectsDependsOnOfALocal);
     RUN_TEST(test_rejectsDependencyOnALocal);
+    RUN_TEST(test_rejectsDependsOnOfACalculatedParameter);
+    RUN_TEST(test_rejectsDependencyOnACalculatedParameter);
     RUN_TEST(test_rejectsDependencyOnUnknownName);
     RUN_TEST(test_rejectsDependencyOnAVariableThatIsNoInput);
     RUN_TEST(test_rejectsDependencyListedTwice);

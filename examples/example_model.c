@@ -33,10 +33,16 @@ int main(void) {
     Outputs* outputs = model->outputs;
     States*  states  = (States*)model->states;
 
-    /* initialize model*/
+    /* set parameters and initial conditions, then initialize the model
+       (calculated parameters and the model's initialize function, if any) */
     params->tau = tau;
     params->k   = k;
     states->x   = x0;
+    if (initializeModel(model) != SIM_OK) {
+        fprintf(stderr, "Initialization failed: %s\n", model->message);
+        freeModel(model);
+        return 1;
+    }
     model->getOutputs(model);
     
     /* begin  simulation */

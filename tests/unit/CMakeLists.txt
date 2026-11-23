@@ -21,6 +21,7 @@ endfunction()
 csfmu_unit_test(test_newModel)
 csfmu_unit_test(test_freeModel)
 csfmu_unit_test(test_modelData)  # saveModelData / restoreModelData
+csfmu_unit_test(test_initialize)  # initializeModel / computeCalculatedParameters / modelError
 csfmu_unit_test(test_eulerForward)
 csfmu_unit_test(test_rungeKutta4)
 
@@ -39,6 +40,11 @@ target_include_directories(test_fmi2_internals PRIVATE ${CMAKE_SOURCE_DIR}/exter
 # step, and a non-finite Real local discards the step
 csfmu_unit_test(test_fmi2_locals ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
 target_include_directories(test_fmi2_locals PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
+
+# Initialization: calculated parameters in every state, the model's
+# initialize function and its errors, states with initial="approx"
+csfmu_unit_test(test_fmi2_initialize ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
+target_include_directories(test_fmi2_initialize PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
 
 # Checks of the model definition in the modelDescription.xml generator. The
 # test includes src/fmi2ModelDescription.c to reach its static functions

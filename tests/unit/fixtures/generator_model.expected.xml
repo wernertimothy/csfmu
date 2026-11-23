@@ -83,8 +83,16 @@
         <ScalarVariable name="x1" valueReference="17" causality="local" variability="continuous" initial="exact">
             <Real start="4"/>
         </ScalarVariable>
-        <ScalarVariable name="second_state" valueReference="18" causality="local" variability="continuous" initial="exact">
+        <ScalarVariable name="second_state" valueReference="18" causality="local" variability="continuous" initial="approx">
             <Real start="-1" unit="N/m"/>
+        </ScalarVariable>
+
+        <!-- Calculated parameters -->
+        <ScalarVariable name="scaled_gain" valueReference="19" description="Gain times 10" causality="calculatedParameter" variability="tunable" initial="calculated">
+            <Real unit="N/m" min="0"/>
+        </ScalarVariable>
+        <ScalarVariable name="doubled_mode" valueReference="20" causality="calculatedParameter" variability="fixed" initial="calculated">
+            <Integer/>
         </ScalarVariable>
     </ModelVariables>
 
@@ -102,6 +110,8 @@
             <Unknown index="11"/>
             <Unknown index="12"/>
             <Unknown index="13"/>
+            <Unknown index="20"/>
+            <Unknown index="21"/>
         </InitialUnknowns>
     </ModelStructure>
 
