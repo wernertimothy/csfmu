@@ -10,6 +10,7 @@
 typedef struct { double gain; int mode; bool enabled; double offset; } Params;
 typedef struct { double u; double w; bool reset; int select; } Inputs;
 typedef struct { double y; double e; double z; int count; bool active; } Outputs;
+typedef struct { double rate; int level; bool saturated; double ratio; } Locals;
 typedef struct { double x1; double x2; } States;
 
 static void stateEquation(modelInstance* m) { (void)m; }
@@ -37,6 +38,13 @@ static const modelVariable VARIABLES[] = {
     { OUTPUT(count),  .dependsOn = "select" },
     { OUTPUT(active) },
 
+    /* locals: all types, bounds, nominal, renamed */
+    { LOCAL(rate),      .unit = "N/m", .min = SOME(-1.0), .max = SOME(1.0), .nominal = 2.0,
+      .description = "Rate of the gain" },
+    { LOCAL(level),     .min = SOME(0), .max = SOME(9) },
+    { LOCAL(saturated) },
+    { LOCAL_AS(ratio, "ratio_value") },
+
     /* states */
     { STATE(x1), .start = 4.0 },
     { STATE_AS(x2, "second_state"), .start = -1.0, .unit = "N/m" },
@@ -60,6 +68,7 @@ const modelDefinition MODEL_DEFINITION = {
     .sizeOfParams   = sizeof(Params),
     .sizeOfInputs   = sizeof(Inputs),
     .sizeOfOutputs  = sizeof(Outputs),
+    .sizeOfLocals   = sizeof(Locals),
     .numberOfStates = NUMBER_OF_DOUBLES(States),
 
     .getStateDerivatives = stateEquation,

@@ -46,6 +46,7 @@ modelInstance* newModel(const modelDefinition* def)
     if (!allocateBlock(&model->params, def->sizeOfParams) ||
         !allocateBlock(&model->inputs, def->sizeOfInputs) ||
         !allocateBlock(&model->outputs, def->sizeOfOutputs) ||
+        !allocateBlock(&model->locals, def->sizeOfLocals) ||
         !allocateBlock(&model->internals, def->sizeOfInternals) ||
         !allocateBlock((void**)&model->states, sizeOfStates) ||
         !allocateBlock((void**)&model->stateDerivatives, sizeOfStates) ||
@@ -91,6 +92,9 @@ void resetModel(modelInstance* model)
     }
     if (def->sizeOfOutputs > 0) {
         memset(model->outputs, 0, def->sizeOfOutputs);
+    }
+    if (def->sizeOfLocals > 0) {
+        memset(model->locals, 0, def->sizeOfLocals);
     }
     if (def->sizeOfInternals > 0) {
         memset(model->internals, 0, def->sizeOfInternals);
@@ -160,6 +164,9 @@ void* modelVariableAddress(modelInstance* model, size_t index)
         case VAR_STATE:
             block = (char*)model->states;
             break;
+        case VAR_LOCAL:
+            block = model->locals;
+            break;
     }
 
     return block + variable->offset;
@@ -203,7 +210,8 @@ static void copyModelData(modelInstance* model, char* buffer, bool save)
     position = copyBlock(position, model->outputs, def->sizeOfOutputs, save);
     position = copyBlock(position, model->states, sizeOfStates, save);
     position = copyBlock(position, model->stateDerivatives, sizeOfStates, save);
-    copyBlock(position, model->internals, def->sizeOfInternals, save);
+    position = copyBlock(position, model->internals, def->sizeOfInternals, save);
+    copyBlock(position, model->locals, def->sizeOfLocals, save);
 }
 
 size_t modelDataSize(const modelDefinition* def)
@@ -213,7 +221,7 @@ size_t modelDataSize(const modelDefinition* def)
     }
 
     return 2 * sizeof(double) + def->sizeOfParams + def->sizeOfInputs + def->sizeOfOutputs +
-           2 * def->numberOfStates * sizeof(double) + def->sizeOfInternals;
+           2 * def->numberOfStates * sizeof(double) + def->sizeOfInternals + def->sizeOfLocals;
 }
 
 /**
@@ -255,6 +263,7 @@ void freeModel(modelInstance* model)
     free(model->params);
     free(model->inputs);
     free(model->outputs);
+    free(model->locals);
     free(model->internals);
     free(model->states);
     free(model->stateDerivatives);

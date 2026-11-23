@@ -4,12 +4,14 @@
 typedef struct { double a; int b; } Params;
 typedef struct { double u; } Inputs;
 typedef struct { double y; } Outputs;
+typedef struct { double ratio; bool saturated; } Locals;
 typedef struct { double cache[3]; int counter; } Internals;
 
 static const modelDefinition DEFINITION = {
     .sizeOfParams    = sizeof(Params),
     .sizeOfInputs    = sizeof(Inputs),
     .sizeOfOutputs   = sizeof(Outputs),
+    .sizeOfLocals    = sizeof(Locals),
     .sizeOfInternals = sizeof(Internals),
     .numberOfStates  = 2,
 };

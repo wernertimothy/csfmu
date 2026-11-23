@@ -23,6 +23,7 @@
 typedef struct { double gain; int mode; } Params;
 typedef struct { double u; double w; } Inputs;
 typedef struct { double y; } Outputs;
+typedef struct { double ratio; int level; } Locals;
 typedef struct { double x1; double x2; } States;
 
 static void stateEquation(modelInstance* m) { (void)m; }
@@ -30,16 +31,18 @@ static void outputEquation(modelInstance* m) { (void)m; }
 static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
 
 /* Indices into the variable table; X2 is last, so it can be left out */
-enum { GAIN, MODE, U, W, Y, X1, X2, NUMBER_OF_VARIABLES };
+enum { GAIN, MODE, U, W, Y, RATIO, LEVEL, X1, X2, NUMBER_OF_VARIABLES };
 
 static const modelVariable VARIABLES[NUMBER_OF_VARIABLES] = {
-    [GAIN] = { PARAM(gain), .start = 1.0, .min = SOME(0.0), .max = SOME(10.0) },
-    [MODE] = { PARAM(mode), .start = 1 },
-    [U]    = { INPUT(u) },
-    [W]    = { INPUT(w) },
-    [Y]    = { OUTPUT(y), .dependsOn = "u w" },
-    [X1]   = { STATE(x1) },
-    [X2]   = { STATE(x2) },
+    [GAIN]  = { PARAM(gain), .start = 1.0, .min = SOME(0.0), .max = SOME(10.0) },
+    [MODE]  = { PARAM(mode), .start = 1 },
+    [U]     = { INPUT(u) },
+    [W]     = { INPUT(w) },
+    [Y]     = { OUTPUT(y), .dependsOn = "u w" },
+    [RATIO] = { LOCAL(ratio) },
+    [LEVEL] = { LOCAL(level) },
+    [X1]    = { STATE(x1) },
+    [X2]    = { STATE(x2) },
 };
 
 static const modelUnit UNITS[] = {
@@ -57,6 +60,7 @@ const modelDefinition MODEL_DEFINITION = {
     .sizeOfParams        = sizeof(Params),
     .sizeOfInputs        = sizeof(Inputs),
     .sizeOfOutputs       = sizeof(Outputs),
+    .sizeOfLocals        = sizeof(Locals),
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
@@ -171,6 +175,19 @@ void test_rejectsVariableOutsideItsStorageBlock(void)
     TEST_ASSERT_EQUAL_INT(1, problems());
 }
 
+void test_rejectsLocalOutsideItsStorageBlock(void)
+{
+    /* level (an int at offset 8) no longer fits, ratio still does */
+    def.sizeOfLocals = sizeof(double);
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsLocalNameUsedTwice(void)
+{
+    variables[LEVEL].name = "y";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
 void test_rejectsStartValueOutsideTheBounds(void)
 {
     variables[GAIN].start = -1.0;
@@ -222,6 +239,19 @@ void test_rejectsNumberOfStatesThatDiffersFromTheTable(void)
 void test_rejectsDependsOnOfAVariableThatIsNoOutput(void)
 {
     variables[U].dependsOn = "w";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsDependsOnOfALocal(void)
+{
+    /* locals are not part of the ModelStructure, so they have no dependencies */
+    variables[RATIO].dependsOn = "u";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsDependencyOnALocal(void)
+{
+    variables[Y].dependsOn = "u ratio";
     TEST_ASSERT_EQUAL_INT(1, problems());
 }
 
@@ -278,6 +308,8 @@ int main(void)
     RUN_TEST(test_rejectsVariableWithoutName);
     RUN_TEST(test_rejectsNameUsedTwice);
     RUN_TEST(test_rejectsVariableOutsideItsStorageBlock);
+    RUN_TEST(test_rejectsLocalOutsideItsStorageBlock);
+    RUN_TEST(test_rejectsLocalNameUsedTwice);
     RUN_TEST(test_rejectsStartValueOutsideTheBounds);
     RUN_TEST(test_acceptsStartValueOnTheBounds);
 
@@ -287,6 +319,8 @@ int main(void)
     RUN_TEST(test_rejectsNumberOfStatesThatDiffersFromTheTable);
 
     RUN_TEST(test_rejectsDependsOnOfAVariableThatIsNoOutput);
+    RUN_TEST(test_rejectsDependsOnOfALocal);
+    RUN_TEST(test_rejectsDependencyOnALocal);
     RUN_TEST(test_rejectsDependencyOnUnknownName);
     RUN_TEST(test_rejectsDependencyOnAVariableThatIsNoInput);
     RUN_TEST(test_rejectsDependencyListedTwice);

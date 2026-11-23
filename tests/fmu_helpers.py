@@ -60,12 +60,37 @@ def variables_with(model_description, causality: str, type: str | None = None) -
     ]
 
 
-def settable_before_initialization(model_description) -> list:
-    """The variables the integration tool may set up to fmi2ExitInitializationMode."""
+def states(model_description) -> list:
+    """The states: local variables with initial="exact", which can be set before the simulation.
+
+    States and local variables share causality="local"; initial tells them apart.
+    """
     return [
         v
         for v in model_description.modelVariables
-        if v.causality in ("parameter", "input", "local")
+        if v.causality == "local" and v.initial == "exact"
+    ]
+
+
+def local_variables(model_description) -> list:
+    """The local variables: computed by the model (initial="calculated"), read-only."""
+    return [
+        v
+        for v in model_description.modelVariables
+        if v.causality == "local" and v.initial == "calculated"
+    ]
+
+
+def settable_before_initialization(model_description) -> list:
+    """The variables the integration tool may set up to fmi2ExitInitializationMode.
+
+    These are the parameters, the inputs and the states, but not the local variables.
+    """
+    settable = {id(v) for v in states(model_description)}
+    return [
+        v
+        for v in model_description.modelVariables
+        if v.causality in ("parameter", "input") or id(v) in settable
     ]
 
 

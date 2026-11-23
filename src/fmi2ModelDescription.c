@@ -9,6 +9,8 @@
  * - The value reference of a variable is its index in the variable table.
  *   fmi2Functions.c uses the same mapping.
  * - The role of a variable determines causality, variability and initial.
+ * - Local variables are published (readable), but are not part of the
+ *   ModelStructure.
  * - The inputs an output depends on directly (dependsOn) become the
  *   dependencies of the output in the ModelStructure.
  * - The capability flags and log categories describe fmi2Functions.c and
@@ -65,6 +67,7 @@ static size_t sizeOfBlock(const modelDefinition* def, varRole role)
         case VAR_INPUT:     return def->sizeOfInputs;
         case VAR_OUTPUT:    return def->sizeOfOutputs;
         case VAR_STATE:     return def->numberOfStates * sizeof(double);
+        case VAR_LOCAL:     return def->sizeOfLocals;
     }
     return 0;
 }
@@ -307,7 +310,7 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
         for (size_t j = 0; j < k; j++) {
             if (def->variables[j].name && strcmp(def->variables[j].name, variable->name) == 0) {
                 fprintf(stderr, "error: variable name '%s' is used more than once "
-                                "(use PARAM_AS, INPUT_AS, OUTPUT_AS or STATE_AS to publish "
+                                "(use PARAM_AS, INPUT_AS, OUTPUT_AS, LOCAL_AS or STATE_AS to publish "
                                 "a field under a different name)\n", variable->name);
                 problems++;
             }
@@ -316,7 +319,7 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
         /* Variable must lie inside its storage block */
         if (variable->offset + sizeOfType(variable->type) > sizeOfBlock(def, variable->role)) {
             fprintf(stderr, "error: variable '%s' lies outside its storage block "
-                            "(check sizeOfParams, sizeOfInputs, sizeOfOutputs, numberOfStates)\n",
+                            "(check sizeOfParams, sizeOfInputs, sizeOfOutputs, sizeOfLocals, numberOfStates)\n",
                             variable->name);
             problems++;
         }
@@ -440,6 +443,7 @@ static const char* roleTitle(varRole role)
         case VAR_INPUT:     return "Inputs";
         case VAR_OUTPUT:    return "Outputs";
         case VAR_STATE:     return "States";
+        case VAR_LOCAL:     return "Locals";
     }
     return "";
 }
@@ -454,9 +458,13 @@ static const char* roleTitle(varRole role)
  *   input      input       continuous / discrete -            yes
  *   output     output      continuous / discrete calculated   no
  *   state      local       continuous            exact        yes
+ *   local      local       continuous / discrete calculated   no
  *
- * Real inputs and outputs are continuous, Integer and Boolean ones are
- * discrete (FMI 2.0 only allows continuous for Real variables).
+ * Real inputs, outputs and locals are continuous, Integer and Boolean ones
+ * are discrete (FMI 2.0 only allows continuous for Real variables). States
+ * and local variables share causality "local"; initial tells them apart: a
+ * state can be set before the simulation (exact), a local variable is
+ * computed by the model (calculated).
  */
 static void writeScalarVariable(FILE* file, const modelVariable* variable, size_t valueReference)
 {
@@ -482,6 +490,11 @@ static void writeScalarVariable(FILE* file, const modelVariable* variable, size_
         case VAR_STATE:
             causality = "local";
             initial = "exact";
+            break;
+        case VAR_LOCAL:
+            causality = "local";
+            initial = "calculated";
+            hasStart = false;
             break;
     }
 
@@ -654,7 +667,10 @@ static void writeModelDescription(FILE* file, const modelDefinition* def)
     fputs("    </ModelVariables>\n\n", file);
 
     /* Model structure (the initial unknowns also depend on parameters and
-       states, which dependsOn does not describe: "depends on all knowns") */
+       states, which dependsOn does not describe: "depends on all knowns").
+       Local variables are not listed: FMI 2.0, section 2.2.8 (ModelStructure)
+       lists outputs in <Outputs>, and outputs, calculated parameters and (for
+       Model Exchange) states and derivatives in <InitialUnknowns> */
     fputs("    <ModelStructure>\n", file);
     writeOutputUnknowns(file, def, "Outputs", true);
     writeOutputUnknowns(file, def, "InitialUnknowns", false);

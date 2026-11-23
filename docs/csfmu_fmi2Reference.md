@@ -42,7 +42,7 @@ All functions follow the same rules:
 - In the Error state every further call fails, except: `fmi2Reset` (start over), `fmi2FreeInstance`, `fmi2SetFMUstate` (go back to a snapshot), `fmi2GetXXX` and `fmi2SetDebugLogging` (diagnosis), and the functions that only handle snapshots (`fmi2FreeFMUstate`, serialization).
 - `fmi2Warning` means the call had its effect, but something is worth reporting. It does not change the state.
 - `fmi2Discard` is returned in two cases:
-  - by `fmi2DoStep` when the integration fails numerically (a state or a Real output becomes NaN or infinite). The FMU is rolled back to the communication point and enters the **Step Failed** state (see [`fmi2DoStep`](#fmi2dostep)).
+  - by `fmi2DoStep` when the integration fails numerically (a state, a Real output or a Real local variable becomes NaN or infinite). The FMU is rolled back to the communication point and enters the **Step Failed** state (see [`fmi2DoStep`](#fmi2dostep)).
   - by the status queries, for a status that is not available. This does not change the state.
 - A NULL component returns `fmi2Error` (there is no instance whose state could change).
 
@@ -630,10 +630,11 @@ All access functions below work the same way:
 | Parameter (`VAR_FIXED`) | Instantiated, Initialization Mode |
 | State | Instantiated, Initialization Mode |
 | Output | Never |
+| Local variable | Never |
 
 Integration tools should always look up value references by variable name in the `modelDescription.xml` and never hardcode them.
 
-**Outputs are always consistent with the other variables.** Every setter, and `fmi2SetupExperiment` (which moves the time), marks the outputs as stale, and every getter recomputes them first if needed (by calling the model's output equation). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last. Which inputs an output depends on is declared by the model (`.dependsOn`) and published in the `ModelStructure` of the `modelDescription.xml`. The `pi_controller` model has outputs with direct feedthrough: `u` and `e` change as soon as `r` or `y_m` is set.
+**Outputs and local variables are always consistent with the other variables.** Every setter, and `fmi2SetupExperiment` (which moves the time), marks them as stale, and every getter recomputes them first if needed (by calling the model's output equation, which computes both). Outputs can therefore be read before and during initialization, and a model with direct feedthrough (`y` depends on `u`) answers with the inputs set last. Which inputs an output depends on is declared by the model (`.dependsOn`) and published in the `ModelStructure` of the `modelDescription.xml`. The `pi_controller` model has outputs with direct feedthrough: `u` and `e` change as soon as `r` or `y_m` is set.
 
 **Example for the `first_order` model:**
 
@@ -674,7 +675,7 @@ Sets one or more real-valued variables by their value references. This is the pr
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | All variables set successfully |
-| `fmi2Error` | NULL component, call not allowed in the current state, invalid arrays, unknown value reference, variable is not of type Real, variable is an output, or variable is a state or fixed parameter and the initialization has finished |
+| `fmi2Error` | NULL component, call not allowed in the current state, invalid arrays, unknown value reference, variable is not of type Real, variable is an output or a local variable, or variable is a state or fixed parameter and the initialization has finished |
 
 #### FMI State Requirements
 **Can be called in**: **Instantiated**, **Initialization Mode**, **Step Complete**
@@ -1013,7 +1014,7 @@ The heart of co-simulation - advances the FMU's internal state from time `t` to 
 |--------|-----------|
 | `fmi2OK` | Step completed successfully |
 | `fmi2Warning` | Step completed, but `currentCommunicationPoint` differed from the FMU's internal clock by more than rounding (still within the tolerance). The FMU continued from `currentCommunicationPoint` (see [Time Validation](#time-validation)) |
-| `fmi2Discard` | The integration failed numerically (a state or a Real output became NaN or infinite). The FMU was rolled back to `currentCommunicationPoint` |
+| `fmi2Discard` | The integration failed numerically (a state, a Real output or a Real local variable became NaN or infinite). The FMU was rolled back to `currentCommunicationPoint` |
 | `fmi2Error` | Invalid component, wrong state, step size not finite or not positive, time inconsistency, step ends behind the stop time, or the integrator left `model->time` at another time than the end of the sub-step (see [Algorithm](#algorithm-sub-stepping-for-numerical-stability)) |
 
 #### FMI State Requirements
@@ -1241,7 +1242,7 @@ if (fmi2GetRealStatus(fmu, fmi2LastSuccessfulTime, &lastTime) == fmi2OK) {
 
 Functions for taking a snapshot of the FMU and returning to it later (capability flags `canGetAndSetFMUstate` and `canSerializeFMUstate`). Typical uses are step rejection in a master algorithm, repeating a simulation from an intermediate point and saving a simulation to disk.
 
-A snapshot contains everything that changes during a simulation: all variables (parameters, inputs, outputs, states), the model's unpublished internals, the internal clock, the experiment settings and the state of the FMU state machine. Instance name, callbacks and log level belong to the instance and are not part of it.
+A snapshot contains everything that changes during a simulation: all variables (parameters, inputs, outputs, local variables, states), the model's unpublished internals, the internal clock, the experiment settings and the state of the FMU state machine. Instance name, callbacks and log level belong to the instance and are not part of it.
 
 ### fmi2GetFMUstate
 

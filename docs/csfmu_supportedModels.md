@@ -18,12 +18,14 @@ where **t** is the time, **x** are the states, **u** are the inputs and **y** ar
 - `f` and `h` may be nonlinear.
 - `f` and `h` may depend explicitly on time. `model->time` is the time of the integrator stage inside `f` and the communication point inside `h`.
 - `h` may use the inputs directly (direct feedthrough). You declare which inputs an output depends on with `.dependsOn`, and the `modelDescription.xml` publishes it.
+- Besides the outputs, `h` may compute **local variables**: values that can be read from outside but are no outputs, such as a heat flow or an error term.
 
 How to write the two equations is explained in [getting started](csfmu_gettingStarted.md#equationsc-or-equationscpp).
 
 ## Variables
 
-- **Parameters**, **inputs** and **outputs** can be of type `double`, `int` or `bool`.
+- **Parameters**, **inputs**, **outputs** and **local variables** can be of type `double`, `int` or `bool`.
+- Local variables are computed by the output equation and published read-only (`causality="local"`). They are always consistent with the other variables, like outputs.
 - Parameters are tunable (they can be changed between simulation steps) or fixed (`.variability = VAR_FIXED`, they can only be set before the simulation starts).
 - **States** are of type `double`, because the integrators work on a vector of doubles.
 
@@ -39,7 +41,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 - Outputs always reflect the inputs set last, also before a step and during initialization.
 - The communication step size can change from step to step.
 - The FMU state can be saved, restored and serialized, e.g. to repeat a step.
-- If a state or a Real output becomes NaN or infinite during a step, the FMU discards the step: it returns `fmi2Discard` and is rolled back to the start of the step, so the integration tool can go back to a saved FMU state and continue.
+- If a state, a Real output or a Real local variable becomes NaN or infinite during a step, the FMU discards the step: it returns `fmi2Discard` and is rolled back to the start of the step, so the integration tool can go back to a saved FMU state and continue.
 
 ## Demo models
 
@@ -54,5 +56,6 @@ The repository ships demo models, each of which showcases a certain feature. Use
 | [`forced_pt1`](../src/models/forced_pt1/) | Explicit time dependence in both equations (`model->time`). The integrator evaluates every stage at its own time |
 | [`pi_controller`](../src/models/pi_controller/) | Direct feedthrough: its outputs react to an input as soon as it is set, without a simulation step (`.dependsOn`) |
 | [`fault_injection`](../src/models/fault_injection/) | A model without inputs, and a numerical failure on request: the FMU discards the step and rolls back (`fmi2Discard`) |
+| [`thermal_mass`](../src/models/thermal_mass/) | A local variable (`Q_loss`, the heat loss to the ambient) that can be read but not set, next to fixed and tunable parameters with SI units |
 
 When the template learns a new kind of model, this page and the list of demo models are extended.

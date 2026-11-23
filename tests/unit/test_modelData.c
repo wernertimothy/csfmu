@@ -6,6 +6,7 @@
 typedef struct { double gain; int mode; bool enabled; } Params;
 typedef struct { double u; bool reset; } Inputs;
 typedef struct { double y; int count; } Outputs;
+typedef struct { double ratio; int level; bool saturated; } Locals;
 typedef struct { double x1; double x2; } States;
 typedef struct { double cache; int counter; bool flag; double table[4]; } Internals;
 
@@ -21,6 +22,9 @@ static const modelVariable VARIABLES[] = {
     { INPUT(reset),   .start = 1 },
     { OUTPUT(y) },
     { OUTPUT(count) },
+    { LOCAL(ratio) },
+    { LOCAL(level) },
+    { LOCAL(saturated) },
     { STATE(x1),      .start = 4.0 },
     { STATE(x2),      .start = -1.0 },
 };
@@ -32,6 +36,7 @@ static const modelDefinition DEFINITION = {
     .sizeOfParams        = sizeof(Params),
     .sizeOfInputs        = sizeof(Inputs),
     .sizeOfOutputs       = sizeof(Outputs),
+    .sizeOfLocals        = sizeof(Locals),
     .sizeOfInternals     = sizeof(Internals),
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
@@ -39,7 +44,7 @@ static const modelDefinition DEFINITION = {
     .integrate           = integrator,
 };
 
-/* A model without parameters, inputs, outputs and internals */
+/* A model without parameters, inputs, outputs, locals and internals */
 static const modelDefinition ONLY_STATES = { .numberOfStates = 2 };
 
 /* A model that consists of nothing but its internals */
@@ -63,6 +68,7 @@ static void changeEverything(modelInstance* m) {
     Params*  p   = m->params;
     Inputs*  in  = m->inputs;
     Outputs* out = m->outputs;
+    Locals*  locals = m->locals;
     Internals* internals = m->internals;
 
     m->time = 100.0;
@@ -74,6 +80,9 @@ static void changeEverything(modelInstance* m) {
     in->reset = false;
     out->y = 96.0;
     out->count = 95;
+    locals->ratio = 87.0;
+    locals->level = 86;
+    locals->saturated = true;
     m->states[0] = 94.0;
     m->states[1] = 93.0;
     m->stateDerivatives[0] = 92.0;
@@ -100,7 +109,7 @@ static void assertInternalsChanged(const modelInstance* m) {
 
 void test_modelDataSize_isTheSumOfAllBlocks(void) {
     size_t expected = 2 * sizeof(double) + sizeof(Params) + sizeof(Inputs) + sizeof(Outputs) + 2 * sizeof(States) +
-                      sizeof(Internals);
+                      sizeof(Internals) + sizeof(Locals);
     TEST_ASSERT_EQUAL_size_t(expected, modelDataSize(&DEFINITION));
 }
 
@@ -117,6 +126,7 @@ void test_restoreModelData_bringsBackEveryBlock(void) {
     const Params*  p   = model->params;
     const Inputs*  in  = model->inputs;
     const Outputs* out = model->outputs;
+    const Locals*  locals = model->locals;
 
     /* arrange: snapshot of a changed model, then back to start values */
     changeEverything(model);
@@ -136,6 +146,9 @@ void test_restoreModelData_bringsBackEveryBlock(void) {
     TEST_ASSERT_FALSE(in->reset);
     TEST_ASSERT_EQUAL_DOUBLE(96.0, out->y);
     TEST_ASSERT_EQUAL_INT(95, out->count);
+    TEST_ASSERT_EQUAL_DOUBLE(87.0, locals->ratio);
+    TEST_ASSERT_EQUAL_INT(86, locals->level);
+    TEST_ASSERT_TRUE(locals->saturated);
     TEST_ASSERT_EQUAL_DOUBLE(94.0, model->states[0]);
     TEST_ASSERT_EQUAL_DOUBLE(93.0, model->states[1]);
     TEST_ASSERT_EQUAL_DOUBLE(92.0, model->stateDerivatives[0]);
@@ -164,6 +177,7 @@ void test_modelData_canBeRestoredIntoAnotherInstance(void) {
     TEST_ASSERT_EQUAL_DOUBLE(1e-3, other->relTol);
     TEST_ASSERT_EQUAL_DOUBLE(99.0, p->gain);
     TEST_ASSERT_EQUAL_DOUBLE(93.0, other->states[1]);
+    TEST_ASSERT_EQUAL_INT(86, ((const Locals*)other->locals)->level);
     assertInternalsChanged(other);
 
     freeModel(other);
@@ -218,6 +232,7 @@ void test_modelData_handlesEmptyBlocks(void) {
     double data[6];
 
     TEST_ASSERT_NULL(m->internals);
+    TEST_ASSERT_NULL(m->locals);
 
     m->time = 0.5;
     m->relTol = 1e-9;

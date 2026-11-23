@@ -387,16 +387,17 @@ static size_t firstNonFiniteState(const modelInstance* model)
 }
 
 /**
- * Index (in the variable table) of the first Real output that is NaN or
- * infinite, or numberOfVariables if all Real outputs are finite
+ * Index (in the variable table) of the first Real output or Real local
+ * variable that is NaN or infinite, or numberOfVariables if all of them are
+ * finite. Both are results of the output equation that the master can read.
  */
-static size_t firstNonFiniteOutput(modelInstance* model)
+static size_t firstNonFiniteResult(modelInstance* model)
 {
     const modelDefinition* def = model->def;
 
     for (size_t k = 0; k < def->numberOfVariables; k++) {
         const modelVariable* variable = &def->variables[k];
-        if (variable->role == VAR_OUTPUT && variable->type == VAR_REAL &&
+        if ((variable->role == VAR_OUTPUT || variable->role == VAR_LOCAL) && variable->type == VAR_REAL &&
             !isfinite(*(const double*)modelVariableAddress(model, k))) {
             return k;
         }
@@ -405,7 +406,16 @@ static size_t firstNonFiniteOutput(modelInstance* model)
 }
 
 /**
- * Recompute the outputs if a variable was set since they were computed
+ * Kind of a result of the output equation, for log messages
+ */
+static const char* resultKind(const modelVariable* variable)
+{
+    return (variable->role == VAR_LOCAL) ? "Local variable" : "Output";
+}
+
+/**
+ * Recompute the outputs and the local variables if a variable was set since
+ * they were computed (the output equation computes both)
  */
 static void refreshOutputs(myFMU2* fmu)
 {
@@ -776,9 +786,9 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
  * modelDescription.xml). The table tells type, role and storage location,
  * so none of the functions below knows anything about the model.
  *
- * Outputs are kept consistent with the other variables: every fmi2SetXXX
- * (and fmi2SetupExperiment, which moves the time) marks them as stale and
- * every fmi2GetXXX recomputes them if needed. This
+ * Outputs and local variables are kept consistent with the other variables:
+ * every fmi2SetXXX (and fmi2SetupExperiment, which moves the time) marks
+ * them as stale and every fmi2GetXXX recomputes them if needed. This
  * way outputs can be read in initialization mode and a model with direct
  * feedthrough (y depends on u) answers with the inputs set last.
  ***************************************************/
@@ -830,7 +840,7 @@ static myFMU2* enterVariableAccess(
  * Checks that the value reference exists, that the variable has the
  * expected type and, for write access, that the variable may be set in the
  * current FMU state:
- * - Outputs can never be set
+ * - Outputs and local variables can never be set
  * - States and fixed parameters can only be set before the simulation
  *   starts (until fmi2ExitInitializationMode)
  * - Inputs and tunable parameters can be set whenever setting is allowed
@@ -858,6 +868,10 @@ static void* resolveVariable(myFMU2* fmu, fmi2ValueReference vr, varType expecte
     if (forWrite) {
         if (variable->role == VAR_OUTPUT) {
             enterErrorState(fmu, "Variable '%s' is an output and cannot be set.", variable->name);
+            return NULL;
+        }
+        if (variable->role == VAR_LOCAL) {
+            enterErrorState(fmu, "Variable '%s' is a local variable and cannot be set.", variable->name);
             return NULL;
         }
 
@@ -982,9 +996,9 @@ fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *
  * Implementation notes:
  * - Looks up each value reference in the model's variable table
- * - Every variable (parameter, input, output, state) can be read
- * - Outputs are recomputed first if a variable was set since the last
- *   computation
+ * - Every variable (parameter, input, output, local, state) can be read
+ * - Outputs and local variables are recomputed first if a variable was set
+ *   since the last computation
  */
 fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Real value[])
 {
@@ -1101,7 +1115,7 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *   the sub-step or rounding (roundingTolerance()). Otherwise the integrator
  *   is broken: the function fails with fmi2Error, the model keeps the values
  *   the integrator left, and the outputs are recomputed from them when read
- * - Computes outputs after integration via getOutputs()
+ * - Computes outputs and local variables after integration via getOutputs()
  *
  * Numerical failure (FMI 2.0, section 4.2.3: "fmi2Discard ... the slave
  * computed successfully only a subinterval of the communication step"):
@@ -1110,8 +1124,8 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  * - After every sub-step the states are checked. If one is NaN or infinite,
  *   the model is restored to currentCommunicationPoint, the function returns
  *   fmi2Discard and the FMU enters stateStepFailed
- * - After the last sub-step the Real outputs are checked the same way. This
- *   also lets a model without states discard a step
+ * - After the last sub-step the Real outputs and Real local variables are
+ *   checked the same way. This also lets a model without states discard a step
  * - Outputs computed outside fmi2DoStep (when read after a set, or in
  *   fmi2ExitInitializationMode) are not checked: FMI 2.0 has no fmi2Discard
  *   for these functions, and the next step discards
@@ -1233,18 +1247,19 @@ fmi2Status fmi2DoStep(
     /* Update internal clock */
     model->time = nextCommunicationPoint;
 
-    /* Compute outputs; discard the step if one of them cannot be evaluated.
-     * The outputs are marked as up to date only after the check, so that a
-     * rollback leaves the output block and the stale flag both at t_k */
+    /* Compute outputs and locals; discard the step if one of them cannot be
+     * evaluated. They are marked as up to date only after the check, so that
+     * a rollback leaves their blocks and the stale flag all at t_k */
     model->getOutputs(model);
 
-    size_t failedOutput = firstNonFiniteOutput(model);
-    if (failedOutput < model->def->numberOfVariables) {
+    size_t failedResult = firstNonFiniteResult(model);
+    if (failedResult < model->def->numberOfVariables) {
+        const modelVariable* failed = &model->def->variables[failedResult];
         restoreModelData(model, model->stepStart);
         return discardStep(myfmu2,
-                           "Output '%s' is not finite at t = %.16g. Step from %.16g to %.16g discarded, "
+                           "%s '%s' is not finite at t = %.16g. Step from %.16g to %.16g discarded, "
                            "FMU rolled back to %.16g.",
-                           model->def->variables[failedOutput].name, nextCommunicationPoint,
+                           resultKind(failed), failed->name, nextCommunicationPoint,
                            currentCommunicationPoint, nextCommunicationPoint, model->time);
     }
     myfmu2->outputsAreStale = fmi2False;

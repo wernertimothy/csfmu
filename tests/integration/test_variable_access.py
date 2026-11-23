@@ -10,9 +10,11 @@ from fmpy.fmi1 import FMICallException
 from tests.fmu_helpers import (
     changed_value,
     initialize,
+    local_variables,
     read,
     settable_before_initialization,
     start_value,
+    states,
     variables_with,
     write,
 )
@@ -26,11 +28,11 @@ def test_value_references_are_unique(model_description) -> None:
 
 def test_states_are_exposed(model_description) -> None:
     """Every model publishes its states as local variables with a start value."""
-    states = variables_with(model_description, "local")
-    assert len(states) > 0
-    for state in states:
+    published = states(model_description)
+    assert len(published) > 0
+    for state in published:
         assert state.type == "Real"
-        assert state.initial == "exact"
+        assert state.variability == "continuous"
         assert state.start is not None
 
 
@@ -92,9 +94,31 @@ def test_states_cannot_be_set_after_initialization(
     initialized_fmu, model_description
 ) -> None:
     """States are initial conditions: setting them during the simulation is an error."""
-    state = variables_with(model_description, "local")[0]
+    state = states(model_description)[0]
     with pytest.raises(FMICallException):
         write(initialized_fmu, state, 1.0)
+
+
+def test_local_variables_have_no_start_value(model_description) -> None:
+    """Local variables are computed by the model, so they are published without start value."""
+    for variable in local_variables(model_description):
+        assert variable.initial == "calculated", variable.name
+        assert variable.start is None, variable.name
+
+
+@pytest.mark.parametrize("initialized", [False, True], ids=["instantiated", "stepping"])
+def test_local_variables_cannot_be_set(new_fmu, model_description, initialized) -> None:
+    """Local variables are computed by the model and can never be set."""
+    locals_ = local_variables(model_description)
+    if not locals_:
+        pytest.skip("the model has no local variables")
+
+    for variable in locals_:
+        fmu = new_fmu()
+        if initialized:
+            initialize(fmu)
+        with pytest.raises(FMICallException):
+            write(fmu, variable, changed_value(variable, read(fmu, variable)))
 
 
 def test_outputs_cannot_be_set(new_fmu, model_description) -> None:

@@ -35,6 +35,11 @@ target_include_directories(test_fmi2_integratorContract PRIVATE ${CMAKE_SOURCE_D
 csfmu_unit_test(test_fmi2_internals ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
 target_include_directories(test_fmi2_internals PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
 
+# Local variables: read with every getter, never set, follow a set without a
+# step, and a non-finite Real local discards the step
+csfmu_unit_test(test_fmi2_locals ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
+target_include_directories(test_fmi2_locals PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
+
 # Checks of the model definition in the modelDescription.xml generator. The
 # test includes src/fmi2ModelDescription.c to reach its static functions
 csfmu_unit_test(test_validateDefinition)

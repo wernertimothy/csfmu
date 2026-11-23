@@ -87,6 +87,7 @@ This header declares the storage of your model as plain structs. The struct name
 | `Params` | Model parameters | `double`, `int`, `bool` |
 | `Inputs` | Input signals | `double`, `int`, `bool` |
 | `Outputs` | Output signals | `double`, `int`, `bool` |
+| `Locals` | Computed values that can be read from outside, but are no outputs (see [Local variables](#local-variables)) | `double`, `int`, `bool` |
 | `States` | Continuous states | `double` only |
 | `Internals` | Memory of the model that is not published (see [below](#internals)) | Plain values and fixed-size arrays |
 
@@ -175,6 +176,7 @@ The model instance gives you access to the storage of your model:
 | `model->params` | `void*` | your `Params` struct |
 | `model->inputs` | `void*` | your `Inputs` struct |
 | `model->outputs` | `void*` | your `Outputs` struct |
+| `model->locals` | `void*` | your `Locals` struct (computed by the output equation, see [Local variables](#local-variables)) |
 | `model->internals` | `void*` | your `Internals` struct (read-only in the equations, see [Internals](#internals)) |
 | `model->states` | `double*` | the state vector |
 | `model->stateDerivatives` | `double*` | the state derivatives, same layout as the states |
@@ -202,7 +204,7 @@ void lorenzAttractor(modelInstance* model) {
 
 #### When the Integration Fails
 
-After every integration sub-step the FMU checks whether a state has become NaN or infinite, and after the last sub-step it checks the Real outputs the same way. If one of them is not finite, the integration has failed: the FMU puts the model back to the start of the communication step and returns `fmi2Discard`. The master can then go back to a saved FMU state and try again, without having to reset the FMU (see [Discarded Steps](csfmu_fmi2Reference.md#discarded-steps)).
+After every integration sub-step the FMU checks whether a state has become NaN or infinite, and after the last sub-step it checks the Real outputs and the Real local variables the same way. If one of them is not finite, the integration has failed: the FMU puts the model back to the start of the communication step and returns `fmi2Discard`. The master can then go back to a saved FMU state and try again, without having to reset the FMU (see [Discarded Steps](csfmu_fmi2Reference.md#discarded-steps)).
 
 So a state equation that cannot be evaluated at some point (e.g. outside the range where it is defined) can return `NAN` from `<math.h>` for a derivative. The step is then discarded and the master is told why. The `fault_injection` model does exactly this on purpose, to test the protocol:
 
@@ -214,7 +216,7 @@ if (p->fail && model->time >= p->t_fail) {
 }
 ```
 
-The output equation may return `NAN` too, which discards the step in the same way. This also works for a model without states. Outputs that the master reads with `fmi2GetReal` between steps (e.g. right after setting an input) are not checked; the next step discards.
+The output equation may return `NAN` too, for an output or a local variable, which discards the step in the same way. This also works for a model without states. Values that the master reads with `fmi2GetReal` between steps (e.g. right after setting an input) are not checked; the next step discards.
 
 #### Output Equation
 
@@ -223,7 +225,7 @@ The equation can have any name.
 ```c
 void whateverAnothername(modelInstance* model);
 ```
-and it should calculate all outputs and write them to your `Outputs` struct.
+and it should calculate all outputs and write them to your `Outputs` struct, and all [local variables](#local-variables) into your `Locals` struct.
 
 Here is an example implementation that defines all three states of the lorenz attractor as outputs.
 
@@ -237,6 +239,40 @@ void lorenzAttractorOutputs(modelInstance* model) {
   out->z = x->z;
 }
 ```
+
+#### Local variables
+
+Some values are worth looking at, but are no signal another model connects to: a heat flow, an error term, an intermediate result. Declare them in a struct `Locals` and compute them in the output equation, together with the outputs. They are published with `causality="local"`: the integration tool can read and plot them, but it can never set them, and they do not appear in the `ModelStructure`.
+
+The `thermal_mass` model (`src/models/thermal_mass/`) publishes its heat loss this way:
+
+```c
+/* variables.h */
+typedef struct {
+    double Q_loss;  /* heat flow from the mass to the ambient */
+} Locals;
+
+/* equations.c */
+static double heatLoss(const Params* p, const States* x)
+{
+    return (x->T - p->T_amb) / p->R;
+}
+
+void thermalMassSystem(modelInstance* model)
+{
+    ...
+    dx->T = (in->P - heatLoss(p, x)) / p->C;
+}
+
+void thermalMassOutputs(modelInstance* model)
+{
+    ...
+    out->T_out     = x->T;
+    locals->Q_loss = heatLoss(p, x);
+}
+```
+
+The output equation runs at the communication points and whenever a variable was set since, so local variables are always consistent with the other variables, exactly like outputs. It does not run at the stages of the integrator, so the state equation never reads `model->locals`: a term that both equations need goes into a helper function, as `heatLoss` above.
 
 #### C++ Models
 
@@ -321,6 +357,7 @@ Every variable you want to be visible from outside gets one entry. The entry sta
 | `PARAM(field)` | `Params` | parameter |
 | `INPUT(field)` | `Inputs` | input |
 | `OUTPUT(field)` | `Outputs` | output |
+| `LOCAL(field)` | `Locals` | local variable |
 | `STATE(field)` | `States` | continuous state |
 
 The macro derives the **name**, the **type** and the **storage location** from the struct field itself, so these can never get out of sync with your structs. A field with an unsupported type does not compile.
@@ -358,9 +395,9 @@ static const modelVariable VARIABLES[] = {
 Things to know:
 
 1. **The order of the entries is free.** Group them however you find readable.
-2. **Names must be unique.** By default a variable is published under its field name. Here `Outputs` and `States` both have a field `x`, so the states are published under a different name with `STATE_AS(field, "name")`. The same exists as `PARAM_AS`, `INPUT_AS` and `OUTPUT_AS`.
+2. **Names must be unique.** By default a variable is published under its field name. Here `Outputs` and `States` both have a field `x`, so the states are published under a different name with `STATE_AS(field, "name")`. The same exists as `PARAM_AS`, `INPUT_AS`, `OUTPUT_AS` and `LOCAL_AS`.
 3. **Every state must be listed.** All fields of `States` have to appear in the table. The start value of a state is its initial condition.
-4. **List every parameter, input and output too.** Only listed variables appear in the `modelDescription.xml`. The build does not stop you from leaving out a field of `Params`, `Inputs` or `Outputs`, but such a field cannot be reached from outside and stays at zero: an input that is never set, an output nobody can read, a parameter without a start value. Memory that your model needs but does not publish belongs into [`Internals`](#internals).
+4. **List every parameter, input, output and local variable too.** Only listed variables appear in the `modelDescription.xml`. The build does not stop you from leaving out a field of `Params`, `Inputs`, `Outputs` or `Locals`, but such a field cannot be reached from outside: an input that is never set, an output nobody can read, a parameter without a start value. Memory that your model needs but does not publish belongs into [`Internals`](#internals).
 
 If you break rule 2 or 3, the build stops with a message that tells you what to fix.
 
@@ -405,7 +442,7 @@ const modelDefinition MODEL_DEFINITION = {
 | `description`, `version` | Optional meta data |
 | `variables`, `numberOfVariables` | The variable table |
 | `units`, `numberOfUnits` | Optional table that defines your units in SI base units (see below) |
-| `sizeOfParams`, `sizeOfInputs`, `sizeOfOutputs`, `sizeOfInternals` | `sizeof` of the respective struct. Leave out what your model does not have |
+| `sizeOfParams`, `sizeOfInputs`, `sizeOfOutputs`, `sizeOfLocals`, `sizeOfInternals` | `sizeof` of the respective struct. Leave out what your model does not have |
 | `numberOfStates` | Number of states, `NUMBER_OF_DOUBLES(States)` |
 | `getStateDerivatives`, `getOutputs` | Your two equations |
 | `integrate` | Numerical integration method to use, see `include/integrator.h` |
@@ -465,6 +502,7 @@ You do not write this file. During the build, a small program (`src/fmi2ModelDes
 | input | `input` | `continuous` (real) or `discrete` (integer, boolean) | |
 | output | `output` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
 | state | `local` | `continuous` | `exact` |
+| local variable | `local` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
 
 The model name becomes the `modelIdentifier`, which is also the name of the binary inside the FMU. The `.name` of your model definition must therefore be equal to the name of your model folder; the build stops if it is not.
 
@@ -478,7 +516,7 @@ result = simulate_fmu(
 )
 ```
 
-Since the states are published, initial conditions can be set from outside like any other start value. Parameters marked `VAR_FIXED` and states can be set until the initialization is finished; inputs and tunable parameters also between steps.
+Since the states are published, initial conditions can be set from outside like any other start value. Parameters marked `VAR_FIXED` and states can be set until the initialization is finished; inputs and tunable parameters also between steps. Outputs and local variables are computed by the model and can never be set. States and local variables share the causality `local`; `initial` tells them apart.
 
 #### Direct feedthrough
 

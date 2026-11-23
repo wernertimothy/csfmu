@@ -5,6 +5,7 @@
 typedef struct { double gain; int mode; bool enabled; double internal; } Params;
 typedef struct { double u; bool reset; } Inputs;
 typedef struct { double y; int count; } Outputs;
+typedef struct { double ratio; int level; bool saturated; } Locals;
 typedef struct { double x1; double x2; } States;
 typedef struct { double cache; int counter; } Internals;
 
@@ -23,6 +24,9 @@ static const modelVariable VARIABLES[] = {
     { STATE_AS(x1, "first_state"), .start = 4.0 },
     { PARAM(enabled), .start = 1 },
     { OUTPUT(count) },
+    { LOCAL_AS(ratio, "ratio_value") },
+    { LOCAL(level),   .start = 7 },
+    { LOCAL(saturated) },
 };
 
 static const modelDefinition DEFINITION = {
@@ -32,6 +36,7 @@ static const modelDefinition DEFINITION = {
     .sizeOfParams        = sizeof(Params),
     .sizeOfInputs        = sizeof(Inputs),
     .sizeOfOutputs       = sizeof(Outputs),
+    .sizeOfLocals        = sizeof(Locals),
     .sizeOfInternals     = sizeof(Internals),
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
@@ -40,7 +45,7 @@ static const modelDefinition DEFINITION = {
     .defaultExperiment   = { .tolerance = 1e-4 },
 };
 
-/* A model without parameters, inputs, outputs and internals */
+/* A model without parameters, inputs, outputs, locals and internals */
 static const modelDefinition ONLY_STATES = { .numberOfStates = 2 };
 
 /* A model without states */
@@ -64,6 +69,7 @@ void test_newModel_allocatesMemory(void) {
     TEST_ASSERT_NOT_NULL(model->params);
     TEST_ASSERT_NOT_NULL(model->inputs);
     TEST_ASSERT_NOT_NULL(model->outputs);
+    TEST_ASSERT_NOT_NULL(model->locals);
     TEST_ASSERT_NOT_NULL(model->internals);
     TEST_ASSERT_NOT_NULL(model->states);
     TEST_ASSERT_NOT_NULL(model->stateDerivatives);
@@ -101,6 +107,7 @@ void test_newModel_appliesStartValuesOfAllTypes(void) {
 void test_newModel_zeroesEverythingWithoutStartValue(void) {
     const Params*    p         = model->params;
     const Outputs*   out       = model->outputs;
+    const Locals*    locals    = model->locals;
     const Internals* internals = model->internals;
 
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->time);
@@ -109,6 +116,8 @@ void test_newModel_zeroesEverythingWithoutStartValue(void) {
     TEST_ASSERT_EQUAL_INT(0, out->count);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->stateDerivatives[0]);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->stateDerivatives[1]);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, locals->ratio);
+    TEST_ASSERT_FALSE(locals->saturated);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->cache);  /* internals have no start values */
     TEST_ASSERT_EQUAL_INT(0, internals->counter);
 }
@@ -126,6 +135,7 @@ void test_newModel_handlesEmptyBlocks(void) {
     TEST_ASSERT_NULL(m->params);
     TEST_ASSERT_NULL(m->inputs);
     TEST_ASSERT_NULL(m->outputs);
+    TEST_ASSERT_NULL(m->locals);
     TEST_ASSERT_NULL(m->internals);
     TEST_ASSERT_NOT_NULL(m->states);
 
@@ -148,6 +158,7 @@ void test_resetModel_restoresStartValues(void) {
     Params*    p         = model->params;
     Inputs*    in        = model->inputs;
     Outputs*   out       = model->outputs;
+    Locals*    locals    = model->locals;
     Internals* internals = model->internals;
 
     /* arrange: change everything */
@@ -161,6 +172,9 @@ void test_resetModel_restoresStartValues(void) {
     out->count = 99;
     model->states[0] = 99.0;
     model->stateDerivatives[1] = 99.0;
+    locals->ratio = 99.0;
+    locals->level = 99;
+    locals->saturated = true;
     internals->cache = 99.0;
     internals->counter = 99;
     model->integrate = NULL;
@@ -179,6 +193,9 @@ void test_resetModel_restoresStartValues(void) {
     TEST_ASSERT_EQUAL_INT(0, out->count);
     TEST_ASSERT_EQUAL_DOUBLE(4.0, model->states[0]);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, model->stateDerivatives[1]);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, locals->ratio);
+    TEST_ASSERT_EQUAL_INT(7, locals->level);  /* the start value, like any other variable */
+    TEST_ASSERT_FALSE(locals->saturated);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->cache);
     TEST_ASSERT_EQUAL_INT(0, internals->counter);
     TEST_ASSERT_TRUE(model->integrate == integrator);
@@ -203,12 +220,24 @@ void test_variableMacros_deriveNameTypeAndRole(void) {
     TEST_ASSERT_EQUAL_STRING("first_state", VARIABLES[6].name);
     TEST_ASSERT_EQUAL_INT(VAR_REAL, VARIABLES[6].type);
     TEST_ASSERT_EQUAL_INT(VAR_STATE, VARIABLES[6].role);
+
+    /* { LOCAL_AS(ratio, "ratio_value") } is entry 9, { LOCAL(level) } entry 10,
+     * { LOCAL(saturated) } entry 11 */
+    TEST_ASSERT_EQUAL_STRING("ratio_value", VARIABLES[9].name);
+    TEST_ASSERT_EQUAL_INT(VAR_REAL, VARIABLES[9].type);
+    TEST_ASSERT_EQUAL_INT(VAR_LOCAL, VARIABLES[9].role);
+    TEST_ASSERT_EQUAL_STRING("level", VARIABLES[10].name);
+    TEST_ASSERT_EQUAL_INT(VAR_INTEGER, VARIABLES[10].type);
+    TEST_ASSERT_EQUAL_INT(VAR_LOCAL, VARIABLES[10].role);
+    TEST_ASSERT_EQUAL_INT(VAR_BOOLEAN, VARIABLES[11].type);
+    TEST_ASSERT_EQUAL_INT(VAR_LOCAL, VARIABLES[11].role);
 }
 
 void test_modelVariableAddress_pointsToTheStructField(void) {
     Params*  p   = model->params;
     Inputs*  in  = model->inputs;
     Outputs* out = model->outputs;
+    Locals*  loc = model->locals;
 
     TEST_ASSERT_EQUAL_PTR(&out->y,           modelVariableAddress(model, 0));
     TEST_ASSERT_EQUAL_PTR(&p->gain,          modelVariableAddress(model, 1));
@@ -217,6 +246,9 @@ void test_modelVariableAddress_pointsToTheStructField(void) {
     TEST_ASSERT_EQUAL_PTR(&p->mode,          modelVariableAddress(model, 4));
     TEST_ASSERT_EQUAL_PTR(&model->states[0], modelVariableAddress(model, 6));
     TEST_ASSERT_EQUAL_PTR(&out->count,       modelVariableAddress(model, 8));
+    TEST_ASSERT_EQUAL_PTR(&loc->ratio,       modelVariableAddress(model, 9));
+    TEST_ASSERT_EQUAL_PTR(&loc->level,       modelVariableAddress(model, 10));
+    TEST_ASSERT_EQUAL_PTR(&loc->saturated,   modelVariableAddress(model, 11));
 }
 
 void test_modelVariableAddress_rejectsInvalidArguments(void) {

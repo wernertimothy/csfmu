@@ -65,11 +65,25 @@
             <Boolean/>
         </ScalarVariable>
 
+        <!-- Locals -->
+        <ScalarVariable name="rate" valueReference="13" description="Rate of the gain" causality="local" variability="continuous" initial="calculated">
+            <Real unit="N/m" min="-1" max="1" nominal="2"/>
+        </ScalarVariable>
+        <ScalarVariable name="level" valueReference="14" causality="local" variability="discrete" initial="calculated">
+            <Integer min="0" max="9"/>
+        </ScalarVariable>
+        <ScalarVariable name="saturated" valueReference="15" causality="local" variability="discrete" initial="calculated">
+            <Boolean/>
+        </ScalarVariable>
+        <ScalarVariable name="ratio_value" valueReference="16" causality="local" variability="continuous" initial="calculated">
+            <Real/>
+        </ScalarVariable>
+
         <!-- States -->
-        <ScalarVariable name="x1" valueReference="13" causality="local" variability="continuous" initial="exact">
+        <ScalarVariable name="x1" valueReference="17" causality="local" variability="continuous" initial="exact">
             <Real start="4"/>
         </ScalarVariable>
-        <ScalarVariable name="second_state" valueReference="14" causality="local" variability="continuous" initial="exact">
+        <ScalarVariable name="second_state" valueReference="18" causality="local" variability="continuous" initial="exact">
             <Real start="-1" unit="N/m"/>
         </ScalarVariable>
     </ModelVariables>

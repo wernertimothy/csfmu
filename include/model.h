@@ -82,10 +82,13 @@ typedef void (*stateDerivativesFn)(modelInstance* model);
 typedef void (*integrateFn)(modelInstance* model, double stepSize);
 
 /**
- * @brief Function pointer type for computing model outputs.
+ * @brief Function pointer type for computing model outputs and locals.
  *
  * Model-specific implementations compute y = h(t, x, u) and store
- * the outputs in model->outputs.
+ * the outputs in model->outputs and the local variables in model->locals.
+ * It is called at the communication points (and whenever a variable was
+ * set since the last call), never at the stages of the integrator, so the
+ * state equation must not read the locals.
  *
  * @param model Pointer to the model instance containing current states and inputs
  */
@@ -106,13 +109,15 @@ typedef enum {
  * @brief Role of a model variable.
  *
  * The role also selects the storage block of the model instance the
- * variable lives in (params, inputs, outputs or states).
+ * variable lives in (params, inputs, outputs, locals or states).
  */
 typedef enum {
     VAR_PARAMETER,  /**< Constant during a simulation run, lives in model->params */
     VAR_INPUT,      /**< Set from outside, lives in model->inputs */
     VAR_OUTPUT,     /**< Computed by the output equation, lives in model->outputs */
-    VAR_STATE       /**< Continuous state, lives in model->states */
+    VAR_STATE,      /**< Continuous state, lives in model->states */
+    VAR_LOCAL       /**< Computed by the output equation and published read-only, but not
+                         part of the interface (no output), lives in model->locals */
 } varRole;
 
 /**
@@ -137,7 +142,7 @@ typedef struct {
 /**
  * @brief Description of one model variable.
  *
- * Declared with the PARAM(), INPUT(), OUTPUT() and STATE() macros, which
+ * Declared with the PARAM(), INPUT(), OUTPUT(), LOCAL() and STATE() macros, which
  * fill in name, type, role and offset from the struct field itself.
  */
 typedef struct {
@@ -199,6 +204,7 @@ typedef struct {
     size_t sizeOfParams;    /**< sizeof(Params), 0 if the model has no parameters */
     size_t sizeOfInputs;    /**< sizeof(Inputs), 0 if the model has no inputs */
     size_t sizeOfOutputs;   /**< sizeof(Outputs), 0 if the model has no outputs */
+    size_t sizeOfLocals;    /**< sizeof(Locals), 0 if the model has no local variables */
     size_t sizeOfInternals; /**< sizeof(Internals), 0 if the model has no internals. Internals are
                                  memory of the model that is not published: zeroed by
                                  resetModel() and part of the model data (see saveModelData()) */
@@ -218,7 +224,8 @@ typedef struct {
  * Represents a single instance of a dynamical system model, containing:
  * - A pointer to the model definition
  * - The current time t and the relative tolerance
- * - Storage blocks for parameters, inputs and outputs (model-specific structs)
+ * - Storage blocks for parameters, inputs, outputs and local variables
+ *   (model-specific structs)
  * - A storage block for the internals (model-specific struct, not published)
  * - State and state derivative vectors
  * - Work memory for the integrator (content is undefined between calls; it is
@@ -239,6 +246,8 @@ struct modelInstance {
     void* params;                            /**< Parameter block [def->sizeOfParams bytes] */
     void* inputs;                            /**< Input block [def->sizeOfInputs bytes] */
     void* outputs;                           /**< Output block [def->sizeOfOutputs bytes] */
+    void* locals;                            /**< Local variable block [def->sizeOfLocals bytes], computed
+                                                  by the output equation together with the outputs */
     void* internals;                         /**< Internals block [def->sizeOfInternals bytes], not published.
                                                   The state and output equations only read it */
     double* states;                         /**< Array of current state values [nx] */
@@ -314,8 +323,8 @@ void* modelVariableAddress(modelInstance* model, size_t index);
  * @brief Returns the number of bytes needed to store the data of a model.
  *
  * The data of a model are its time, its relative tolerance, its parameter,
- * input and output blocks, its states, its state derivatives and its
- * internals.
+ * input and output blocks, its states, its state derivatives, its internals
+ * and its local variables.
  *
  * @param def Definition of the model
  *
@@ -384,7 +393,7 @@ extern const modelDefinition MODEL_DEFINITION;
  * @brief Macros for declaring model variables.
  *
  * A model declares its storage as plain structs named Params, Inputs,
- * Outputs and States, and lists the fields it wants to publish:
+ * Outputs, Locals and States, and lists the fields it wants to publish:
  *
  * @code
  * typedef struct { double tau; int mode; } Params;
@@ -422,6 +431,9 @@ extern const modelDefinition MODEL_DEFINITION;
 /** Declares a field of the struct Outputs as an output. */
 #define OUTPUT(field)          MODEL_VARIABLE(VAR_OUTPUT, Outputs, field, #field, MODEL_VARIABLE_TYPES)
 
+/** Declares a field of the struct Locals as a local variable (published, read-only). */
+#define LOCAL(field)           MODEL_VARIABLE(VAR_LOCAL, Locals, field, #field, MODEL_VARIABLE_TYPES)
+
 /** Declares a field of the struct States as a continuous state (double only). */
 #define STATE(field)           MODEL_VARIABLE(VAR_STATE, States, field, #field, double: VAR_REAL)
 
@@ -433,6 +445,7 @@ extern const modelDefinition MODEL_DEFINITION;
 #define PARAM_AS(field, name)  MODEL_VARIABLE(VAR_PARAMETER, Params, field, name, MODEL_VARIABLE_TYPES)
 #define INPUT_AS(field, name)  MODEL_VARIABLE(VAR_INPUT, Inputs, field, name, MODEL_VARIABLE_TYPES)
 #define OUTPUT_AS(field, name) MODEL_VARIABLE(VAR_OUTPUT, Outputs, field, name, MODEL_VARIABLE_TYPES)
+#define LOCAL_AS(field, name)  MODEL_VARIABLE(VAR_LOCAL, Locals, field, name, MODEL_VARIABLE_TYPES)
 #define STATE_AS(field, name)  MODEL_VARIABLE(VAR_STATE, States, field, name, double: VAR_REAL)
 
 /** Sets an optional bound: .min = SOME(0.0) */
