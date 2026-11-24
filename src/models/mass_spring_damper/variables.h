@@ -33,6 +33,7 @@ extern "C" {
 
 /* state equation */
 void massSpringDamper(modelInstance* model);
+
 /* output equation */
 void massSpringDamperOutputs(modelInstance* model);
 

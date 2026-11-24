@@ -35,6 +35,7 @@ extern "C" {
 
 /* state equation */
 void typedDemoSystem(modelInstance* model);
+
 /* output equation */
 void typedDemoOutputs(modelInstance* model);
 

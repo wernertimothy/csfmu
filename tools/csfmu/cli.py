@@ -1,7 +1,7 @@
 """Command line interface of the csfmu project manager.
 
 Usage:
-    csfmu new <model> [--cpp]
+    csfmu new <model> [--cpp] [--bare]
     csfmu rm <model>
     csfmu build [<model>] [-o <dir>]
     csfmu test [<model>] [-- <pytest args>]
@@ -157,10 +157,11 @@ def test(root: Path, model: str, pytest_args: list[str]) -> int:
     return run([sys.executable, "-m", "pytest", *pytest_args], cwd=root, env=env)
 
 
-def new(root: Path, name: str, *, cpp: bool = False) -> int:
+def new(root: Path, name: str, *, cpp: bool = False, bare: bool = False) -> int:
     """Create a new model from the template in src/models/<name>/ and its tests in tests/models/<name>/.
 
-    With cpp, the equations are written in C++ (equations.cpp).
+    With cpp, the equations are written in C++ (equations.cpp). With bare, the
+    model is an empty skeleton that is not a valid model until it is filled in.
     """
     error = validate_name(name)
     if error is not None:
@@ -177,9 +178,14 @@ def new(root: Path, name: str, *, cpp: bool = False) -> int:
                 return 1
 
     print(f"Created model '{name}':")
-    for path in create_model(root, name, cpp=cpp):
+    for path in create_model(root, name, cpp=cpp, bare=bare):
         print(f"  {path.relative_to(root)}")
     print("Next:")
+    if bare:
+        print(
+            "  fill in the model and delete what it does not need"
+            " (it is not a valid model while empty)"
+        )
     print(f"  uv run csfmu build {name}")
     print(f"  uv run csfmu test {name}")
     return 0
@@ -312,6 +318,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="write the equations in C++ (equations.cpp instead of equations.c)",
     )
+    new_parser.add_argument(
+        "--bare",
+        action="store_true",
+        help="create an empty skeleton without equations (not a valid model until filled in)",
+    )
 
     rm_parser = commands.add_parser("rm", help="remove a model and all its files")
     rm_parser.add_argument("model", help="name of a folder under src/models/")
@@ -365,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "clean":
         return clean(root)
     if args.command == "new":
-        return new(root, args.model, cpp=args.cpp)
+        return new(root, args.model, cpp=args.cpp, bare=args.bare)
     if args.command == "rm":
         return remove(root, args.model)
 

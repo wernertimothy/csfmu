@@ -33,6 +33,7 @@ extern "C" {
 
 /* state equation */
 void forcedPt1System(modelInstance* model);
+
 /* output equation */
 void forcedPt1Outputs(modelInstance* model);
 

@@ -71,7 +71,7 @@ Second, add the following files and fill them with life:
 
 That is all. You do not have to touch any other file of the project: the model is picked up by `-DMODEL=lorenz_attractor`.
 
-**Tip:** `uv run csfmu new lorenz_attractor` creates the folder and all three files for you, filled with a simple integrator that builds and passes the tests right away. Add `--cpp` to get the equations in C++. See [the project manager](csfmu_cli.md) for details.
+**Tip:** `uv run csfmu new lorenz_attractor` creates the folder and all three files for you, filled with a simple integrator that builds and passes the tests right away. Add `--cpp` to get the equations in C++, or `--bare` to get an empty skeleton of every part a model can have, instead of the integrator. See [the project manager](csfmu_cli.md) for details.
 
 The build system auto-detects whether your model uses C or C++ based on the file extension. If `equations.cpp` exists it will be compiled with the C++ compiler; otherwise `equations.c` is used.
 
@@ -127,6 +127,7 @@ extern "C" {
 
 /* state equation */
 void lorenzAttractor(modelInstance* model);
+
 /* output equation */
 void lorenzAttractorOutputs(modelInstance* model);
 

@@ -203,6 +203,7 @@ extern "C" {
 
 /* state equation */
 void ${camel}System(modelInstance* model);
+
 /* output equation */
 void ${camel}Outputs(modelInstance* model);
 
@@ -399,17 +400,259 @@ def test_output_integrates_the_input(initialized_fmu, vr) -> None:
 ''')
 
 
-def create_model(root: Path, name: str, *, cpp: bool = False) -> list[Path]:
+# The bare templates: every storage block, every field of the model definition
+# and every function, all of them empty. C does not allow empty structs, and an
+# FMU needs at least one variable, so a bare model is not a valid model until
+# the user has filled in what the model needs and deleted the rest.
+
+VARIABLES_H_BARE = Template("""\
+#ifndef ${guard}
+#define ${guard}
+
+#include "model.h"
+
+/*
+ * Fill in the structs your model needs and delete the others, together with
+ * their line in MODEL_DEFINITION (variables.c). C does not allow empty
+ * structs: GCC and Clang accept them as an extension, MSVC refuses them.
+ */
+
+/* parameters and calculated parameters (double, int, bool, char name[MODEL_STRING_SIZE]) */
+typedef struct {
+} Params;
+
+/* inputs (double, int, bool) */
+typedef struct {
+} Inputs;
+
+/* outputs (double, int, bool) */
+typedef struct {
+} Outputs;
+
+/* local variables: published read-only, computed by the output equation (double, int, bool) */
+typedef struct {
+} Locals;
+
+/* continuous states (doubles only) */
+typedef struct {
+} States;
+
+/* internals: not published, part of the FMU state (plain values and fixed-size arrays) */
+typedef struct {
+} Internals;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* state equation */
+void ${camel}System(modelInstance* model);
+
+/* output equation, also computes the local variables */
+void ${camel}Outputs(modelInstance* model);
+
+/* calculated parameters (optional) */
+void ${camel}CalculateParameters(modelInstance* model);
+
+/* initialization (optional) */
+simStatus ${camel}Initialize(modelInstance* model);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+""")
+
+VARIABLES_C_BARE = Template("""\
+#include "variables.h"
+#include "integrator.h"
+
+const modelDefinition MODEL_DEFINITION = {
+    /* model identifier */
+    .name        = "${name}",
+    .guid        = "{${guid}}",
+    .description = "",
+    .version     = "1.0.0",
+
+    /* variables and units (no tables yet; an FMU needs at least one variable) */
+    .variables         = NULL,
+    .numberOfVariables = 0,
+    .units             = NULL,
+    .numberOfUnits     = 0,
+
+    /* system dimensions */
+    .sizeOfParams    = sizeof(Params),
+    .sizeOfInputs    = sizeof(Inputs),
+    .sizeOfOutputs   = sizeof(Outputs),
+    .sizeOfLocals    = sizeof(Locals),
+    .sizeOfInternals = sizeof(Internals),
+    .numberOfStates  = NUMBER_OF_DOUBLES(States),
+
+    /* model equations */
+    .getStateDerivatives = ${camel}System,
+    .getOutputs          = ${camel}Outputs,
+
+    /* method for numerical integration */
+    .integrate   = eulerForward,
+    .maxStepSize = 1e-3,
+
+    /* calculated parameters and initialization (optional) */
+    .calculateParameters = ${camel}CalculateParameters,
+    .initialize          = ${camel}Initialize,
+
+    /* suggested simulation settings */
+    .defaultExperiment = { .startTime = 0.0, .stopTime = 10.0, .tolerance = 1e-6, .stepSize = 0.01 },
+};
+""")
+
+EQUATIONS_C_BARE = Template("""\
+#include "variables.h"
+
+/**
+ * State equation: dx/dt = f(t, x, u)
+ */
+void ${camel}System(modelInstance* model)
+{
+    (void)model;
+    /* const Params*    p         = model->params; */
+    /* const Inputs*    in        = model->inputs; */
+    /* const States*    x         = (const States*)model->states; */
+    /* const Internals* internals = model->internals; */
+    /* States*          dx        = (States*)model->stateDerivatives; */
+}
+
+/**
+ * Output equation: y = h(t, x, u), also computes the local variables
+ */
+void ${camel}Outputs(modelInstance* model)
+{
+    (void)model;
+    /* const Params*    p         = model->params; */
+    /* const Inputs*    in        = model->inputs; */
+    /* const States*    x         = (const States*)model->states; */
+    /* const Internals* internals = model->internals; */
+    /* Outputs*         out       = model->outputs; */
+    /* Locals*          locals    = model->locals; */
+}
+
+/**
+ * Calculated parameters: computed from the parameters only
+ */
+void ${camel}CalculateParameters(modelInstance* model)
+{
+    (void)model;
+    /* Params* p = model->params; */
+}
+
+/**
+ * Initialization: may set the states with .initial = VAR_APPROX and the internals
+ */
+simStatus ${camel}Initialize(modelInstance* model)
+{
+    (void)model;
+    /* const Params* p         = model->params; */
+    /* const Inputs* in        = model->inputs; */
+    /* States*       x         = (States*)model->states; */
+    /* Internals*    internals = model->internals; */
+    return SIM_OK;
+}
+""")
+
+EQUATIONS_CPP_BARE = Template("""\
+#include "variables.h"
+
+/* The equations are called from C, so they need C linkage */
+extern "C" {
+
+/**
+ * State equation: dx/dt = f(t, x, u)
+ */
+void ${camel}System(modelInstance* model)
+{
+    (void)model;
+    // const Params&    p         = *static_cast<const Params*>(model->params);
+    // const Inputs&    in        = *static_cast<const Inputs*>(model->inputs);
+    // const States&    x         = *reinterpret_cast<const States*>(model->states);
+    // const Internals& internals = *static_cast<const Internals*>(model->internals);
+    // States&          dx        = *reinterpret_cast<States*>(model->stateDerivatives);
+}
+
+/**
+ * Output equation: y = h(t, x, u), also computes the local variables
+ */
+void ${camel}Outputs(modelInstance* model)
+{
+    (void)model;
+    // const Params&    p         = *static_cast<const Params*>(model->params);
+    // const Inputs&    in        = *static_cast<const Inputs*>(model->inputs);
+    // const States&    x         = *reinterpret_cast<const States*>(model->states);
+    // const Internals& internals = *static_cast<const Internals*>(model->internals);
+    // Outputs&         out       = *static_cast<Outputs*>(model->outputs);
+    // Locals&          locals    = *static_cast<Locals*>(model->locals);
+}
+
+/**
+ * Calculated parameters: computed from the parameters only
+ */
+void ${camel}CalculateParameters(modelInstance* model)
+{
+    (void)model;
+    // Params& p = *static_cast<Params*>(model->params);
+}
+
+/**
+ * Initialization: may set the states with .initial = VAR_APPROX and the internals
+ */
+simStatus ${camel}Initialize(modelInstance* model)
+{
+    (void)model;
+    // const Params& p         = *static_cast<const Params*>(model->params);
+    // const Inputs& in        = *static_cast<const Inputs*>(model->inputs);
+    // States&       x         = *reinterpret_cast<States*>(model->states);
+    // Internals&    internals = *static_cast<Internals*>(model->internals);
+    return SIM_OK;
+}
+
+}  /* extern "C" */
+""")
+
+TEST_MODEL_BARE = Template('''\
+"""Tests of the ${name} model.
+
+Add the tests of your equations here, and check each result against a known
+solution, as the tests of the demo models in tests/models/ do.
+
+The tests in tests/integration/ check the FMI behavior of every model. The
+tests in this folder are only collected when the ${name} model is tested.
+"""
+''')
+
+
+def create_model(
+    root: Path, name: str, *, cpp: bool = False, bare: bool = False
+) -> list[Path]:
     """Create the files of a new model from the template and return their paths.
 
     Creates src/models/<name>/ with an integrator (dx/dt = k*u, y = x) and
     tests/models/<name>/ with a starter test of the model. Neither folder may exist.
     With cpp, the equations are written in C++ (equations.cpp instead of
     equations.c); variables.c stays C, because the variable table needs C.
+    With bare, the files are an empty skeleton instead of the integrator:
+    empty structs, every field of the model definition, empty functions and
+    a test file without tests. It is not a valid model until it is filled in.
     """
-    equations_file, equations = (
-        ("equations.cpp", EQUATIONS_CPP) if cpp else ("equations.c", EQUATIONS_C)
-    )
+    if bare:
+        variables_h, variables_c, test = (
+            VARIABLES_H_BARE,
+            VARIABLES_C_BARE,
+            TEST_MODEL_BARE,
+        )
+        equations = EQUATIONS_CPP_BARE if cpp else EQUATIONS_C_BARE
+    else:
+        variables_h, variables_c, test = VARIABLES_H, VARIABLES_C, TEST_MODEL
+        equations = EQUATIONS_CPP if cpp else EQUATIONS_C
+    equations_file = "equations.cpp" if cpp else "equations.c"
     values = {
         "name": name,
         "camel": camel_case(name),
@@ -419,11 +662,11 @@ def create_model(root: Path, name: str, *, cpp: bool = False) -> list[Path]:
     model_dir = root / "src" / "models" / name
     test_dir = root / "tests" / "models" / name
     files = {
-        model_dir / "variables.h": VARIABLES_H.substitute(values),
-        model_dir / "variables.c": VARIABLES_C.substitute(values),
+        model_dir / "variables.h": variables_h.substitute(values),
+        model_dir / "variables.c": variables_c.substitute(values),
         model_dir / equations_file: equations.substitute(values),
         test_dir / "__init__.py": "",
-        test_dir / f"test_{name}.py": TEST_MODEL.substitute(values),
+        test_dir / f"test_{name}.py": test.substitute(values),
     }
 
     model_dir.mkdir(parents=True)

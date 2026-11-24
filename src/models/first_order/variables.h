@@ -30,6 +30,7 @@ extern "C" {
 
 /* state equation */
 void firstOrderSystem(modelInstance* model);
+
 /* output equation */
 void firstOrderOutputs(modelInstance* model);
 

@@ -6,10 +6,17 @@ its tests is checked by the CLI job of the CI.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from csfmu import cli
 from csfmu.scaffold import camel_case, create_model, validate_name
+
+# The root of this repository (not of the fake project)
+REPO = Path(__file__).resolve().parents[2]
+
+# The storage blocks of a model, in the order of the bare template
+STORAGE_STRUCTS = ["Params", "Inputs", "Outputs", "Locals", "States", "Internals"]
 
 
 @pytest.fixture
@@ -35,6 +42,19 @@ def answer(monkeypatch, *answers: str) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt="": next(replies))
 
 
+def strip_comments(source: str) -> str:
+    """Remove the /* */ and // comments of C or C++ source code."""
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", "", source)
+
+
+def model_definition_fields() -> list[str]:
+    """Return the field names of the struct modelDefinition in include/model.h of this repository."""
+    header = strip_comments((REPO / "include" / "model.h").read_text(encoding="utf-8"))
+    body = re.search(r"typedef struct \{([^{}]*)\} modelDefinition;", header).group(1)
+    return re.findall(r"(\w+)\s*;", body)
+
+
 # argument parsing
 
 
@@ -56,6 +76,14 @@ def test_pytest_arguments_do_not_become_the_model() -> None:
 def test_new_writes_c_unless_cpp_is_given() -> None:
     assert cli.parse_args(["new", "my_model"]).cpp is False
     assert cli.parse_args(["new", "my_model", "--cpp"]).cpp is True
+
+
+def test_new_writes_the_template_unless_bare_is_given() -> None:
+    assert cli.parse_args(["new", "my_model"]).bare is False
+
+    args = cli.parse_args(["new", "my_model", "--bare", "--cpp"])
+    assert args.bare is True
+    assert args.cpp is True
 
 
 # finding the project and its models
@@ -180,6 +208,80 @@ def test_new_cpp_model_has_cpp_equations(project) -> None:
 def test_new_passes_cpp_on(project) -> None:
     assert cli.new(project, "my_model", cpp=True) == 0
     assert (project / "src/models/my_model/equations.cpp").is_file()
+
+
+def test_bare_model_has_every_storage_block_empty(project) -> None:
+    """The bare template has the same files, and its structs have no fields."""
+    files = create_model(project, "my_model", bare=True)
+
+    assert [path.relative_to(project).as_posix() for path in files] == [
+        "src/models/my_model/variables.h",
+        "src/models/my_model/variables.c",
+        "src/models/my_model/equations.c",
+        "tests/models/my_model/__init__.py",
+        "tests/models/my_model/test_my_model.py",
+    ]
+    header = strip_comments((project / "src/models/my_model/variables.h").read_text())
+    structs = re.findall(r"typedef struct \{(.*?)\} (\w+);", header, flags=re.DOTALL)
+    assert [name for _, name in structs] == STORAGE_STRUCTS
+    assert [body.strip() for body, _ in structs] == [""] * len(STORAGE_STRUCTS)
+
+
+def test_bare_model_definition_sets_every_field(project) -> None:
+    """The bare variables.c spells out every field of the model definition.
+
+    Unlike the other tests, this one reads include/model.h of this
+    repository: it fails when the model definition gets a field that the
+    bare template does not set yet.
+    """
+    create_model(project, "my_model", bare=True)
+    source = strip_comments((project / "src/models/my_model/variables.c").read_text())
+
+    fields = model_definition_fields()
+    assert "getStateDerivatives" in fields, "include/model.h was not parsed"
+    missing = [field for field in fields if not re.search(rf"\.{field}\s*=", source)]
+    assert missing == []
+
+
+@pytest.mark.parametrize("cpp", [False, True], ids=["C", "C++"])
+def test_bare_functions_are_empty(project, cpp) -> None:
+    """Apart from comments, the bare functions only use their argument (and return SIM_OK)."""
+    files = create_model(project, "my_model", cpp=cpp, bare=True)
+    equations = next(path for path in files if path.stem == "equations")
+    assert equations.suffix == (".cpp" if cpp else ".c")
+
+    source = strip_comments(equations.read_text())
+    bodies = re.findall(
+        r"(\w+)\(modelInstance\* model\)\s*\{(.*?)\}", source, flags=re.DOTALL
+    )
+    assert {function: " ".join(body.split()) for function, body in bodies} == {
+        "myModelSystem": "(void)model;",
+        "myModelOutputs": "(void)model;",
+        "myModelCalculateParameters": "(void)model;",
+        "myModelInitialize": "(void)model; return SIM_OK;",
+    }
+
+    # every function is declared and part of the model definition
+    header = (project / "src/models/my_model/variables.h").read_text()
+    definition = (project / "src/models/my_model/variables.c").read_text()
+    for function, _ in bodies:
+        assert f"{function}(modelInstance* model);" in header
+        assert f"= {function}," in definition
+
+
+def test_bare_test_file_has_no_tests(project) -> None:
+    create_model(project, "my_model", bare=True)
+    text = (project / "tests/models/my_model/test_my_model.py").read_text()
+
+    compile(text, "test_my_model.py", "exec")  # valid Python
+    assert text.startswith('"""Tests of the my_model model.')
+    assert "def test_" not in text
+
+
+def test_new_passes_bare_on(project, capsys) -> None:
+    assert cli.new(project, "my_model", cpp=True, bare=True) == 0
+    assert (project / "src/models/my_model/equations.cpp").is_file()
+    assert "not a valid model" in capsys.readouterr().out
 
 
 def test_every_new_model_gets_its_own_guid(project) -> None:

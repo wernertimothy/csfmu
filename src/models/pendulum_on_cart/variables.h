@@ -36,6 +36,7 @@ extern "C" {
 
 /* state equation */
 void pendulumOnCartSystem(modelInstance* model);
+
 /* output equation */
 void pendulumOnCartOutputs(modelInstance* model);
 

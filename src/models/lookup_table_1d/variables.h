@@ -36,8 +36,10 @@ extern "C" {
 
 /* state equation (nothing to compute, the model has no states) */
 void lookupTable1dSystem(modelInstance* model);
+
 /* output equation */
 void lookupTable1dOutputs(modelInstance* model);
+
 /* initialization: reads the table file */
 simStatus lookupTable1dInitialize(modelInstance* model);
 

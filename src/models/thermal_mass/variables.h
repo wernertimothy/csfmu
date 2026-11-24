@@ -42,10 +42,13 @@ extern "C" {
 
 /* state equation */
 void thermalMassSystem(modelInstance* model);
+
 /* output equation (outputs and local variables) */
 void thermalMassOutputs(modelInstance* model);
+
 /* calculated parameters */
 void thermalMassParameters(modelInstance* model);
+
 /* initialization */
 simStatus thermalMassInitialize(modelInstance* model);
 

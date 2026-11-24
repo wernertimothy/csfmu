@@ -32,6 +32,7 @@ extern "C" {
 
 /* state equation */
 void piControllerSystem(modelInstance* model);
+
 /* output equation */
 void piControllerOutputs(modelInstance* model);
 

@@ -26,6 +26,7 @@ extern "C" {
 
 /* state equation */
 void faultInjectionSystem(modelInstance* model);
+
 /* output equation */
 void faultInjectionOutputs(modelInstance* model);
 

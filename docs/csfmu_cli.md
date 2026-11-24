@@ -35,7 +35,7 @@ Select a model [1-4] or q to quit:
 
 ## Commands
 
-### `new <model> [--cpp]`
+### `new <model> [--cpp] [--bare]`
 
 Creates a new model from a template.
 
@@ -81,6 +81,26 @@ The FMI behavior of every model is checked by the tests in `tests/integration/`.
 uv run csfmu build my_model
 uv run csfmu test my_model
 ```
+
+**Bare models.** With `--bare` the files are an empty skeleton instead of the integrator, to be filled in with your own model:
+
+```bash
+uv run csfmu new my_model --bare
+```
+
+  | File | Content |
+  |------|---------|
+  | `src/models/<model>/variables.h` | All six structs, empty: `Params`, `Inputs`, `Outputs`, `Locals`, `States` and `Internals`, and the declarations of the four functions |
+  | `src/models/<model>/variables.c` | The model definition with every field written out and a freshly generated GUID, but no variable table and no unit table yet |
+  | `src/models/<model>/equations.c` (`equations.cpp` with `--cpp`) | The state equation, the output equation, the calculated parameters and the initialization, all empty. Comments in each function show how to view the storage blocks it may use |
+  | `tests/models/<model>/test_<model>.py` | Only a docstring, no tests yet |
+
+Implement what your model needs and delete what it does not need: a struct together with its line in `MODEL_DEFINITION`, and the calculated parameters or the initialization together with their declaration and their line in `MODEL_DEFINITION`.
+The state and output equations, the integrator and `maxStepSize` are required, also for a model without states (see `lookup_table_1d`). [getting started][] explains each part.
+
+A bare model does not build into a working FMU as it is, it is only a starting point.
+
+`--bare` and `--cpp` can be combined: `uv run csfmu new my_model --bare --cpp` creates the empty skeleton with `equations.cpp`.
 
 **Naming rules.** The model name ends up as folder name, CMake target, FMI `modelIdentifier`, file name of the FMU and Python package name of the tests. It therefore has to be valid for all of them:
 
