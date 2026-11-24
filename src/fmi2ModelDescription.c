@@ -13,6 +13,7 @@
  *   ModelStructure.
  * - Calculated parameters are initial unknowns of the ModelStructure.
  * - The enumeration types the variables use become TypeDefinitions.
+ * - String parameters are published with their start text.
  * - The inputs an output depends on directly (dependsOn) become the
  *   dependencies of the output in the ModelStructure.
  * - The capability flags and log categories describe fmi2Functions.c and
@@ -55,6 +56,7 @@ static size_t sizeOfType(varType type)
         case VAR_REAL:    return sizeof(double);
         case VAR_INTEGER: return sizeof(int);
         case VAR_BOOLEAN: return sizeof(bool);
+        case VAR_STRING:  return MODEL_STRING_SIZE;
     }
     return 0;
 }
@@ -332,6 +334,60 @@ static int validateEnumeration(const modelDefinition* def, size_t k)
 }
 
 /**
+ * Check a string variable
+ *
+ * Prints one message per problem and returns the number of problems.
+ *
+ * The start text is checked byte by byte: control characters cannot be
+ * published, because an XML parser replaces tab, line feed and carriage
+ * return in an attribute value by spaces (attribute-value normalization),
+ * and the other control characters are not allowed in XML 1.0 at all.
+ */
+static int validateString(const modelVariable* variable)
+{
+    int problems = 0;
+
+    if (variable->role != VAR_PARAMETER) {
+        fprintf(stderr, "error: '%s' is a string, but only parameters can be strings\n", variable->name);
+        problems++;
+    }
+
+    if (variable->size != MODEL_STRING_SIZE) {
+        fprintf(stderr, "error: string parameter '%s' must be declared as char %s[MODEL_STRING_SIZE] "
+                        "(a char* pointer or an array of another size cannot be published)\n",
+                        variable->name, variable->name);
+        problems++;
+    }
+
+    if (variable->unit || variable->min.set || variable->max.set || variable->nominal != 0.0 ||
+        variable->start != 0.0) {
+        fprintf(stderr, "error: string parameter '%s' has .unit, .min, .max, .nominal or .start; "
+                        "its start value is the text .startString\n", variable->name);
+        problems++;
+    }
+
+    if (variable->startString) {
+        size_t length = strlen(variable->startString);
+        if (length >= MODEL_STRING_SIZE) {
+            fprintf(stderr, "error: the start text of '%s' has %zu bytes, at most %d fit "
+                            "(MODEL_STRING_SIZE - 1)\n", variable->name, length, MODEL_STRING_SIZE - 1);
+            problems++;
+        }
+        for (size_t k = 0; k < length; k++) {
+            if ((unsigned char)variable->startString[k] < 0x20) {
+                fprintf(stderr, "error: the start text of '%s' contains the control character %d at "
+                                "byte %zu, which the modelDescription.xml cannot hold\n",
+                                variable->name, (unsigned char)variable->startString[k], k);
+                problems++;
+                break;
+            }
+        }
+    }
+
+    return problems;
+}
+
+/**
  * Check the model definition for mistakes that the compiler cannot catch
  *
  * Prints one message per problem and returns the number of problems.
@@ -351,6 +407,9 @@ static int validateEnumeration(const modelDefinition* def, size_t k)
  * - Enumeration types are only used by Integer variables, have a unique
  *   name and items with unique names and values; an enumeration variable
  *   starts at the value of an item and has no bounds of its own
+ * - Strings are parameters declared as char[MODEL_STRING_SIZE], without unit,
+ *   bounds, nominal or numeric start; their start text fits and has no
+ *   control characters. Only strings have a start text
  */
 static int validateDefinition(const modelDefinition* def, const char* modelIdentifier)
 {
@@ -408,8 +467,11 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
             }
         }
 
-        /* Variable must lie inside its storage block */
-        if (variable->offset + sizeOfType(variable->type) > sizeOfBlock(def, variable->role)) {
+        /* Variable must lie inside its storage block (a string of the wrong
+           size is reported by validateString instead) */
+        bool isStringOfWrongSize = variable->type == VAR_STRING && variable->size != MODEL_STRING_SIZE;
+        if (!isStringOfWrongSize &&
+            variable->offset + sizeOfType(variable->type) > sizeOfBlock(def, variable->role)) {
             fprintf(stderr, "error: variable '%s' lies outside its storage block "
                             "(check sizeOfParams, sizeOfInputs, sizeOfOutputs, sizeOfLocals, numberOfStates)\n",
                             variable->name);
@@ -432,8 +494,8 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
             }
         }
 
-        /* Start value must respect the bounds */
-        if (hasStartValue(variable->role) &&
+        /* Start value must respect the bounds (a string has neither, see validateString) */
+        if (hasStartValue(variable->role) && variable->type != VAR_STRING &&
             ((variable->min.set && variable->start < variable->min.value) ||
              (variable->max.set && variable->start > variable->max.value))) {
             fprintf(stderr, "error: start value of '%s' lies outside [min, max]\n", variable->name);
@@ -478,6 +540,15 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
                         (int)variable->start, variable->name);
                 problems++;
             }
+        }
+
+        /* String variables, and the start text that only they have */
+        if (variable->type == VAR_STRING) {
+            problems += validateString(variable);
+        } else if (variable->startString) {
+            fprintf(stderr, "error: '%s' has .startString, but only string parameters have a start text "
+                            "(use .start)\n", variable->name);
+            problems++;
         }
 
         /* Dependencies must be inputs of this model */
@@ -643,6 +714,10 @@ static const char* roleTitle(varRole role)
  *   state       local                continuous            exact/approx  yes
  *   local       local                continuous / discrete calculated    no
  *
+ * Strings are parameters only (see validateDefinition()), published as
+ * <String start="..."/> with the start text ("" if the model gives none:
+ * a parameter has initial="exact", which needs a start value).
+ *
  * Real inputs, outputs and locals are continuous, Integer and Boolean ones
  * are discrete (FMI 2.0 only allows continuous for Real variables). States
  * and local variables share causality "local"; initial tells them apart: a
@@ -739,6 +814,12 @@ static void writeScalarVariable(FILE* file, const modelVariable* variable, size_
             fputs("            <Boolean", file);
             if (hasStart) {
                 fprintf(file, " start=\"%s\"", (variable->start != 0.0) ? "true" : "false");
+            }
+            break;
+        case VAR_STRING:
+            fputs("            <String", file);
+            if (hasStart) {
+                writeStringAttribute(file, "start", variable->startString ? variable->startString : "");
             }
             break;
     }

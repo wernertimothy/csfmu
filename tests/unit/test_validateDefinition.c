@@ -20,7 +20,7 @@
 
 #define IDENTIFIER "validation_model"
 
-typedef struct { double gain; double scaled; int choice; int mode; } Params;
+typedef struct { double gain; double scaled; int choice; char name[MODEL_STRING_SIZE]; int mode; } Params;
 typedef struct { double u; double w; } Inputs;
 typedef struct { double y; } Outputs;
 typedef struct { double ratio; int level; } Locals;
@@ -42,12 +42,13 @@ static const modelEnumeration CHOICE = {
 };
 
 /* Indices into the variable table; X2 is last, so it can be left out */
-enum { GAIN, MODE, CHOICE_VAR, SCALED, U, W, Y, RATIO, LEVEL, X1, X2, NUMBER_OF_VARIABLES };
+enum { GAIN, MODE, CHOICE_VAR, NAME, SCALED, U, W, Y, RATIO, LEVEL, X1, X2, NUMBER_OF_VARIABLES };
 
 static const modelVariable VARIABLES[NUMBER_OF_VARIABLES] = {
     [GAIN]   = { PARAM(gain), .start = 1.0, .min = SOME(0.0), .max = SOME(10.0) },
     [MODE]   = { PARAM(mode), .start = 1 },
     [CHOICE_VAR] = { PARAM(choice), .declaredType = &CHOICE, .start = 3 },
+    [NAME]   = { PARAM(name), .startString = "table.csv" },
     [SCALED] = { CALCULATED_PARAM(scaled) },
     [U]      = { INPUT(u) },
     [W]      = { INPUT(w) },
@@ -369,6 +370,102 @@ void test_acceptsComputedEnumerationWithoutStartValue(void)
 }
 
 /***************************************************
+ * Strings
+ ***************************************************/
+
+/* A start text of the given length: "aaa...a" */
+static char startText[MODEL_STRING_SIZE + 1];
+static const char* startTextOfLength(size_t length)
+{
+    memset(startText, 'a', length);
+    startText[length] = '\0';
+    return startText;
+}
+
+void test_acceptsStringWithoutStartText(void)
+{
+    variables[NAME].startString = NULL;
+    TEST_ASSERT_EQUAL_INT(0, problems());
+}
+
+void test_rejectsStringThatIsNoParameter(void)
+{
+    /* a calculated parameter lives in the parameter block too, so only the role is wrong */
+    variables[NAME].role = VAR_CALCULATED_PARAMETER;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsStringOfAnotherSize(void)
+{
+    variables[NAME].size = MODEL_STRING_SIZE / 2;  /* char name[128] */
+    TEST_ASSERT_EQUAL_INT(1, problems());
+    setUp();
+    variables[NAME].size = sizeof(char*);  /* char* name: a pointer, no storage */
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsUnitBoundsNominalAndNumericStartOnAString(void)
+{
+    variables[NAME].unit = "1";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+    setUp();
+    variables[NAME].min = (optReal)SOME(0.0);
+    TEST_ASSERT_EQUAL_INT(1, problems());
+    setUp();
+    variables[NAME].max = (optReal)SOME(1.0);
+    TEST_ASSERT_EQUAL_INT(1, problems());
+    setUp();
+    variables[NAME].nominal = 1.0;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+    setUp();
+    variables[NAME].start = 1.0;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsDeclaredTypeOnAString(void)
+{
+    variables[NAME].declaredType = &choice;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_acceptsTheLongestStartText(void)
+{
+    variables[NAME].startString = startTextOfLength(MODEL_STRING_SIZE - 1);
+    TEST_ASSERT_EQUAL_INT(0, problems());
+}
+
+void test_rejectsStartTextThatDoesNotFit(void)
+{
+    variables[NAME].startString = startTextOfLength(MODEL_STRING_SIZE);
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsControlCharacterInTheStartText(void)
+{
+    variables[NAME].startString = "table\t.csv";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+    setUp();
+    variables[NAME].startString = "table\n.csv";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+    setUp();
+    variables[NAME].startString = "\x01\x02";  /* one problem, also for several */
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_acceptsNonAsciiStartText(void)
+{
+    /* UTF-8 bytes are >= 0x80 and must not be mistaken for control characters */
+    variables[NAME].startString = "Tabelle_\xc3\xa4\xc3\xb6\xc3\xbc.csv";
+    TEST_ASSERT_EQUAL_INT(0, problems());
+}
+
+void test_rejectsStartTextOnAVariableThatIsNoString(void)
+{
+    variables[GAIN].startString = "1.0";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+/***************************************************
  * dependsOn
  ***************************************************/
 
@@ -483,6 +580,17 @@ int main(void)
     RUN_TEST(test_rejectsStartValueThatIsNoItem);
     RUN_TEST(test_rejectsBoundsOnAnEnumerationVariable);
     RUN_TEST(test_acceptsComputedEnumerationWithoutStartValue);
+
+    RUN_TEST(test_acceptsStringWithoutStartText);
+    RUN_TEST(test_rejectsStringThatIsNoParameter);
+    RUN_TEST(test_rejectsStringOfAnotherSize);
+    RUN_TEST(test_rejectsUnitBoundsNominalAndNumericStartOnAString);
+    RUN_TEST(test_rejectsDeclaredTypeOnAString);
+    RUN_TEST(test_acceptsTheLongestStartText);
+    RUN_TEST(test_rejectsStartTextThatDoesNotFit);
+    RUN_TEST(test_rejectsControlCharacterInTheStartText);
+    RUN_TEST(test_acceptsNonAsciiStartText);
+    RUN_TEST(test_rejectsStartTextOnAVariableThatIsNoString);
 
     RUN_TEST(test_rejectsDependsOnOfAVariableThatIsNoOutput);
     RUN_TEST(test_rejectsDependsOnOfALocal);

@@ -9,7 +9,7 @@ csfmu provides a minimal, self-contained implementation of the FMI Co-Simulation
 Key features:
 - **Plug-and-play model interface**: Add your model without modifying the FMU code
 - **FMU-agnostic design**: Models can be tested and simulated independently
-- **Declare variables once**: Parameters, inputs, outputs and states are plain C struct fields (`double`, `int` or `bool`), in any order; the `modelDescription.xml` is generated
+- **Declare variables once**: Parameters, inputs, outputs and states are plain C struct fields (`double`, `int` or `bool`, and strings for parameters), in any order; the `modelDescription.xml` is generated
 - **Build-time model selection**: Choose your model via CMake build options
 - **Extensible architecture**: It's easy to add new models and integrators or extend the fmi implementation.
 

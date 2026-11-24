@@ -69,6 +69,10 @@ modelInstance* newModel(const modelDefinition* def)
  * - memset() on a NULL block is avoided by checking the block size
  * - Start values are stored as double in the variable table and converted
  *   to the variable's type here
+ * - The start value of a string is the text .startString (NULL = ""). It is
+ *   written with modelSetString(), so a start value that does not fit (the
+ *   build refuses it, but a definition that bypasses the build may have
+ *   one) leaves the zeroed field "" instead of writing past it
  */
 void resetModel(modelInstance* model)
 {
@@ -121,6 +125,9 @@ void resetModel(modelInstance* model)
             case VAR_BOOLEAN:
                 *(bool*)address = (variable->start != 0.0);
                 break;
+            case VAR_STRING:
+                modelSetString(model, k, variable->startString ? variable->startString : "");
+                break;
         }
     }
 
@@ -154,6 +161,47 @@ bool modelEnumerationHasValue(const modelEnumeration* type, int value)
         }
     }
     return false;
+}
+
+/**
+ * Implementation notes for modelSetString():
+ * - The length is counted by a loop that stops after MODEL_STRING_SIZE
+ *   bytes, so a value that is far too long (or not terminated within that
+ *   range) is never read further than needed to refuse it. strnlen() would
+ *   do the same, but it is not part of C11
+ * - memmove() instead of memcpy() or strcpy(): value may point into the
+ *   variable itself, e.g. if an FMI master passes back the pointer it got
+ *   from fmi2GetString
+ * - The bytes behind the text are zeroed, so the field only depends on the
+ *   text and not on longer texts it held before. Equal model data then
+ *   also have equal bytes (e.g. two serialized FMU states)
+ * - A string whose field is not MODEL_STRING_SIZE bytes is never written:
+ *   the build refuses such a definition, and a definition that bypasses the
+ *   build must not make this function write past the field
+ */
+bool modelSetString(modelInstance* model, size_t index, const char* value)
+{
+    if (!model || !value || index >= model->def->numberOfVariables) {
+        return false;
+    }
+
+    const modelVariable* variable = &model->def->variables[index];
+    if (variable->type != VAR_STRING || variable->size != MODEL_STRING_SIZE) {
+        return false;
+    }
+
+    size_t length = 0;
+    while (length < MODEL_STRING_SIZE && value[length] != '\0') {
+        length++;
+    }
+    if (length == MODEL_STRING_SIZE) {
+        return false;
+    }
+
+    char* field = modelVariableAddress(model, index);
+    memmove(field, value, length + 1);
+    memset(field + length + 1, 0, MODEL_STRING_SIZE - (length + 1));
+    return true;
 }
 
 void computeCalculatedParameters(modelInstance* model)

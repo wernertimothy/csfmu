@@ -31,7 +31,7 @@ The two sides are kept apart by one idea: **a model describes its variables once
 * The **FMI implementation** knows nothing about the model. It finds every variable through that table.
 * The **`modelDescription.xml`** is generated from the same table during the build. You never write it by hand, and you never deal with value references.
 
-As a consequence there are no ordering rules: variables can be declared in any order and can be of type `double`, `int` or `bool`.
+As a consequence there are no ordering rules: variables can be declared in any order and can be of type `double`, `int` or `bool`, and parameters can also be strings.
 
 Which systems a model can describe, and a demo model for each feature, is listed in [supported models](csfmu_supportedModels.md).
 
@@ -84,7 +84,7 @@ This header declares the storage of your model as plain structs. The struct name
 
 | Struct | Content | Allowed field types |
 |--------|---------|---------------------|
-| `Params` | Model parameters, and the parameters your model calculates from them (see [Initialization](#initialization)) | `double`, `int`, `bool` |
+| `Params` | Model parameters, and the parameters your model calculates from them (see [Initialization](#initialization)) | `double`, `int`, `bool`, and `char name[MODEL_STRING_SIZE]` for a string (see [String parameters](#string-parameters)) |
 | `Inputs` | Input signals | `double`, `int`, `bool` |
 | `Outputs` | Output signals | `double`, `int`, `bool` |
 | `Locals` | Computed values that can be read from outside, but are no outputs (see [Local variables](#local-variables)) | `double`, `int`, `bool` |
@@ -201,6 +201,8 @@ void lorenzAttractor(modelInstance* model) {
   dx->z = x->x * x->y - p->beta * x->z;
 }
 ```
+
+**A model without states** is a static map **y = h(t, u)**, e.g. a lookup table. Leave out the `States` struct and `.numberOfStates`, and still give a state equation (it has nothing to compute) and an integrator: the FMU then only advances the time in a step. The output equation does all the work. See `src/models/lookup_table_1d`.
 
 #### When the Integration Fails
 
@@ -418,6 +420,7 @@ After the macro you can add optional properties:
 | Property | Meaning | Example |
 |----------|---------|---------|
 | `.start` | Start value (default 0). For `bool` use 0 or 1 | `.start = 10.0` |
+| `.startString` | String parameters only: the start text (default `""`) | `.startString = "table.csv"` |
 | `.unit` | Unit name (real variables) | `.unit = "s"` |
 | `.description` | Human readable description | `.description = "Prandtl number"` |
 | `.min`, `.max` | Bounds | `.min = SOME(0.0)` |
@@ -578,6 +581,32 @@ Things to know:
 3. **One type, many variables.** Several variables may point at the same type; it is published once in the `TypeDefinitions` of the `modelDescription.xml`.
 4. **Computed values are your responsibility.** An output, local variable or calculated parameter can be an enumeration too; your equations must write the value of an item into it.
 
+#### String parameters
+
+A parameter can be a text, such as the name of a file. Declare it as a `char` array of the fixed size `MODEL_STRING_SIZE` and give its start value as `.startString`. This is the `table_file` parameter of the `lookup_table_1d` model:
+
+```c
+/* variables.h */
+typedef struct {
+    char table_file[MODEL_STRING_SIZE];
+} Params;
+
+/* variables.c */
+static const modelVariable VARIABLES[] = {
+    { PARAM(table_file), .startString = "table.csv", .variability = VAR_FIXED,
+      .description = "Name of the table file with the columns u and y" },
+    ...
+};
+```
+
+Things to know:
+
+1. **The size is always `MODEL_STRING_SIZE`.** A string holds at most `MODEL_STRING_SIZE - 1` (255) bytes of UTF-8 text plus the terminating `'\0'`. The limit counts bytes, not characters: `ä` takes two. The build stops if the field has another size or is a `char*` pointer, because a pointer has no room for the text.
+2. **The FMU copies the text in.** `fmi2SetString` copies the text into the field, so the integration tool can free its own string after the call. A text that does not fit is refused with an error and the parameter keeps its value; it is never cut.
+3. **Read it as a C string.** Your equations read `p->table_file` like any other `const char*`, but never write it.
+4. **Fixed or tunable.** Like every parameter, a string is tunable unless you declare it `VAR_FIXED`. A string has no `.start`, `.unit`, `.min`, `.max` or `.nominal`, and the start text must not contain control characters such as a line break. The build checks all of this.
+5. **Only parameters.** `PARAM` and `PARAM_AS` accept a string field; inputs, outputs, local variables, calculated parameters and states do not.
+
 #### Why is this a C file?
 
 The variable table uses two features of C that C++ does not offer in the same way (designated initializers in any order and `_Generic`). The file contains no logic, so there is nothing to gain from C++ here. A model with `equations.cpp` therefore still has a `variables.c`; see `src/models/pendulum_on_cart`.
@@ -598,6 +627,8 @@ You do not write this file. During the build, a small program (`src/fmi2ModelDes
 | output | `output` | `continuous` (real) or `discrete` (integer, enumeration, boolean) | `calculated` |
 | state | `local` | `continuous` | `exact` (`approx` with `.initial = VAR_APPROX`) |
 | local variable | `local` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
+
+A string parameter is published like any other parameter, with its start text: `<String start="table.csv"/>`.
 
 The model name becomes the `modelIdentifier`, which is also the name of the binary inside the FMU. The `.name` of your model definition must therefore be equal to the name of your model folder; the build stops if it is not.
 

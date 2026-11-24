@@ -23,6 +23,7 @@ csfmu_unit_test(test_freeModel)
 csfmu_unit_test(test_modelData)  # saveModelData / restoreModelData
 csfmu_unit_test(test_initialize)  # initializeModel / computeCalculatedParameters / modelError
 csfmu_unit_test(test_enumeration)  # modelEnumerationHasValue / enumeration variables
+csfmu_unit_test(test_string)  # string parameters / modelSetString
 csfmu_unit_test(test_eulerForward)
 csfmu_unit_test(test_rungeKutta4)
 
@@ -50,6 +51,11 @@ target_include_directories(test_fmi2_initialize PRIVATE ${CMAKE_SOURCE_DIR}/exte
 # Enumeration variables: Integer access, only item values can be set
 csfmu_unit_test(test_fmi2_enumeration ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
 target_include_directories(test_fmi2_enumeration PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
+
+# String parameters: get, set (copied in, refused if too long or NULL), fixed
+# and tunable, part of the FMU state and of fmi2Reset
+csfmu_unit_test(test_fmi2_string ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
+target_include_directories(test_fmi2_string PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
 
 # Checks of the model definition in the modelDescription.xml generator. The
 # test includes src/fmi2ModelDescription.c to reach its static functions

@@ -837,6 +837,7 @@ static const char* typeName(varType type)
         case VAR_REAL:    return "Real";
         case VAR_INTEGER: return "Integer";
         case VAR_BOOLEAN: return "Boolean";
+        case VAR_STRING:  return "String";
     }
     return "unknown";
 }
@@ -1032,8 +1033,17 @@ fmi2Status fmi2SetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
 /**
  * Set string-valued variables
  *
- * The template does not support string variables, so every value
- * reference is invalid for this function.
+ * Implementation notes:
+ * - Strings are parameters (see resolveVariable() for when fixed and
+ *   tunable ones can be set)
+ * - The text is copied into the variable's char[MODEL_STRING_SIZE] field, as
+ *   FMI 2.0 requires (section 2.1.2: "If an fmi2String variable is passed as
+ *   input argument to an FMI function and the FMU needs to use the string
+ *   later, the FMI function must copy the string before it returns"). The
+ *   integration tool may free its strings after the call
+ * - A text that does not fit (more than MODEL_STRING_SIZE - 1 bytes) is an
+ *   error and is never cut; the variable keeps its value. So is a NULL text
+ * - The text may be a pointer returned by fmi2GetString (see modelSetString())
  */
 fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2String value[])
 {
@@ -1042,11 +1052,25 @@ fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
         return fmi2Error;
     }
 
-    if (nvr > 0) {
-        return enterErrorState(myfmu2, "Value reference %u is not a String variable (strings are not supported).",
-                               vr[0]);
+    /* Set values */
+    for (size_t k = 0; k < nvr; k++) {
+        if (!resolveVariable(myfmu2, vr[k], VAR_STRING, fmi2True)) {
+            return fmi2Error;
+        }
+
+        const char* name = myfmu2->model->def->variables[vr[k]].name;
+        if (!value[k]) {
+            return enterErrorState(myfmu2, "Variable '%s': the value is NULL.", name);
+        }
+        if (!modelSetString(myfmu2->model, vr[k], value[k])) {
+            return enterErrorState(myfmu2, "The value of variable '%s' does not fit: a string can have at most "
+                                           "%d bytes.", name, MODEL_STRING_SIZE - 1);
+        }
     }
 
+    myfmu2->outputsAreStale = fmi2True;
+
+    logCallMessage(myfmu2, "Values set.");
     return fmi2OK;
 }
 
@@ -1135,8 +1159,15 @@ fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
 /**
  * Get string-valued variables
  *
- * The template does not support string variables, so every value
- * reference is invalid for this function.
+ * Implementation notes:
+ * - Returns pointers to the texts inside the model instance, nothing is
+ *   copied or allocated. FMI 2.0 allows this (section 2.1.7: "The strings
+ *   returned by fmi2GetString must be copied in the target environment
+ *   because the allocated memory for these strings might be deallocated by
+ *   the next call to any of the fmi2 interface functions or it might be an
+ *   internal string buffer that is reused")
+ * - The pointers stay valid until fmi2FreeInstance; the text they point to
+ *   changes when the variable is set, reset or restored from an FMU state
  */
 fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2String value[])
 {
@@ -1145,11 +1176,18 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
         return fmi2Error;
     }
 
-    if (nvr > 0) {
-        return enterErrorState(myfmu2, "Value reference %u is not a String variable (strings are not supported).",
-                               vr[0]);
+    refreshOutputs(myfmu2);
+
+    /* Get values */
+    for (size_t k = 0; k < nvr; k++) {
+        const char* variable = resolveVariable(myfmu2, vr[k], VAR_STRING, fmi2False);
+        if (!variable) {
+            return fmi2Error;
+        }
+        value[k] = variable;
     }
 
+    logCallMessage(myfmu2, "Values retrieved.");
     return fmi2OK;
 }
 

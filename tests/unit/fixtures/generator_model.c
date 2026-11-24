@@ -7,7 +7,10 @@
 
 #include "model.h"
 
-typedef struct { double gain; int mode; bool enabled; double offset; double scaled_gain; int doubled; int operation; } Params;
+typedef struct {
+    double gain; int mode; bool enabled; double offset; double scaled_gain; int doubled; int operation;
+    char file_name[MODEL_STRING_SIZE]; char label[MODEL_STRING_SIZE];
+} Params;
 typedef struct { double u; double w; bool reset; int select; int command; } Inputs;
 typedef struct { double y; double e; double z; int count; bool active; int state; } Outputs;
 typedef struct { double rate; int level; bool saturated; double ratio; int direction; } Locals;
@@ -44,13 +47,18 @@ static const modelEnumeration DIRECTION = {
 };
 
 static const modelVariable VARIABLES[] = {
-    /* parameters: all types, bounds, nominal, fixed, renamed, undefined unit, enumeration */
+    /* parameters: all types, bounds, nominal, fixed, renamed, undefined unit, enumeration, strings */
     { PARAM(gain),    .start = 2.5, .unit = "N/m", .min = SOME(0.0), .max = SOME(100.0), .nominal = 10.0,
       .description = "Gain: a < b & \"c\" > d" },
     { PARAM(mode),    .start = 3, .min = SOME(0), .max = SOME(5), .variability = VAR_FIXED },
     { PARAM(enabled), .start = 1 },
     { PARAM_AS(offset, "offset_value"), .start = 0.1, .unit = "undefined_unit" },
     { PARAM(operation), .declaredType = &OPERATING_MODE, .start = 3 },
+    /* strings: a start text that needs escaping and has UTF-8 ("a" with umlaut), and
+     * a tunable, renamed one without start text (start="") */
+    { PARAM(file_name), .startString = "data_\xc3\xa4 <v1> & \"final\".csv", .variability = VAR_FIXED,
+      .description = "Name of the data file" },
+    { PARAM_AS(label, "label_text") },
 
     /* inputs: all types, enumeration */
     { INPUT(u),      .start = 0.5, .unit = "N/m" },

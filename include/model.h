@@ -16,7 +16,8 @@
  * - Model-independent FMI wrapper implementation
  * - Standalone simulation without FMI overhead
  * - Model selection at link time (one MODEL_DEFINITION per binary)
- * - Variables of type double, int and bool, declared in any order
+ * - Variables of type double, int and bool, and string parameters
+ *   (char[MODEL_STRING_SIZE]), declared in any order
  */
 
 #ifndef MODEL_H
@@ -58,6 +59,16 @@ typedef struct modelInstance modelInstance;
  * @brief Size of the message buffer of a model instance (see modelError()).
  */
 #define MODEL_MESSAGE_SIZE 256
+
+/**
+ * @brief Size of the struct field of a string parameter, including the terminating '\0'.
+ *
+ * A string parameter is declared as char name[MODEL_STRING_SIZE] and holds
+ * at most MODEL_STRING_SIZE - 1 bytes of UTF-8 text. The text lives inside
+ * the parameter block, so a snapshot of the model (see saveModelData())
+ * stays a plain copy of memory.
+ */
+#define MODEL_STRING_SIZE 256
 
 /**
  * @brief Result of a model-layer computation that can fail.
@@ -146,7 +157,8 @@ typedef simStatus (*initializeFn)(modelInstance* model);
 typedef enum {
     VAR_REAL,     /**< double */
     VAR_INTEGER,  /**< int */
-    VAR_BOOLEAN   /**< bool */
+    VAR_BOOLEAN,  /**< bool */
+    VAR_STRING    /**< char[MODEL_STRING_SIZE], parameters only */
 } varType;
 
 /**
@@ -233,14 +245,19 @@ typedef struct {
  * @brief Description of one model variable.
  *
  * Declared with the PARAM(), CALCULATED_PARAM(), INPUT(), OUTPUT(), LOCAL() and STATE() macros, which
- * fill in name, type, role and offset from the struct field itself.
+ * fill in name, type, role, offset and size from the struct field itself.
  */
 typedef struct {
     const char*             name;         /**< Published name, unique within the model */
     varType                 type;         /**< Data type of the struct field */
     varRole                 role;         /**< Role, selects the storage block */
     size_t                  offset;       /**< Byte offset of the field inside its storage block */
-    double                  start;        /**< Start value, converted to the variable's type */
+    size_t                  size;         /**< sizeof the struct field, filled in by the macros (the
+                                               build checks it for strings: a char* pointer has the
+                                               same type for _Generic, but not the same size) */
+    double                  start;        /**< Start value, converted to the variable's type
+                                               (not for strings, see startString) */
+    const char*             startString;  /**< String parameters only: start value, NULL (default) = "" */
     const char*             unit;         /**< Unit name (optional, real variables only) */
     const char*             description;  /**< Human readable description (optional) */
     optReal                 min;          /**< Lower bound (optional) */
@@ -456,10 +473,31 @@ simStatus modelError(modelInstance* model, const char* format, ...);
 bool modelEnumerationHasValue(const modelEnumeration* type, int value);
 
 /**
+ * @brief Sets the value of a string variable.
+ *
+ * Copies value (including the terminating '\0') into the variable's
+ * char[MODEL_STRING_SIZE] field. A value that does not fit is refused, never
+ * cut: the variable then keeps its value. value may point into the variable
+ * itself (e.g. a pointer the caller read before), the copy handles the overlap.
+ *
+ * @param model Pointer to the model instance
+ * @param index Index into model->def->variables
+ * @param value '\0'-terminated text of at most MODEL_STRING_SIZE - 1 bytes
+ *
+ * @return true if the value was set; false if model or value is NULL, index
+ *         is out of range, the variable is not a string of MODEL_STRING_SIZE
+ *         bytes or the value does not fit (the variable is unchanged in all
+ *         these cases)
+ */
+bool modelSetString(modelInstance* model, size_t index, const char* value);
+
+/**
  * @brief Returns the address of a variable's storage.
  *
  * The returned pointer must be cast according to the variable's type
- * (VAR_REAL: double*, VAR_INTEGER: int*, VAR_BOOLEAN: bool*).
+ * (VAR_REAL: double*, VAR_INTEGER: int*, VAR_BOOLEAN: bool*, VAR_STRING:
+ * char*, pointing at a '\0'-terminated text in a char[MODEL_STRING_SIZE]).
+ * Write strings with modelSetString(), which checks the length.
  *
  * @param model Pointer to the model instance
  * @param index Index into model->def->variables
@@ -554,9 +592,12 @@ extern const modelDefinition MODEL_DEFINITION;
  * };
  * @endcode
  *
- * Each macro derives name, role, offset and type from the struct field
+ * Each macro derives name, role, offset, size and type from the struct field
  * itself, so these can never disagree with the struct. A field whose type
  * is not double, int or bool (or not double for a state) fails to compile.
+ * Parameters may also be strings, declared as char name[MODEL_STRING_SIZE]
+ * (the start value goes into .startString); the array is seen as char* by
+ * _Generic, and the build checks its size.
  *
  * The macros rely on C11 designated initializers and _Generic and are
  * therefore only available in C. Variable tables always live in a .c file,
@@ -568,12 +609,16 @@ extern const modelDefinition MODEL_DEFINITION;
     .name   = (publishedName), \
     .role   = (roleValue), \
     .offset = offsetof(structType, field), \
+    .size   = sizeof(((structType*)0)->field), \
     .type   = _Generic(((structType*)0)->field, __VA_ARGS__)
 
 #define MODEL_VARIABLE_TYPES double: VAR_REAL, int: VAR_INTEGER, bool: VAR_BOOLEAN
 
-/** Declares a field of the struct Params as a parameter. */
-#define PARAM(field)           MODEL_VARIABLE(VAR_PARAMETER, Params, field, #field, MODEL_VARIABLE_TYPES)
+/* Parameters may also be strings: _Generic sees a char array as char* */
+#define MODEL_PARAMETER_TYPES MODEL_VARIABLE_TYPES, char*: VAR_STRING
+
+/** Declares a field of the struct Params as a parameter (also a string: char name[MODEL_STRING_SIZE]). */
+#define PARAM(field)           MODEL_VARIABLE(VAR_PARAMETER, Params, field, #field, MODEL_PARAMETER_TYPES)
 
 /** Declares a field of the struct Params as a calculated parameter (computed, published read-only). */
 #define CALCULATED_PARAM(field) \
@@ -596,7 +641,7 @@ extern const modelDefinition MODEL_DEFINITION;
  * Needed when two structs use the same field name (e.g. States.x and
  * Outputs.x), since published names must be unique within a model.
  */
-#define PARAM_AS(field, name)  MODEL_VARIABLE(VAR_PARAMETER, Params, field, name, MODEL_VARIABLE_TYPES)
+#define PARAM_AS(field, name)  MODEL_VARIABLE(VAR_PARAMETER, Params, field, name, MODEL_PARAMETER_TYPES)
 #define INPUT_AS(field, name)  MODEL_VARIABLE(VAR_INPUT, Inputs, field, name, MODEL_VARIABLE_TYPES)
 #define OUTPUT_AS(field, name) MODEL_VARIABLE(VAR_OUTPUT, Outputs, field, name, MODEL_VARIABLE_TYPES)
 #define LOCAL_AS(field, name)  MODEL_VARIABLE(VAR_LOCAL, Locals, field, name, MODEL_VARIABLE_TYPES)

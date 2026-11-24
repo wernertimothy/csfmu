@@ -16,6 +16,7 @@ dx/dt = f(t, x, u)      x: vector of doubles
 where **t** is the time, **x** are the states, **u** are the inputs and **y** are the outputs. Parameters enter both equations.
 
 - `f` and `h` may be nonlinear.
+- A model may have no states at all. It is then a static map `y = h(t, u)`, such as a lookup table.
 - `f` and `h` may depend explicitly on time. `model->time` is the time of the integrator stage inside `f` and the communication point inside `h`.
 - `h` may use the inputs directly (direct feedthrough). You declare which inputs an output depends on with `.dependsOn`, and the `modelDescription.xml` publishes it.
 - Besides the outputs, `h` may compute **local variables**: values that can be read from outside but are no outputs, such as a heat flow or an error term.
@@ -27,6 +28,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 
 - **Parameters**, **inputs**, **outputs** and **local variables** can be of type `double`, `int` or `bool`.
 - An `int` variable can be published as an **enumeration**: a named set of values (items), of which only the items can be set.
+- Parameters can also be **strings** (`char name[MODEL_STRING_SIZE]`), e.g. a file name. A string holds up to 255 bytes of UTF-8 text; a longer text is refused, never cut. String parameters are fixed or tunable like any other parameter and are part of the FMU state.
 - Local variables are computed by the output equation and published read-only (`causality="local"`). They are always consistent with the other variables, like outputs.
 - Parameters are tunable (they can be changed between simulation steps) or fixed (`.variability = VAR_FIXED`, they can only be set before the simulation starts).
 - Calculated parameters are computed from the parameters and published read-only (`causality="calculatedParameter"`). They are consistent with the parameters in every state of the FMU, also during the initialization.
@@ -61,5 +63,6 @@ The repository ships demo models, each of which showcases a certain feature. Use
 | [`pi_controller`](../src/models/pi_controller/) | Direct feedthrough: its outputs react to an input as soon as it is set, without a simulation step (`.dependsOn`) |
 | [`fault_injection`](../src/models/fault_injection/) | A model without inputs, and a numerical failure on request: the FMU discards the step and rolls back (`fmi2Discard`) |
 | [`thermal_mass`](../src/models/thermal_mass/) | A local variable (`Q_loss`, the heat loss to the ambient) that can be read but not set; a calculated parameter (`tau = R*C`); an initialization that can start in steady state (`init_mode`, an enumeration), with a state published as `initial="approx"` |
+| [`lookup_table_1d`](../src/models/lookup_table_1d/) | A model without states: a static map that interpolates its input in a table (clamped at both ends), with direct feedthrough. The name of the table file is a String parameter (`table_file`) |
 
 When the template learns a new kind of model, this page and the list of demo models are extended.

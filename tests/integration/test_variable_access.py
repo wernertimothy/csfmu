@@ -8,6 +8,7 @@ import pytest
 from fmpy.fmi1 import FMICallException
 
 from tests.fmu_helpers import (
+    MAX_STRING_BYTES,
     approx_states,
     calculated_parameters,
     changed_value,
@@ -32,9 +33,13 @@ def test_value_references_are_unique(model_description) -> None:
 
 
 def test_states_are_exposed(model_description) -> None:
-    """Every model publishes its states as local variables with a start value."""
+    """The states are published as continuous Real local variables with a start value.
+
+    That every state is published is checked by the build (fmi2ModelDescription.c).
+    """
     published = states(model_description)
-    assert len(published) > 0
+    if not published:
+        pytest.skip("the model has no states")
     for state in published:
         assert state.type == "Real"
         assert state.variability == "continuous"
@@ -104,9 +109,11 @@ def test_states_cannot_be_set_after_initialization(
     initialized_fmu, model_description
 ) -> None:
     """States are initial conditions: setting them during the simulation is an error."""
-    state = states(model_description)[0]
+    published = states(model_description)
+    if not published:
+        pytest.skip("the model has no states")
     with pytest.raises(FMICallException):
-        write(initialized_fmu, state, 1.0)
+        write(initialized_fmu, published[0], 1.0)
 
 
 def test_approx_states_cannot_be_set_in_initialization_mode(
@@ -209,7 +216,7 @@ def test_outputs_cannot_be_set(new_fmu, model_description) -> None:
 
 
 def test_access_with_wrong_type_fails(new_fmu, model_description) -> None:
-    """A Real variable cannot be accessed through the Integer or Boolean functions."""
+    """A Real variable cannot be accessed through the Integer, Boolean or String functions."""
     real = next(v for v in model_description.modelVariables if v.type == "Real")
 
     with pytest.raises(FMICallException):
@@ -217,9 +224,13 @@ def test_access_with_wrong_type_fails(new_fmu, model_description) -> None:
     with pytest.raises(FMICallException):
         new_fmu().getBoolean([real.valueReference])
     with pytest.raises(FMICallException):
+        new_fmu().getString([real.valueReference])
+    with pytest.raises(FMICallException):
         new_fmu().setInteger([real.valueReference], [1])
     with pytest.raises(FMICallException):
         new_fmu().setBoolean([real.valueReference], [True])
+    with pytest.raises(FMICallException):
+        new_fmu().setString([real.valueReference], ["text"])
 
 
 def test_access_with_unknown_value_reference_fails(new_fmu, model_description) -> None:
@@ -230,14 +241,30 @@ def test_access_with_unknown_value_reference_fails(new_fmu, model_description) -
         new_fmu().getReal([unknown])
     with pytest.raises(FMICallException):
         new_fmu().setReal([unknown], [1.0])
+    with pytest.raises(FMICallException):
+        new_fmu().getString([unknown])
+    with pytest.raises(FMICallException):
+        new_fmu().setString([unknown], ["text"])
 
 
-def test_string_access_fails(new_fmu) -> None:
-    """The template has no String variables, so every String access is an error."""
-    with pytest.raises(FMICallException):
-        new_fmu().getString([0])
-    with pytest.raises(FMICallException):
-        new_fmu().setString([0], ["text"])
+def test_string_parameters_refuse_values_that_do_not_fit(
+    new_fmu, model_description
+) -> None:
+    """A String parameter holds at most MAX_STRING_BYTES bytes; a longer value is
+    refused, never cut, and the parameter keeps its value."""
+    strings = variables_with(model_description, "parameter", "String")
+    if not strings:
+        pytest.skip("the model has no String parameters")
+
+    for variable in strings:
+        fmu = new_fmu()
+        longest = "a" * MAX_STRING_BYTES
+        write(fmu, variable, longest)
+        assert read(fmu, variable) == longest, variable.name
+
+        with pytest.raises(FMICallException):
+            write(fmu, variable, "b" * (MAX_STRING_BYTES + 1))
+        assert read(fmu, variable) == longest, variable.name
 
 
 def test_reset_restores_start_values(initialized_fmu, model_description) -> None:

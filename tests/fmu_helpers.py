@@ -14,18 +14,30 @@ GETTERS = {
     "Integer": "getInteger",
     "Enumeration": "getInteger",
     "Boolean": "getBoolean",
+    "String": "getString",
 }
 SETTERS = {
     "Real": "setReal",
     "Integer": "setInteger",
     "Enumeration": "setInteger",
     "Boolean": "setBoolean",
+    "String": "setString",
 }
+
+# Longest text a String variable can hold, in bytes of UTF-8: the struct field
+# is char[MODEL_STRING_SIZE] including the terminating '\0' (include/model.h)
+MAX_STRING_BYTES = 255
 
 
 def read(fmu, variable):
-    """Read a variable with the getter that matches its type."""
-    return getattr(fmu, GETTERS[variable.type])([variable.valueReference])[0]
+    """Read a variable with the getter that matches its type.
+
+    FMPy returns the text of a String variable as UTF-8 bytes; it is decoded to str.
+    """
+    value = getattr(fmu, GETTERS[variable.type])([variable.valueReference])[0]
+    if variable.type == "String":
+        return value.decode("utf-8")
+    return value
 
 
 def write(fmu, variable, value) -> None:
@@ -40,6 +52,8 @@ def read_all(fmu, model_description) -> dict:
 
 def start_value(variable):
     """Start value from the modelDescription.xml, converted to a Python value."""
+    if variable.type == "String":
+        return variable.start
     if variable.type == "Boolean":
         return variable.start == "true"
     if variable.type in ("Integer", "Enumeration"):
@@ -61,10 +75,15 @@ def changed_value(variable, value=None):
     """A value that differs from value (default: the start value) and respects max.
 
     Real variables change by 0.25, Integer variables by 1, Boolean variables
-    flip, Enumeration variables take the value of the next item (cyclic).
+    flip, Enumeration variables take the value of the next item (cyclic),
+    String variables get "_changed" appended (or lose their last character if
+    that would not fit).
     """
     if value is None:
         value = start_value(variable)
+    if variable.type == "String":
+        changed = value + "_changed"
+        return changed if len(changed.encode()) <= MAX_STRING_BYTES else value[:-1]
     if variable.type == "Boolean":
         return not value
     if variable.type == "Enumeration":

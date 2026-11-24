@@ -936,7 +936,7 @@ if (limitReached) {
 
 ### fmi2SetString / fmi2GetString
 
-String variables are not supported.
+Set and get string parameters.
 
 #### Signature
 ```c
@@ -952,37 +952,53 @@ fmi2Status fmi2GetString(fmi2Component c,
 ```
 
 #### Description
-The template does not support string variables, so no value reference is valid for these functions. They exist because the FMI 2.0 standard requires every FMU to export them.
+The string counterparts of `fmi2SetReal` and `fmi2GetReal`. A variable is a string variable if its field in the model's `Params` struct is a `char name[MODEL_STRING_SIZE]`; strings are always parameters. A string holds at most `MODEL_STRING_SIZE - 1` (255) bytes of UTF-8 text.
+
+`fmi2SetString` copies every text into the FMU, so the integration tool may free or reuse its strings after the call. `fmi2GetString` returns pointers to the texts inside the FMU instance.
 
 #### Parameters
 | Name | Type | Description |
 |------|------|-------------|
 | `c` | `fmi2Component` | The FMU instance |
-| `vr` | `const fmi2ValueReference[]` | Array of value references |
-| `nvr` | `size_t` | Number of value references |
-| `value` | `fmi2String[]` | Values |
+| `vr` | `const fmi2ValueReference[]` | Array of value references identifying the variables |
+| `nvr` | `size_t` | Number of value references (length of `vr` and `value` arrays) |
+| `value` | `fmi2String[]` | Texts to set (`const`, for the setter) or **output array** of pointers (for the getter) |
 
 #### Return Values
 | Status | Condition |
 |--------|-----------|
-| `fmi2OK` | `nvr` is 0 |
-| `fmi2Error` | `nvr` is greater than 0, NULL component, call not allowed in the current state, or invalid arrays |
+| `fmi2OK` | All variables set / read successfully |
+| `fmi2Error` | Same conditions as `fmi2SetReal` / `fmi2GetReal`; the variable must be of type String. For the setter also: a text is `NULL`, or a text has more than 255 bytes |
 
 #### FMI State Requirements
-**Can be called in**: Same states as [`fmi2SetReal`](#fmi2setreal) and [`fmi2GetReal`](#fmi2getreal)
+**Can be called in**: Same states as [`fmi2SetReal`](#fmi2setreal) and [`fmi2GetReal`](#fmi2getreal). A fixed string can only be set until `fmi2ExitInitializationMode`, a tunable one also between steps
 **State transitions**: None on success. On error the FMU enters the error state
 
 #### Usage Example
 ```c
-// There are no string variables: only the empty call succeeds
-fmi2Status status = fmi2GetString(fmu, NULL, 0, NULL);  // fmi2OK
+/* value reference of the lookup_table_1d model (position in its variable table) */
+const fmi2ValueReference VR_table_file = 0;
+
+// Choose the table before the initialization
+fmi2String file = "measured.csv";
+fmi2SetString(fmu, &VR_table_file, 1, &file);
+
+// Read it back; copy the text if it is needed after the next FMI call
+fmi2String current;
+fmi2GetString(fmu, &VR_table_file, 1, &current);
+char copy[256];
+snprintf(copy, sizeof(copy), "%s", current);
 ```
 
 #### Related Functions
-- [`fmi2SetReal`](#fmi2setreal) / [`fmi2GetReal`](#fmi2getreal) - Access to real variables
+- [`fmi2SetReal`](#fmi2setreal) / [`fmi2GetReal`](#fmi2getreal) - Same for real variables
+- [`fmi2SetInteger / fmi2GetInteger`](#fmi2setinteger--fmi2getinteger) - Same for integer variables
 
 #### Notes
-- **Fails loudly**: A call with a value reference returns `fmi2Error` instead of reporting success without doing anything
+- **Never cut**: A text that does not fit is refused with `fmi2Error` and a log message that names the variable; the variable keeps its value. The limit counts bytes, so a text with non-ASCII characters (two or more bytes each in UTF-8) fits fewer characters
+- **Pointer lifetime**: The pointers returned by `fmi2GetString` point into the FMU instance and stay valid until `fmi2FreeInstance`, but the text they point to changes when the variable is set, reset (`fmi2Reset`) or restored (`fmi2SetFMUstate`). FMI 2.0 requires the integration tool to copy the text before the next call to the FMU anyway (section 2.1.7: "The strings returned by fmi2GetString must be copied in the target environment because the allocated memory for these strings might be deallocated by the next call to any of the fmi2 interface functions or it might be an internal string buffer that is reused")
+- **Own pointers**: A pointer returned by `fmi2GetString` can be passed back to `fmi2SetString`
+- **Part of the FMU state**: The texts are saved, restored and serialized with the FMU state like every other parameter
 
 ---
 
