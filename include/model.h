@@ -184,6 +184,41 @@ typedef enum {
 } varInitial;
 
 /**
+ * @brief One item of an enumeration type.
+ */
+typedef struct {
+    const char* name;         /**< Published name of the item, unique within its type */
+    int         value;        /**< Value of the item, unique within its type */
+    const char* description;  /**< Human readable description (optional) */
+} modelEnumerationItem;
+
+/**
+ * @brief An enumeration type: a named set of integer values.
+ *
+ * A variable of type int is published as an enumeration by pointing at its
+ * type (modelVariable.declaredType). It is still accessed like an Integer
+ * variable, but only the values of the items can be set. The field itself
+ * stays an int: the underlying type of a C enum is implementation-defined,
+ * so its type would not be recognized the same way on every compiler.
+ *
+ * @code
+ * static const modelEnumerationItem INIT_MODE_ITEMS[] = {
+ *     { .name = "fixed_start",  .value = 1, .description = "T starts at its start value" },
+ *     { .name = "steady_state", .value = 2, .description = "T starts in equilibrium" },
+ * };
+ * static const modelEnumeration INIT_MODE = {
+ *     .name = "InitMode", .items = INIT_MODE_ITEMS, .numberOfItems = ARRAY_LEN(INIT_MODE_ITEMS),
+ * };
+ * @endcode
+ */
+typedef struct {
+    const char*                 name;           /**< Published name of the type, unique within the model */
+    const char*                 description;    /**< Human readable description (optional) */
+    const modelEnumerationItem* items;          /**< The items of the type */
+    size_t                      numberOfItems;  /**< Number of entries in items */
+} modelEnumeration;
+
+/**
  * @brief Optional real value (used for bounds that may be absent).
  *
  * A zero-initialized optReal is "not set", so bounds can simply be
@@ -201,21 +236,23 @@ typedef struct {
  * fill in name, type, role and offset from the struct field itself.
  */
 typedef struct {
-    const char*    name;         /**< Published name, unique within the model */
-    varType        type;         /**< Data type of the struct field */
-    varRole        role;         /**< Role, selects the storage block */
-    size_t         offset;       /**< Byte offset of the field inside its storage block */
-    double         start;        /**< Start value, converted to the variable's type */
-    const char*    unit;         /**< Unit name (optional, real variables only) */
-    const char*    description;  /**< Human readable description (optional) */
-    optReal        min;          /**< Lower bound (optional) */
-    optReal        max;          /**< Upper bound (optional) */
-    double         nominal;      /**< Nominal value, 0 = not set (real variables only) */
-    varVariability variability;  /**< Parameters and calculated parameters only, defaults to VAR_TUNABLE */
-    varInitial     initial;      /**< States only, defaults to VAR_EXACT */
-    const char*    dependsOn;    /**< Outputs only: names of the inputs the output depends on
-                                      directly, separated by spaces. "" = none,
-                                      NULL (default) = all inputs */
+    const char*             name;         /**< Published name, unique within the model */
+    varType                 type;         /**< Data type of the struct field */
+    varRole                 role;         /**< Role, selects the storage block */
+    size_t                  offset;       /**< Byte offset of the field inside its storage block */
+    double                  start;        /**< Start value, converted to the variable's type */
+    const char*             unit;         /**< Unit name (optional, real variables only) */
+    const char*             description;  /**< Human readable description (optional) */
+    optReal                 min;          /**< Lower bound (optional) */
+    optReal                 max;          /**< Upper bound (optional) */
+    double                  nominal;      /**< Nominal value, 0 = not set (real variables only) */
+    varVariability          variability;  /**< Parameters and calculated parameters only, defaults to VAR_TUNABLE */
+    varInitial              initial;      /**< States only, defaults to VAR_EXACT */
+    const modelEnumeration* declaredType; /**< Integer variables only: the enumeration type of the
+                                               variable, NULL (default) = plain Integer */
+    const char*             dependsOn;    /**< Outputs only: names of the inputs the output depends on
+                                               directly, separated by spaces. "" = none,
+                                               NULL (default) = all inputs */
 } modelVariable;
 
 /**
@@ -406,6 +443,17 @@ simStatus initializeModel(modelInstance* model);
  * @return SIM_ERROR
  */
 simStatus modelError(modelInstance* model, const char* format, ...);
+
+/**
+ * @brief Checks whether a value is the value of an item of an enumeration.
+ *
+ * @param type  The enumeration type (may be NULL)
+ * @param value The value to check
+ *
+ * @return true if one of the items of type has the value, false otherwise
+ *         (also if type is NULL)
+ */
+bool modelEnumerationHasValue(const modelEnumeration* type, int value);
 
 /**
  * @brief Returns the address of a variable's storage.

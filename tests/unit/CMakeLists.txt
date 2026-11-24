@@ -22,6 +22,7 @@ csfmu_unit_test(test_newModel)
 csfmu_unit_test(test_freeModel)
 csfmu_unit_test(test_modelData)  # saveModelData / restoreModelData
 csfmu_unit_test(test_initialize)  # initializeModel / computeCalculatedParameters / modelError
+csfmu_unit_test(test_enumeration)  # modelEnumerationHasValue / enumeration variables
 csfmu_unit_test(test_eulerForward)
 csfmu_unit_test(test_rungeKutta4)
 
@@ -46,6 +47,10 @@ target_include_directories(test_fmi2_locals PRIVATE ${CMAKE_SOURCE_DIR}/external
 csfmu_unit_test(test_fmi2_initialize ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
 target_include_directories(test_fmi2_initialize PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
 
+# Enumeration variables: Integer access, only item values can be set
+csfmu_unit_test(test_fmi2_enumeration ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
+target_include_directories(test_fmi2_enumeration PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
+
 # Checks of the model definition in the modelDescription.xml generator. The
 # test includes src/fmi2ModelDescription.c to reach its static functions
 csfmu_unit_test(test_validateDefinition)
@@ -60,7 +65,8 @@ add_executable(generate_fixture_description
     ${CMAKE_SOURCE_DIR}/src/fmi2ModelDescription.c
     fixtures/generator_model.c
 )
-target_include_directories(generate_fixture_description PRIVATE ${CMAKE_SOURCE_DIR}/include)
+# model_core provides the model-layer helpers the generator uses (e.g. modelEnumerationHasValue)
+target_link_libraries(generate_fixture_description PRIVATE model_core)
 
 # The generated modelDescription.xml must be equal to the handwritten one
 add_test(NAME test_modelDescription_golden

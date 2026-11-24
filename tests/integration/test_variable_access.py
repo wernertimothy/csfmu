@@ -11,6 +11,8 @@ from tests.fmu_helpers import (
     approx_states,
     calculated_parameters,
     changed_value,
+    enumeration_values,
+    enumeration_variables,
     initialize,
     local_variables,
     read,
@@ -122,6 +124,32 @@ def test_approx_states_cannot_be_set_in_initialization_mode(
         fmu.enterInitializationMode()
         with pytest.raises(FMICallException):
             write(fmu, variable, changed_value(variable))
+
+
+def test_enumeration_start_values_are_items(model_description) -> None:
+    """An enumeration variable with a start value starts at the value of an item."""
+    for variable in enumeration_variables(model_description):
+        assert variable.declaredType.items, variable.name
+        if variable.start is not None:
+            assert start_value(variable) in enumeration_values(variable), variable.name
+
+
+def test_enumerations_refuse_values_that_are_no_item(
+    new_fmu, model_description
+) -> None:
+    """Only the values of the items of an enumeration can be set."""
+    settable = [
+        v
+        for v in enumeration_variables(model_description)
+        if v.causality in ("parameter", "input")
+    ]
+    if not settable:
+        pytest.skip("the model has no enumeration parameters or inputs")
+
+    for variable in settable:
+        fmu = new_fmu()
+        with pytest.raises(FMICallException):
+            write(fmu, variable, max(enumeration_values(variable)) + 1)
 
 
 def test_calculated_parameters_cannot_be_set(new_fmu, model_description) -> None:

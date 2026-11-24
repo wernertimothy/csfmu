@@ -142,6 +142,20 @@ double modelDefaultTolerance(const modelDefinition* def)
     return def->defaultExperiment.tolerance;
 }
 
+bool modelEnumerationHasValue(const modelEnumeration* type, int value)
+{
+    if (!type) {
+        return false;
+    }
+
+    for (size_t k = 0; k < type->numberOfItems; k++) {
+        if (type->items[k].value == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void computeCalculatedParameters(modelInstance* model)
 {
     if (model && model->def->calculateParameters) {

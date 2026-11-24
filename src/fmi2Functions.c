@@ -966,6 +966,11 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
 
 /**
  * Set integer-valued variables
+ *
+ * Implementation notes:
+ * - Enumeration variables are Integer variables with a declared type. Only
+ *   the values of its items can be set: any other value (also one between
+ *   two items) is an error. The variable keeps its value
  */
 fmi2Status fmi2SetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, const fmi2Integer value[])
 {
@@ -980,6 +985,13 @@ fmi2Status fmi2SetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t
         if (!variable) {
             return fmi2Error;
         }
+
+        const modelEnumeration* type = myfmu2->model->def->variables[vr[k]].declaredType;
+        if (type && !modelEnumerationHasValue(type, value[k])) {
+            return enterErrorState(myfmu2, "Value %d of variable '%s' is not an item of the enumeration '%s'.",
+                                   value[k], myfmu2->model->def->variables[vr[k]].name, type->name);
+        }
+
         *variable = value[k];
     }
 

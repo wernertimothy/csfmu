@@ -425,6 +425,7 @@ After the macro you can add optional properties:
 | `.variability` | Parameters and calculated parameters only: `VAR_TUNABLE` (default) or `VAR_FIXED` | `.variability = VAR_FIXED` |
 | `.initial` | States only: `VAR_EXACT` (default) or `VAR_APPROX` if the initialize function may replace the start value (see [Initialization](#initialization)) | `.initial = VAR_APPROX` |
 | `.dependsOn` | Outputs only: the inputs the output depends on directly (see [below](#direct-feedthrough)) | `.dependsOn = ""` |
+| `.declaredType` | `int` variables only: the enumeration type of the variable (see [Enumerations](#enumerations)) | `.declaredType = &INIT_MODE` |
 
 ```c
 #include "variables.h"
@@ -537,6 +538,46 @@ static const modelVariable VARIABLES[] = {
 
 See `src/models/typed_demo` for a model that uses all three types in all roles.
 
+#### Enumerations
+
+An `int` variable whose values stand for named choices, such as a mode, can be published as an **enumeration**. The integration tool then shows the names instead of the numbers, and only the listed values can be set. Declare the items and the type in `variables.c`, and point the variable at its type with `.declaredType`. This is the `init_mode` parameter of the `thermal_mass` model:
+
+```c
+/* variables.h: the values of the items */
+#define THERMAL_MASS_FIXED_START  1
+#define THERMAL_MASS_STEADY_STATE 2
+
+typedef struct {
+    ...
+    int init_mode;
+} Params;
+
+/* variables.c */
+static const modelEnumerationItem INIT_MODE_ITEMS[] = {
+    { .name = "fixed_start",  .value = THERMAL_MASS_FIXED_START,  .description = "T starts at its start value" },
+    { .name = "steady_state", .value = THERMAL_MASS_STEADY_STATE, .description = "T starts in equilibrium" },
+};
+
+static const modelEnumeration INIT_MODE = {
+    .name          = "InitMode",
+    .description   = "Initialization of the temperature",
+    .items         = INIT_MODE_ITEMS,
+    .numberOfItems = ARRAY_LEN(INIT_MODE_ITEMS),
+};
+
+static const modelVariable VARIABLES[] = {
+    { PARAM(init_mode), .declaredType = &INIT_MODE, .start = THERMAL_MASS_FIXED_START, .variability = VAR_FIXED },
+    ...
+};
+```
+
+Things to know:
+
+1. **The field is an `int`.** It is set and read with `fmi2SetInteger` and `fmi2GetInteger`, like an Integer variable. Use `#define` constants (or the constants of a C `enum`) for the values, but not a C `enum` type for the field: its size and signedness depend on the compiler.
+2. **The items are the only valid values.** Setting any other value, also one between two items, is an error. The start value must be one of the items, and the variable has no `.min` or `.max` of its own. The build checks this, and that the names and values of the items are unique.
+3. **One type, many variables.** Several variables may point at the same type; it is published once in the `TypeDefinitions` of the `modelDescription.xml`.
+4. **Computed values are your responsibility.** An output, local variable or calculated parameter can be an enumeration too; your equations must write the value of an item into it.
+
 #### Why is this a C file?
 
 The variable table uses two features of C that C++ does not offer in the same way (designated initializers in any order and `_Generic`). The file contains no logic, so there is nothing to gain from C++ here. A model with `equations.cpp` therefore still has a `variables.c`; see `src/models/pendulum_on_cart`.
@@ -553,8 +594,8 @@ You do not write this file. During the build, a small program (`src/fmi2ModelDes
 |------|-----------|-------------|---------|
 | parameter | `parameter` | `tunable` or `fixed` | `exact` |
 | calculated parameter | `calculatedParameter` | `tunable` or `fixed` | `calculated` |
-| input | `input` | `continuous` (real) or `discrete` (integer, boolean) | |
-| output | `output` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
+| input | `input` | `continuous` (real) or `discrete` (integer, enumeration, boolean) | |
+| output | `output` | `continuous` (real) or `discrete` (integer, enumeration, boolean) | `calculated` |
 | state | `local` | `continuous` | `exact` (`approx` with `.initial = VAR_APPROX`) |
 | local variable | `local` | `continuous` (real) or `discrete` (integer, boolean) | `calculated` |
 

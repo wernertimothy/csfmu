@@ -7,10 +7,10 @@
 
 #include "model.h"
 
-typedef struct { double gain; int mode; bool enabled; double offset; double scaled_gain; int doubled; } Params;
-typedef struct { double u; double w; bool reset; int select; } Inputs;
-typedef struct { double y; double e; double z; int count; bool active; } Outputs;
-typedef struct { double rate; int level; bool saturated; double ratio; } Locals;
+typedef struct { double gain; int mode; bool enabled; double offset; double scaled_gain; int doubled; int operation; } Params;
+typedef struct { double u; double w; bool reset; int select; int command; } Inputs;
+typedef struct { double y; double e; double z; int count; bool active; int state; } Outputs;
+typedef struct { double rate; int level; bool saturated; double ratio; int direction; } Locals;
 typedef struct { double x1; double x2; } States;
 
 static void stateEquation(modelInstance* m) { (void)m; }
@@ -19,33 +19,61 @@ static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepS
 static void calculateParameters(modelInstance* m) { (void)m; }
 static simStatus initialize(modelInstance* m) { (void)m; return SIM_OK; }
 
+/* enumerations: a gap in the values, descriptions that need escaping, a
+ * type used by several variables (written once), negative values */
+static const modelEnumerationItem OPERATING_MODE_ITEMS[] = {
+    { .name = "off",  .value = 0, .description = "Switched off" },
+    { .name = "on",   .value = 1 },
+    { .name = "auto", .value = 3, .description = "On if \"needed\" & allowed" },
+};
+static const modelEnumeration OPERATING_MODE = {
+    .name          = "OperatingMode",
+    .description   = "Mode: off < on < auto",
+    .items         = OPERATING_MODE_ITEMS,
+    .numberOfItems = ARRAY_LEN(OPERATING_MODE_ITEMS),
+};
+
+static const modelEnumerationItem DIRECTION_ITEMS[] = {
+    { .name = "backward", .value = -1 },
+    { .name = "forward",  .value = 1 },
+};
+static const modelEnumeration DIRECTION = {
+    .name          = "Direction",
+    .items         = DIRECTION_ITEMS,
+    .numberOfItems = ARRAY_LEN(DIRECTION_ITEMS),
+};
+
 static const modelVariable VARIABLES[] = {
-    /* parameters: all types, bounds, nominal, fixed, renamed, undefined unit */
+    /* parameters: all types, bounds, nominal, fixed, renamed, undefined unit, enumeration */
     { PARAM(gain),    .start = 2.5, .unit = "N/m", .min = SOME(0.0), .max = SOME(100.0), .nominal = 10.0,
       .description = "Gain: a < b & \"c\" > d" },
     { PARAM(mode),    .start = 3, .min = SOME(0), .max = SOME(5), .variability = VAR_FIXED },
     { PARAM(enabled), .start = 1 },
     { PARAM_AS(offset, "offset_value"), .start = 0.1, .unit = "undefined_unit" },
+    { PARAM(operation), .declaredType = &OPERATING_MODE, .start = 3 },
 
-    /* inputs: all types */
+    /* inputs: all types, enumeration */
     { INPUT(u),      .start = 0.5, .unit = "N/m" },
     { INPUT(w) },
     { INPUT(reset) },
     { INPUT(select), .start = -2 },
+    { INPUT(command), .declaredType = &OPERATING_MODE },
 
-    /* outputs: no, some (not in table order) and undeclared dependencies */
+    /* outputs: no, some (not in table order) and undeclared dependencies, enumeration */
     { OUTPUT(y),      .dependsOn = "" },
     { OUTPUT(e),      .dependsOn = "w u" },
     { OUTPUT(z) },
     { OUTPUT(count),  .dependsOn = "select" },
     { OUTPUT(active) },
+    { OUTPUT(state),  .declaredType = &OPERATING_MODE, .dependsOn = "command" },
 
-    /* locals: all types, bounds, nominal, renamed */
+    /* locals: all types, bounds, nominal, renamed, enumeration */
     { LOCAL(rate),      .unit = "N/m", .min = SOME(-1.0), .max = SOME(1.0), .nominal = 2.0,
       .description = "Rate of the gain" },
     { LOCAL(level),     .min = SOME(0), .max = SOME(9) },
     { LOCAL(saturated) },
     { LOCAL_AS(ratio, "ratio_value") },
+    { LOCAL(direction), .declaredType = &DIRECTION },
 
     /* states: exact (default) and approx */
     { STATE(x1), .start = 4.0 },

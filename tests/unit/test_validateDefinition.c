@@ -20,7 +20,7 @@
 
 #define IDENTIFIER "validation_model"
 
-typedef struct { double gain; double scaled; int mode; } Params;
+typedef struct { double gain; double scaled; int choice; int mode; } Params;
 typedef struct { double u; double w; } Inputs;
 typedef struct { double y; } Outputs;
 typedef struct { double ratio; int level; } Locals;
@@ -32,12 +32,22 @@ static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepS
 static void calculateParameters(modelInstance* m) { (void)m; }
 static simStatus initialize(modelInstance* m) { (void)m; return SIM_OK; }
 
+/* Enumeration type of the parameter choice (items with a gap) */
+static const modelEnumerationItem CHOICE_ITEMS[] = {
+    { .name = "one",   .value = 1 },
+    { .name = "three", .value = 3 },
+};
+static const modelEnumeration CHOICE = {
+    .name = "Choice", .items = CHOICE_ITEMS, .numberOfItems = ARRAY_LEN(CHOICE_ITEMS),
+};
+
 /* Indices into the variable table; X2 is last, so it can be left out */
-enum { GAIN, MODE, SCALED, U, W, Y, RATIO, LEVEL, X1, X2, NUMBER_OF_VARIABLES };
+enum { GAIN, MODE, CHOICE_VAR, SCALED, U, W, Y, RATIO, LEVEL, X1, X2, NUMBER_OF_VARIABLES };
 
 static const modelVariable VARIABLES[NUMBER_OF_VARIABLES] = {
     [GAIN]   = { PARAM(gain), .start = 1.0, .min = SOME(0.0), .max = SOME(10.0) },
     [MODE]   = { PARAM(mode), .start = 1 },
+    [CHOICE_VAR] = { PARAM(choice), .declaredType = &CHOICE, .start = 3 },
     [SCALED] = { CALCULATED_PARAM(scaled) },
     [U]      = { INPUT(u) },
     [W]      = { INPUT(w) },
@@ -77,14 +87,20 @@ const modelDefinition MODEL_DEFINITION = {
 static modelDefinition def;
 static modelVariable variables[NUMBER_OF_VARIABLES];
 static modelUnit units[ARRAY_LEN(UNITS)];
+static modelEnumerationItem choiceItems[ARRAY_LEN(CHOICE_ITEMS)];
+static modelEnumeration choice;
 
 void setUp(void)
 {
     memcpy(variables, VARIABLES, sizeof(VARIABLES));
     memcpy(units, UNITS, sizeof(UNITS));
+    memcpy(choiceItems, CHOICE_ITEMS, sizeof(CHOICE_ITEMS));
+    choice = CHOICE;
+    choice.items = choiceItems;
     def = MODEL_DEFINITION;
     def.variables = variables;
     def.units = units;
+    variables[CHOICE_VAR].declaredType = &choice;
 }
 
 void tearDown(void) {}
@@ -279,6 +295,80 @@ void test_rejectsNumberOfStatesThatDiffersFromTheTable(void)
 }
 
 /***************************************************
+ * Enumerations
+ ***************************************************/
+
+void test_rejectsDeclaredTypeOnAVariableThatIsNoInteger(void)
+{
+    variables[GAIN].declaredType = &choice;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsEnumerationWithoutName(void)
+{
+    choice.name = NULL;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsEnumerationWithoutItems(void)
+{
+    choice.numberOfItems = 0;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsItemWithoutName(void)
+{
+    choiceItems[1].name = NULL;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsItemNameUsedTwice(void)
+{
+    choiceItems[1].name = "one";
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsItemValueUsedTwice(void)
+{
+    choiceItems[0].value = 3;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsTwoTypesWithTheSameName(void)
+{
+    static const modelEnumerationItem items[] = { { .name = "first", .value = 1 } };
+    static const modelEnumeration sameName = { .name = "Choice", .items = items, .numberOfItems = 1 };
+
+    variables[MODE].declaredType = &sameName;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_acceptsOneTypeUsedByTwoVariables(void)
+{
+    variables[MODE].declaredType = &choice;  /* mode starts at 1, an item */
+    TEST_ASSERT_EQUAL_INT(0, problems());
+}
+
+void test_rejectsStartValueThatIsNoItem(void)
+{
+    variables[CHOICE_VAR].start = 2;  /* between the items */
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_rejectsBoundsOnAnEnumerationVariable(void)
+{
+    variables[CHOICE_VAR].max = (optReal)SOME(3);
+    TEST_ASSERT_EQUAL_INT(1, problems());
+}
+
+void test_acceptsComputedEnumerationWithoutStartValue(void)
+{
+    /* a local publishes no start value, so its start (0, no item) is not checked */
+    variables[LEVEL].declaredType = &choice;
+    TEST_ASSERT_EQUAL_INT(0, problems());
+}
+
+/***************************************************
  * dependsOn
  ***************************************************/
 
@@ -381,6 +471,18 @@ int main(void)
     RUN_TEST(test_rejectsStateDeclaredTwice);
     RUN_TEST(test_rejectsUndeclaredState);
     RUN_TEST(test_rejectsNumberOfStatesThatDiffersFromTheTable);
+
+    RUN_TEST(test_rejectsDeclaredTypeOnAVariableThatIsNoInteger);
+    RUN_TEST(test_rejectsEnumerationWithoutName);
+    RUN_TEST(test_rejectsEnumerationWithoutItems);
+    RUN_TEST(test_rejectsItemWithoutName);
+    RUN_TEST(test_rejectsItemNameUsedTwice);
+    RUN_TEST(test_rejectsItemValueUsedTwice);
+    RUN_TEST(test_rejectsTwoTypesWithTheSameName);
+    RUN_TEST(test_acceptsOneTypeUsedByTwoVariables);
+    RUN_TEST(test_rejectsStartValueThatIsNoItem);
+    RUN_TEST(test_rejectsBoundsOnAnEnumerationVariable);
+    RUN_TEST(test_acceptsComputedEnumerationWithoutStartValue);
 
     RUN_TEST(test_rejectsDependsOnOfAVariableThatIsNoOutput);
     RUN_TEST(test_rejectsDependsOnOfALocal);

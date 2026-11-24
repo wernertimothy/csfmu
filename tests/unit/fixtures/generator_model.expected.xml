@@ -11,6 +11,22 @@
         <Unit name="undefined_unit"/>
     </UnitDefinitions>
 
+    <TypeDefinitions>
+        <SimpleType name="OperatingMode" description="Mode: off &lt; on &lt; auto">
+            <Enumeration>
+                <Item name="off" value="0" description="Switched off"/>
+                <Item name="on" value="1"/>
+                <Item name="auto" value="3" description="On if &quot;needed&quot; &amp; allowed"/>
+            </Enumeration>
+        </SimpleType>
+        <SimpleType name="Direction">
+            <Enumeration>
+                <Item name="backward" value="-1"/>
+                <Item name="forward" value="1"/>
+            </Enumeration>
+        </SimpleType>
+    </TypeDefinitions>
+
     <LogCategories>
         <Category name="logAll" description="All log messages"/>
         <Category name="logEvents" description="Lifecycle of the FMU"/>
@@ -33,85 +49,99 @@
         <ScalarVariable name="offset_value" valueReference="3" causality="parameter" variability="tunable" initial="exact">
             <Real start="0.1" unit="undefined_unit"/>
         </ScalarVariable>
+        <ScalarVariable name="operation" valueReference="4" causality="parameter" variability="tunable" initial="exact">
+            <Enumeration declaredType="OperatingMode" start="3"/>
+        </ScalarVariable>
 
         <!-- Inputs -->
-        <ScalarVariable name="u" valueReference="4" causality="input" variability="continuous">
+        <ScalarVariable name="u" valueReference="5" causality="input" variability="continuous">
             <Real start="0.5" unit="N/m"/>
         </ScalarVariable>
-        <ScalarVariable name="w" valueReference="5" causality="input" variability="continuous">
+        <ScalarVariable name="w" valueReference="6" causality="input" variability="continuous">
             <Real start="0"/>
         </ScalarVariable>
-        <ScalarVariable name="reset" valueReference="6" causality="input" variability="discrete">
+        <ScalarVariable name="reset" valueReference="7" causality="input" variability="discrete">
             <Boolean start="false"/>
         </ScalarVariable>
-        <ScalarVariable name="select" valueReference="7" causality="input" variability="discrete">
+        <ScalarVariable name="select" valueReference="8" causality="input" variability="discrete">
             <Integer start="-2"/>
+        </ScalarVariable>
+        <ScalarVariable name="command" valueReference="9" causality="input" variability="discrete">
+            <Enumeration declaredType="OperatingMode" start="0"/>
         </ScalarVariable>
 
         <!-- Outputs -->
-        <ScalarVariable name="y" valueReference="8" causality="output" variability="continuous" initial="calculated">
+        <ScalarVariable name="y" valueReference="10" causality="output" variability="continuous" initial="calculated">
             <Real/>
         </ScalarVariable>
-        <ScalarVariable name="e" valueReference="9" causality="output" variability="continuous" initial="calculated">
+        <ScalarVariable name="e" valueReference="11" causality="output" variability="continuous" initial="calculated">
             <Real/>
         </ScalarVariable>
-        <ScalarVariable name="z" valueReference="10" causality="output" variability="continuous" initial="calculated">
+        <ScalarVariable name="z" valueReference="12" causality="output" variability="continuous" initial="calculated">
             <Real/>
         </ScalarVariable>
-        <ScalarVariable name="count" valueReference="11" causality="output" variability="discrete" initial="calculated">
+        <ScalarVariable name="count" valueReference="13" causality="output" variability="discrete" initial="calculated">
             <Integer/>
         </ScalarVariable>
-        <ScalarVariable name="active" valueReference="12" causality="output" variability="discrete" initial="calculated">
+        <ScalarVariable name="active" valueReference="14" causality="output" variability="discrete" initial="calculated">
             <Boolean/>
+        </ScalarVariable>
+        <ScalarVariable name="state" valueReference="15" causality="output" variability="discrete" initial="calculated">
+            <Enumeration declaredType="OperatingMode"/>
         </ScalarVariable>
 
         <!-- Locals -->
-        <ScalarVariable name="rate" valueReference="13" description="Rate of the gain" causality="local" variability="continuous" initial="calculated">
+        <ScalarVariable name="rate" valueReference="16" description="Rate of the gain" causality="local" variability="continuous" initial="calculated">
             <Real unit="N/m" min="-1" max="1" nominal="2"/>
         </ScalarVariable>
-        <ScalarVariable name="level" valueReference="14" causality="local" variability="discrete" initial="calculated">
+        <ScalarVariable name="level" valueReference="17" causality="local" variability="discrete" initial="calculated">
             <Integer min="0" max="9"/>
         </ScalarVariable>
-        <ScalarVariable name="saturated" valueReference="15" causality="local" variability="discrete" initial="calculated">
+        <ScalarVariable name="saturated" valueReference="18" causality="local" variability="discrete" initial="calculated">
             <Boolean/>
         </ScalarVariable>
-        <ScalarVariable name="ratio_value" valueReference="16" causality="local" variability="continuous" initial="calculated">
+        <ScalarVariable name="ratio_value" valueReference="19" causality="local" variability="continuous" initial="calculated">
             <Real/>
+        </ScalarVariable>
+        <ScalarVariable name="direction" valueReference="20" causality="local" variability="discrete" initial="calculated">
+            <Enumeration declaredType="Direction"/>
         </ScalarVariable>
 
         <!-- States -->
-        <ScalarVariable name="x1" valueReference="17" causality="local" variability="continuous" initial="exact">
+        <ScalarVariable name="x1" valueReference="21" causality="local" variability="continuous" initial="exact">
             <Real start="4"/>
         </ScalarVariable>
-        <ScalarVariable name="second_state" valueReference="18" causality="local" variability="continuous" initial="approx">
+        <ScalarVariable name="second_state" valueReference="22" causality="local" variability="continuous" initial="approx">
             <Real start="-1" unit="N/m"/>
         </ScalarVariable>
 
         <!-- Calculated parameters -->
-        <ScalarVariable name="scaled_gain" valueReference="19" description="Gain times 10" causality="calculatedParameter" variability="tunable" initial="calculated">
+        <ScalarVariable name="scaled_gain" valueReference="23" description="Gain times 10" causality="calculatedParameter" variability="tunable" initial="calculated">
             <Real unit="N/m" min="0"/>
         </ScalarVariable>
-        <ScalarVariable name="doubled_mode" valueReference="20" causality="calculatedParameter" variability="fixed" initial="calculated">
+        <ScalarVariable name="doubled_mode" valueReference="24" causality="calculatedParameter" variability="fixed" initial="calculated">
             <Integer/>
         </ScalarVariable>
     </ModelVariables>
 
     <ModelStructure>
         <Outputs>
-            <Unknown index="9" dependencies=""/>
-            <Unknown index="10" dependencies="5 6"/>
-            <Unknown index="11"/>
-            <Unknown index="12" dependencies="8"/>
+            <Unknown index="11" dependencies=""/>
+            <Unknown index="12" dependencies="6 7"/>
             <Unknown index="13"/>
+            <Unknown index="14" dependencies="9"/>
+            <Unknown index="15"/>
+            <Unknown index="16" dependencies="10"/>
         </Outputs>
         <InitialUnknowns>
-            <Unknown index="9"/>
-            <Unknown index="10"/>
             <Unknown index="11"/>
             <Unknown index="12"/>
             <Unknown index="13"/>
-            <Unknown index="20"/>
-            <Unknown index="21"/>
+            <Unknown index="14"/>
+            <Unknown index="15"/>
+            <Unknown index="16"/>
+            <Unknown index="24"/>
+            <Unknown index="25"/>
         </InitialUnknowns>
     </ModelStructure>
 

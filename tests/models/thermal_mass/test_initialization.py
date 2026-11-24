@@ -1,8 +1,10 @@
-"""Tests of the initialization of the thermal_mass model (ROADMAP P1.3).
+"""Tests of the initialization of the thermal_mass model (ROADMAP P1.3, P1.4).
 
     tau = R*C                              (calculated parameter)
-    init_mode 1 (fixed_start):  T(0) = start value of T
-    init_mode 2 (steady_state): T(0) = T_amb + R*P, so that dT/dt = 0
+    init_mode = fixed_start (1):  T(0) = start value of T
+    init_mode = steady_state (2): T(0) = T_amb + R*P, so that dT/dt = 0
+
+init_mode is an enumeration (InitMode), set and read like an Integer.
 
 T is a state with initial="approx": the initialization may replace its start
 value, so it can only be set before fmi2EnterInitializationMode.
@@ -80,21 +82,34 @@ def test_fixed_start_keeps_the_start_value(new_fmu, vr) -> None:
     assert real(fmu, vr, "T_out") == 300.0
 
 
-def test_invalid_init_mode_fails_the_initialization(new_fmu, vr) -> None:
-    """An init_mode outside {1, 2} is reported by fmi2ExitInitializationMode."""
+def test_init_mode_is_an_enumeration(model_description) -> None:
+    """init_mode is published as the enumeration InitMode with its two items."""
+    init_mode = next(
+        v for v in model_description.modelVariables if v.name == "init_mode"
+    )
+
+    assert init_mode.type == "Enumeration"
+    assert init_mode.declaredType.name == "InitMode"
+    assert {item.name: int(item.value) for item in init_mode.declaredType.items} == {
+        "fixed_start": FIXED_START,
+        "steady_state": STEADY_STATE,
+    }
+
+
+def test_invalid_init_mode_is_refused(new_fmu, vr) -> None:
+    """A value that is no item of InitMode cannot be set at all."""
     log = []
     fmu = new_fmu(log=log)
-    fmu.setInteger([vr("init_mode")], [3])
-    fmu.setupExperiment(startTime=0.0)
-    fmu.enterInitializationMode()
 
     with pytest.raises(FMICallException):
-        fmu.exitInitializationMode()
+        fmu.setInteger([vr("init_mode")], [3])
 
     assert any(
-        "Initialization failed: init_mode 3 is neither" in message
+        "Value 3 of variable 'init_mode' is not an item of the enumeration 'InitMode'"
+        in message
         for _, _, message in log
     ), log
+    assert fmu.getInteger([vr("init_mode")])[0] == FIXED_START
 
 
 def test_temperature_cannot_be_set_in_initialization_mode(new_fmu, vr) -> None:

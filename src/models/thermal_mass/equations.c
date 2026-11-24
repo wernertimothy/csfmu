@@ -79,8 +79,9 @@ void thermalMassParameters(modelInstance* model)
  * Implementation notes:
  * - T is declared with .initial = VAR_APPROX in variables.c, because this
  *   function may replace its start value
- * - init_mode is checked here: the bounds in the variable table are
- *   published, but the FMU does not enforce them
+ * - init_mode is an enumeration: the FMU refuses to set a value that is no
+ *   item, so the default branch only catches values written directly into
+ *   the parameter block (e.g. in a standalone simulation without FMI)
  */
 simStatus thermalMassInitialize(modelInstance* model)
 {

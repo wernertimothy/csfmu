@@ -12,6 +12,7 @@
  * - Local variables are published (readable), but are not part of the
  *   ModelStructure.
  * - Calculated parameters are initial unknowns of the ModelStructure.
+ * - The enumeration types the variables use become TypeDefinitions.
  * - The inputs an output depends on directly (dependsOn) become the
  *   dependencies of the output in the ModelStructure.
  * - The capability flags and log categories describe fmi2Functions.c and
@@ -72,6 +73,22 @@ static size_t sizeOfBlock(const modelDefinition* def, varRole role)
         case VAR_CALCULATED_PARAMETER: return def->sizeOfParams;
     }
     return 0;
+}
+
+/**
+ * Whether variable k is the first variable of the table with its
+ * enumeration type (so the type is written and validated only once)
+ */
+static bool isFirstUseOfType(const modelDefinition* def, size_t k)
+{
+    const modelEnumeration* type = def->variables[k].declaredType;
+
+    for (size_t j = 0; j < k; j++) {
+        if (def->variables[j].declaredType == type) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -259,6 +276,62 @@ static int validateDependencies(const modelDefinition* def, const modelVariable*
 }
 
 /**
+ * Check an enumeration type, the first time a variable uses it
+ *
+ * Prints one message per problem and returns the number of problems.
+ */
+static int validateEnumeration(const modelDefinition* def, size_t k)
+{
+    const modelEnumeration* type = def->variables[k].declaredType;
+    int problems = 0;
+
+    if (!type->name) {
+        fprintf(stderr, "error: the enumeration type of '%s' has no name\n", def->variables[k].name);
+        return 1;
+    }
+
+    /* Type names must be unique: a different type with the same name, used earlier */
+    for (size_t j = 0; j < k; j++) {
+        const modelEnumeration* other = def->variables[j].declaredType;
+        if (other && other != type && isFirstUseOfType(def, j) && other->name &&
+            strcmp(other->name, type->name) == 0) {
+            fprintf(stderr, "error: two different enumeration types are named '%s'\n", type->name);
+            problems++;
+        }
+    }
+
+    if (type->numberOfItems == 0 || !type->items) {
+        fprintf(stderr, "error: enumeration '%s' has no items\n", type->name);
+        return problems + 1;
+    }
+
+    for (size_t i = 0; i < type->numberOfItems; i++) {
+        const modelEnumerationItem* item = &type->items[i];
+
+        if (!item->name) {
+            fprintf(stderr, "error: item %zu of enumeration '%s' has no name\n", i, type->name);
+            problems++;
+            continue;
+        }
+        for (size_t j = 0; j < i; j++) {
+            const modelEnumerationItem* earlier = &type->items[j];
+            if (earlier->name && strcmp(earlier->name, item->name) == 0) {
+                fprintf(stderr, "error: enumeration '%s' has more than one item named '%s'\n",
+                        type->name, item->name);
+                problems++;
+            }
+            if (earlier->value == item->value) {
+                fprintf(stderr, "error: items '%s' and '%s' of enumeration '%s' have the same value %d\n",
+                        earlier->name ? earlier->name : "?", item->name, type->name, item->value);
+                problems++;
+            }
+        }
+    }
+
+    return problems;
+}
+
+/**
  * Check the model definition for mistakes that the compiler cannot catch
  *
  * Prints one message per problem and returns the number of problems.
@@ -275,6 +348,9 @@ static int validateDependencies(const modelDefinition* def, const modelVariable*
  * - initial = VAR_APPROX is only used by states, and only if the model has
  *   an initialize function that can replace the start value
  * - A model with calculated parameters has a calculateParameters function
+ * - Enumeration types are only used by Integer variables, have a unique
+ *   name and items with unique names and values; an enumeration variable
+ *   starts at the value of an item and has no bounds of its own
  */
 static int validateDefinition(const modelDefinition* def, const char* modelIdentifier)
 {
@@ -381,6 +457,29 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
             hasCalculatedParameters = true;
         }
 
+        /* Enumeration variables */
+        if (variable->declaredType && variable->type != VAR_INTEGER) {
+            fprintf(stderr, "error: '%s' is not an int, only Integer variables can have a declaredType\n",
+                    variable->name);
+            problems++;
+        } else if (variable->declaredType) {
+            if (isFirstUseOfType(def, k)) {
+                problems += validateEnumeration(def, k);
+            }
+            if (variable->min.set || variable->max.set) {
+                fprintf(stderr, "error: enumeration variable '%s' has min or max; its values are the items "
+                                "of its type\n", variable->name);
+                problems++;
+            }
+            /* (a type without items is already reported by validateEnumeration) */
+            if (hasStartValue(variable->role) && variable->declaredType->numberOfItems > 0 &&
+                !modelEnumerationHasValue(variable->declaredType, (int)variable->start)) {
+                fprintf(stderr, "error: start value %d of '%s' is not an item of its enumeration\n",
+                        (int)variable->start, variable->name);
+                problems++;
+            }
+        }
+
         /* Dependencies must be inputs of this model */
         if (variable->dependsOn) {
             problems += validateDependencies(def, variable);
@@ -469,6 +568,48 @@ static void writeUnitDefinitions(FILE* file, const modelDefinition* def)
 
     if (opened) {
         fputs("    </UnitDefinitions>\n\n", file);
+    }
+}
+
+/**
+ * Write the TypeDefinitions element
+ *
+ * Contains every enumeration type used by a variable, once, in the order of
+ * the first variable that uses it.
+ */
+static void writeTypeDefinitions(FILE* file, const modelDefinition* def)
+{
+    bool opened = false;
+
+    for (size_t k = 0; k < def->numberOfVariables; k++) {
+        const modelEnumeration* type = def->variables[k].declaredType;
+
+        if (!type || !isFirstUseOfType(def, k)) {
+            continue;
+        }
+
+        if (!opened) {
+            fputs("    <TypeDefinitions>\n", file);
+            opened = true;
+        }
+
+        fputs("        <SimpleType", file);
+        writeStringAttribute(file, "name", type->name);
+        writeStringAttribute(file, "description", type->description);
+        fputs(">\n            <Enumeration>\n", file);
+        for (size_t i = 0; i < type->numberOfItems; i++) {
+            const modelEnumerationItem* item = &type->items[i];
+            fputs("                <Item", file);
+            writeStringAttribute(file, "name", item->name);
+            fprintf(file, " value=\"%d\"", item->value);
+            writeStringAttribute(file, "description", item->description);
+            fputs("/>\n", file);
+        }
+        fputs("            </Enumeration>\n        </SimpleType>\n", file);
+    }
+
+    if (opened) {
+        fputs("    </TypeDefinitions>\n\n", file);
     }
 }
 
@@ -574,6 +715,15 @@ static void writeScalarVariable(FILE* file, const modelVariable* variable, size_
             }
             break;
         case VAR_INTEGER:
+            if (variable->declaredType) {
+                /* Enumeration: the bounds are the items of the type */
+                fputs("            <Enumeration", file);
+                writeStringAttribute(file, "declaredType", variable->declaredType->name);
+                if (hasStart) {
+                    fprintf(file, " start=\"%d\"", (int)variable->start);
+                }
+                break;
+            }
             fputs("            <Integer", file);
             if (hasStart) {
                 fprintf(file, " start=\"%d\"", (int)variable->start);
@@ -677,8 +827,9 @@ static void writeModelDescription(FILE* file, const modelDefinition* def)
           " canBeInstantiatedOnlyOncePerProcess=\"false\""
           " canNotUseMemoryManagementFunctions=\"" CAN_NOT_USE_MEMORY_MANAGEMENT_FUNCTIONS "\"/>\n\n", file);
 
-    /* Unit definitions */
+    /* Unit and type definitions */
     writeUnitDefinitions(file, def);
+    writeTypeDefinitions(file, def);
 
     /* Log categories (must match LOG_CATEGORIES in fmi2Functions.c) */
     fputs("    <LogCategories>\n"

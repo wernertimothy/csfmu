@@ -3,7 +3,7 @@
 
 #include "model.h"
 
-/* initialization modes (parameter init_mode) */
+/* items of the enumeration InitMode (parameter init_mode, see variables.c) */
 #define THERMAL_MASS_FIXED_START  1  /* T starts at its start value */
 #define THERMAL_MASS_STEADY_STATE 2  /* T starts in equilibrium: T = T_amb + R*P */
 
@@ -12,7 +12,7 @@ typedef struct {
     double C;          /* heat capacity */
     double R;          /* thermal resistance to the ambient */
     double T_amb;      /* ambient temperature */
-    int    init_mode;  /* how T is initialized (THERMAL_MASS_FIXED_START, ...) */
+    int    init_mode;  /* how T is initialized: an enumeration, so an int (see model.h) */
     double tau;        /* time constant R*C (calculated parameter) */
 } Params;
 

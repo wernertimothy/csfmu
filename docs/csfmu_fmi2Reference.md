@@ -824,7 +824,7 @@ fmi2Status fmi2GetInteger(fmi2Component c,
 ```
 
 #### Description
-The integer counterparts of `fmi2SetReal` and `fmi2GetReal`. A variable is an integer variable if its field in the model's struct is of type `int`.
+The integer counterparts of `fmi2SetReal` and `fmi2GetReal`. A variable is an integer variable if its field in the model's struct is of type `int`. Enumeration variables (`<Enumeration declaredType="...">` in the `modelDescription.xml`) are integer variables too and use the same two functions; only the values of the items of their type can be set.
 
 #### Parameters
 | Name | Type | Description |
@@ -838,7 +838,7 @@ The integer counterparts of `fmi2SetReal` and `fmi2GetReal`. A variable is an in
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | All variables set / read successfully |
-| `fmi2Error` | Same conditions as `fmi2SetReal` / `fmi2GetReal`; the variable must be of type Integer |
+| `fmi2Error` | Same conditions as `fmi2SetReal` / `fmi2GetReal`; the variable must be of type Integer or Enumeration. For an enumeration variable, `fmi2SetInteger` also fails if the value is not the value of an item of its type (e.g. `Value 3 of variable 'init_mode' is not an item of the enumeration 'InitMode'.`); the variable keeps its value |
 
 #### FMI State Requirements
 **Can be called in**: Same states as [`fmi2SetReal`](#fmi2setreal) and [`fmi2GetReal`](#fmi2getreal)
@@ -865,7 +865,8 @@ fmi2GetInteger(fmu, &VR_level, 1, &level);
 
 #### Notes
 - **Same rules as for Real variables**: See [Value References](#value-references) for which variables can be set when
-- **Discrete in the model description**: Integer inputs and outputs are declared with `variability="discrete"`, as required by FMI 2.0
+- **Discrete in the model description**: Integer and enumeration inputs and outputs are declared with `variability="discrete"`, as required by FMI 2.0
+- **Enumerations**: The items of every enumeration type are listed in the `TypeDefinitions` of the `modelDescription.xml`. Values that are no item are refused, also values between two items. The `thermal_mass` model has the enumeration parameter `init_mode` (type `InitMode`)
 
 ---
 

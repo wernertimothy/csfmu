@@ -26,6 +26,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 ## Variables
 
 - **Parameters**, **inputs**, **outputs** and **local variables** can be of type `double`, `int` or `bool`.
+- An `int` variable can be published as an **enumeration**: a named set of values (items), of which only the items can be set.
 - Local variables are computed by the output equation and published read-only (`causality="local"`). They are always consistent with the other variables, like outputs.
 - Parameters are tunable (they can be changed between simulation steps) or fixed (`.variability = VAR_FIXED`, they can only be set before the simulation starts).
 - Calculated parameters are computed from the parameters and published read-only (`causality="calculatedParameter"`). They are consistent with the parameters in every state of the FMU, also during the initialization.
@@ -59,6 +60,6 @@ The repository ships demo models, each of which showcases a certain feature. Use
 | [`forced_pt1`](../src/models/forced_pt1/) | Explicit time dependence in both equations (`model->time`). The integrator evaluates every stage at its own time |
 | [`pi_controller`](../src/models/pi_controller/) | Direct feedthrough: its outputs react to an input as soon as it is set, without a simulation step (`.dependsOn`) |
 | [`fault_injection`](../src/models/fault_injection/) | A model without inputs, and a numerical failure on request: the FMU discards the step and rolls back (`fmi2Discard`) |
-| [`thermal_mass`](../src/models/thermal_mass/) | A local variable (`Q_loss`, the heat loss to the ambient) that can be read but not set; a calculated parameter (`tau = R*C`); an initialization that can start in steady state (`init_mode`), with a state published as `initial="approx"` |
+| [`thermal_mass`](../src/models/thermal_mass/) | A local variable (`Q_loss`, the heat loss to the ambient) that can be read but not set; a calculated parameter (`tau = R*C`); an initialization that can start in steady state (`init_mode`, an enumeration), with a state published as `initial="approx"` |
 
 When the template learns a new kind of model, this page and the list of demo models are extended.
