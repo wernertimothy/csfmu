@@ -315,6 +315,62 @@ void ${camel}Outputs(modelInstance* model)
 }
 """)
 
+EQUATIONS_CPP = Template("""\
+#include "variables.h"
+
+/* The equations are called from C, so they need C linkage */
+extern "C" {
+
+/**
+ * Integrator state equation: dx/dt = f(t, x, u)
+ *
+ * Implements the differential equation:
+ *     dx/dt = k*u
+ *
+ * where:
+ *     k = integrator gain (parameter)
+ *     u = input signal (input)
+ *     x = state variable (state)
+ *
+ * Implementation notes:
+ * - Views the storage blocks through the structs from variables.h. C++ does
+ *   not convert void* implicitly, so the blocks need explicit casts
+ *   (reinterpret_cast for the state vectors, which are double arrays)
+ * - The current time t is model->time (this equation does not use it)
+ * - The state vector is a double array; States gives its entries names
+ * - Writes result directly to the state derivatives
+ */
+void ${camel}System(modelInstance* model)
+{
+    const Params& p  = *static_cast<const Params*>(model->params);
+    const Inputs& in = *static_cast<const Inputs*>(model->inputs);
+    States&       dx = *reinterpret_cast<States*>(model->stateDerivatives);
+
+    /* Compute state derivative: dx/dt = k*u */
+    dx.x = p.k * in.u;
+}
+
+/**
+ * Integrator output equation: y = h(t, x, u)
+ *
+ * The output is equal to the state:
+ *     y = x
+ *
+ * Implementation notes:
+ * - No direct feedthrough of u, hence .dependsOn = "" in variables.c
+ */
+void ${camel}Outputs(modelInstance* model)
+{
+    const States& x   = *reinterpret_cast<const States*>(model->states);
+    Outputs&      out = *static_cast<Outputs*>(model->outputs);
+
+    /* Output equals state (y = x) */
+    out.y = x.x;
+}
+
+}  /* extern "C" */
+""")
+
 TEST_MODEL = Template('''\
 """Tests of the ${name} model.
 
@@ -343,12 +399,17 @@ def test_output_integrates_the_input(initialized_fmu, vr) -> None:
 ''')
 
 
-def create_model(root: Path, name: str) -> list[Path]:
+def create_model(root: Path, name: str, *, cpp: bool = False) -> list[Path]:
     """Create the files of a new model from the template and return their paths.
 
     Creates src/models/<name>/ with an integrator (dx/dt = k*u, y = x) and
     tests/models/<name>/ with a starter test of the model. Neither folder may exist.
+    With cpp, the equations are written in C++ (equations.cpp instead of
+    equations.c); variables.c stays C, because the variable table needs C.
     """
+    equations_file, equations = (
+        ("equations.cpp", EQUATIONS_CPP) if cpp else ("equations.c", EQUATIONS_C)
+    )
     values = {
         "name": name,
         "camel": camel_case(name),
@@ -360,7 +421,7 @@ def create_model(root: Path, name: str) -> list[Path]:
     files = {
         model_dir / "variables.h": VARIABLES_H.substitute(values),
         model_dir / "variables.c": VARIABLES_C.substitute(values),
-        model_dir / "equations.c": EQUATIONS_C.substitute(values),
+        model_dir / equations_file: equations.substitute(values),
         test_dir / "__init__.py": "",
         test_dir / f"test_{name}.py": TEST_MODEL.substitute(values),
     }

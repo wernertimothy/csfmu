@@ -106,8 +106,8 @@ jobs:
         run: uv run pytest tests/integration/test_two_fmus.py -v
 
   # Tests of the csfmu tool, which do not depend on a model. Creating a model
-  # with "csfmu new" and testing it catches a scaffold template that no
-  # longer fits the modelDefinition API
+  # with "csfmu new" and testing it catches a scaffold template, C or C++,
+  # that no longer fits the modelDefinition API
   cli:
     name: CLI
     runs-on: ubuntu-latest
@@ -126,6 +126,11 @@ jobs:
         run: |
           uv run csfmu new scaffold_probe
           uv run csfmu test scaffold_probe
+
+      - name: Create, build and test a new C++ model
+        run: |
+          uv run csfmu new scaffold_probe_cpp --cpp
+          uv run csfmu test scaffold_probe_cpp
 
   # Line coverage of src/ over the C and Python tests of every model. Report
   # only, there is no threshold. CMake takes CFLAGS, CXXFLAGS and LDFLAGS from

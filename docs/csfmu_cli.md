@@ -35,7 +35,7 @@ Select a model [1-4] or q to quit:
 
 ## Commands
 
-### `new <model>`
+### `new <model> [--cpp]`
 
 Creates a new model from a template.
 
@@ -54,13 +54,21 @@ The template is the simplest dynamical system there is, an integrator with gain:
 
 with **dx/dt = k·u** and **y = x**.
 
+With `--cpp` the equations are written in C++: the same integrator goes into `equations.cpp` instead of `equations.c`.
+
+```bash
+uv run csfmu new my_model --cpp
+```
+
+`variables.c` stays a C file, also for a C++ model, because the variable table needs C. [C++ models][] in getting started explains what differs in C++.
+
 The following files are created:
 
   | File | Content |
   |------|---------|
   | `src/models/<model>/variables.h` | The structs `Params`, `Inputs`, `Outputs`, `States` and the declarations of the equations |
   | `src/models/<model>/variables.c` | The variable table and the model definition, with a freshly generated GUID |
-  | `src/models/<model>/equations.c` | The state and output equations |
+  | `src/models/<model>/equations.c` (`equations.cpp` with `--cpp`) | The state and output equations |
   | `tests/models/<model>/__init__.py` | Makes the tests a Python package |
   | `tests/models/<model>/test_<model>.py` | A starter test that checks the integrator against its exact solution |
 
@@ -201,3 +209,4 @@ uv run csfmu clean
 ```
 
 [getting started]: csfmu_gettingStarted.md
+[C++ models]: csfmu_gettingStarted.md#c-models

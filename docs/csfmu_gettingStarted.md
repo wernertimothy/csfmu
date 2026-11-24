@@ -71,7 +71,7 @@ Second, add the following files and fill them with life:
 
 That is all. You do not have to touch any other file of the project: the model is picked up by `-DMODEL=lorenz_attractor`.
 
-**Tip:** `uv run csfmu new lorenz_attractor` creates the folder and all three files for you, filled with a simple integrator that builds and passes the tests right away. See [the project manager](csfmu_cli.md) for details.
+**Tip:** `uv run csfmu new lorenz_attractor` creates the folder and all three files for you, filled with a simple integrator that builds and passes the tests right away. Add `--cpp` to get the equations in C++. See [the project manager](csfmu_cli.md) for details.
 
 The build system auto-detects whether your model uses C or C++ based on the file extension. If `equations.cpp` exists it will be compiled with the C++ compiler; otherwise `equations.c` is used.
 
@@ -368,7 +368,7 @@ Things to know:
 
 #### C++ Models
 
-You can also implement your equations in C++ by naming the file `equations.cpp`. This lets you use classes, the C++ standard library, templates, and other C++ features inside your model.
+You can also implement your equations in C++ by naming the file `equations.cpp`. This lets you use classes, the C++ standard library, templates, and other C++ features inside your model. `uv run csfmu new <model> --cpp` creates a model with its equations in C++.
 
 The only requirement is that the two equation functions must have **C linkage** (via `extern "C"`). Everything else can be pure C++.
 

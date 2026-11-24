@@ -53,6 +53,11 @@ def test_pytest_arguments_do_not_become_the_model() -> None:
     assert args.pytest_args == ["-v"]
 
 
+def test_new_writes_c_unless_cpp_is_given() -> None:
+    assert cli.parse_args(["new", "my_model"]).cpp is False
+    assert cli.parse_args(["new", "my_model", "--cpp"]).cpp is True
+
+
 # finding the project and its models
 
 
@@ -151,6 +156,30 @@ def test_new_model_has_sources_and_a_test(project) -> None:
     variables_c = (project / "src/models/my_model/variables.c").read_text()
     assert '.name        = "my_model"' in variables_c
     assert "myModelSystem" in variables_c
+
+
+def test_new_cpp_model_has_cpp_equations(project) -> None:
+    files = create_model(project, "my_model", cpp=True)
+
+    assert [path.relative_to(project).as_posix() for path in files] == [
+        "src/models/my_model/variables.h",
+        "src/models/my_model/variables.c",
+        "src/models/my_model/equations.cpp",
+        "tests/models/my_model/__init__.py",
+        "tests/models/my_model/test_my_model.py",
+    ]
+    assert not (project / "src/models/my_model/equations.c").exists()
+    assert cli.available_models(project) == ["my_model"]
+
+    equations = (project / "src/models/my_model/equations.cpp").read_text()
+    assert 'extern "C" {' in equations
+    assert "void myModelSystem(modelInstance* model)" in equations
+    assert "void myModelOutputs(modelInstance* model)" in equations
+
+
+def test_new_passes_cpp_on(project) -> None:
+    assert cli.new(project, "my_model", cpp=True) == 0
+    assert (project / "src/models/my_model/equations.cpp").is_file()
 
 
 def test_every_new_model_gets_its_own_guid(project) -> None:

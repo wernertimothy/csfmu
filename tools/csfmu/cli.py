@@ -1,7 +1,7 @@
 """Command line interface of the csfmu project manager.
 
 Usage:
-    csfmu new <model>
+    csfmu new <model> [--cpp]
     csfmu rm <model>
     csfmu build [<model>] [-o <dir>]
     csfmu test [<model>] [-- <pytest args>]
@@ -157,8 +157,11 @@ def test(root: Path, model: str, pytest_args: list[str]) -> int:
     return run([sys.executable, "-m", "pytest", *pytest_args], cwd=root, env=env)
 
 
-def new(root: Path, name: str) -> int:
-    """Create a new model from the template in src/models/<name>/ and its tests in tests/models/<name>/."""
+def new(root: Path, name: str, *, cpp: bool = False) -> int:
+    """Create a new model from the template in src/models/<name>/ and its tests in tests/models/<name>/.
+
+    With cpp, the equations are written in C++ (equations.cpp).
+    """
     error = validate_name(name)
     if error is not None:
         print(f"Error: {error}")
@@ -174,7 +177,7 @@ def new(root: Path, name: str) -> int:
                 return 1
 
     print(f"Created model '{name}':")
-    for path in create_model(root, name):
+    for path in create_model(root, name, cpp=cpp):
         print(f"  {path.relative_to(root)}")
     print("Next:")
     print(f"  uv run csfmu build {name}")
@@ -304,6 +307,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     new_parser.add_argument(
         "model", help="name of the new folder under src/models/ (e.g. my_model)"
     )
+    new_parser.add_argument(
+        "--cpp",
+        action="store_true",
+        help="write the equations in C++ (equations.cpp instead of equations.c)",
+    )
 
     rm_parser = commands.add_parser("rm", help="remove a model and all its files")
     rm_parser.add_argument("model", help="name of a folder under src/models/")
@@ -357,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "clean":
         return clean(root)
     if args.command == "new":
-        return new(root, args.model)
+        return new(root, args.model, cpp=args.cpp)
     if args.command == "rm":
         return remove(root, args.model)
 
