@@ -25,6 +25,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,8 +58,10 @@ typedef struct modelInstance modelInstance;
 
 /**
  * @brief Size of the message buffer of a model instance (see modelError()).
+ *
+ * Large enough for a message that names a file by its full path.
  */
-#define MODEL_MESSAGE_SIZE 256
+#define MODEL_MESSAGE_SIZE 1024
 
 /**
  * @brief Size of the struct field of a string parameter, including the terminating '\0'.
@@ -347,6 +350,7 @@ typedef struct {
  * - A buffer for rolling back a failed step (see stepStart)
  * - Function pointers for model equations and integration
  * - A message buffer that explains the last error (see modelError())
+ * - The path of the folder with the model's data files (see resourcePath)
  *
  * Memory layout is managed by newModel() and freeModel().
  *
@@ -376,6 +380,10 @@ struct modelInstance {
     outputsFn getOutputs;                    /**< Function to compute y = h(t,x,u) */
     char message[MODEL_MESSAGE_SIZE];        /**< Reason of the last SIM_ERROR (see modelError()), "" if
                                                   none. Cleared by resetModel(), not part of the model data */
+    char* resourcePath;                      /**< Absolute path of the folder with the model's data files
+                                                  (resources), UTF-8, ending with a '/'; NULL if unknown.
+                                                  Set by the caller with modelSetResourcePath(), read-only for
+                                                  the model. Kept by resetModel(), not part of the model data */
 };
 
 /**
@@ -406,8 +414,9 @@ modelInstance* newModel(const modelDefinition* def);
  * (see modelDefaultTolerance()), zeroes all storage blocks (including the
  * internals, which have no start values), writes the start value of every
  * variable in the definition's variable table, (re-)binds the function
- * pointers from the definition and clears the message. This function is
- * NULL-safe.
+ * pointers from the definition and clears the message. The resource path
+ * (see modelSetResourcePath()) is kept: it belongs to the instance, not to
+ * a simulation. This function is NULL-safe.
  *
  * @param model Pointer to the model instance to reset. May be NULL.
  */
@@ -549,11 +558,44 @@ void saveModelData(const modelInstance* model, void* buffer);
 void restoreModelData(modelInstance* model, const void* buffer);
 
 /**
+ * @brief Sets the path of the folder with the model's data files.
+ *
+ * Copies path into model->resourcePath and appends a '/' unless it already
+ * ends with one (or with a backslash on Windows), so that a model can append a
+ * file name directly. The path belongs to the instance, like its definition:
+ * resetModel() keeps it and it is not part of the model data.
+ *
+ * @param model Pointer to the model instance
+ * @param path  Absolute path, UTF-8 encoded; NULL or "" means unknown
+ *              (model->resourcePath becomes NULL)
+ *
+ * @return true on success, false if model is NULL or memory allocation
+ *         fails (model->resourcePath is then NULL)
+ */
+bool modelSetResourcePath(modelInstance* model, const char* path);
+
+/**
+ * @brief Opens a file whose path is UTF-8 encoded.
+ *
+ * Same as fopen(), but the path is always UTF-8, also on Windows, where
+ * fopen() would read it in the local code page and fail on non-ASCII
+ * characters (e.g. a temporary folder below a user name with an umlaut).
+ *
+ * @param path UTF-8 encoded path
+ * @param mode Mode as for fopen(), e.g. "rb"
+ *
+ * @return The opened file (close it with fclose()), or NULL if path or mode
+ *         is NULL, path is not valid UTF-8 (Windows) or the file cannot be
+ *         opened
+ */
+FILE* modelOpenFile(const char* path, const char* mode);
+
+/**
  * @brief Deallocates a model instance and all its associated memory.
  *
  * Safely frees all dynamically allocated memory within the model instance
- * and the instance itself. This function is NULL-safe and can be called
- * with a NULL pointer without causing errors.
+ * (including the resource path) and the instance itself. This function is
+ * NULL-safe and can be called with a NULL pointer without causing errors.
  *
  * @param model Pointer to the model instance to free. May be NULL.
  *

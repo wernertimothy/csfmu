@@ -1,14 +1,15 @@
 """Tests of the lookup_table_1d model: y = interp1(table, u), without states.
 
-The table holds the points (u, y) = (-1, -2), (0, 0), (1, 1), (2, 1.5),
-(3, 1.75). Between two points y is interpolated linearly, outside the table
-it is clamped to the first or last value. All values below are exact in
-binary floating point.
+The packaged table (resources/table.csv) holds the points (u, y) = (-1, -2),
+(0, 0), (1, 1), (2, 1.5), (3, 1.75). Between two points y is interpolated
+linearly, outside the table it is clamped to the first or last value. All
+values below are exact in binary floating point. The initialization reads
+the table, so y is NaN before.
 """
 
 import pytest
 
-from tests.fmu_helpers import advance, initialize, states
+from tests.fmu_helpers import advance, initialize, is_nan, states
 
 # (u, y): the points, the middle of every segment, and clamping on both sides
 EXPECTED = [
@@ -37,12 +38,34 @@ def test_output_follows_the_input_without_a_step(initialized_fmu, vr, u, y) -> N
     assert initialized_fmu.getReal([vr("y")])[0] == y
 
 
-@pytest.mark.parametrize(("u", "y"), EXPECTED)
-def test_output_before_initialization(new_fmu, vr, u, y) -> None:
-    """The table is available as soon as the FMU is instantiated."""
+def test_output_is_nan_before_initialization(new_fmu, vr) -> None:
+    """The initialization reads the table: before, y cannot be computed."""
     fmu = new_fmu()
-    fmu.setReal([vr("u")], [u])
-    assert fmu.getReal([vr("y")])[0] == y
+    assert is_nan(fmu.getReal([vr("y")])[0])
+
+    fmu.setReal([vr("u")], [0.5])
+    assert is_nan(fmu.getReal([vr("y")])[0])
+
+    fmu.setupExperiment(startTime=0.0)
+    fmu.enterInitializationMode()
+    assert is_nan(fmu.getReal([vr("y")])[0])
+
+    fmu.exitInitializationMode()
+    assert fmu.getReal([vr("y")])[0] == 0.5
+
+
+def test_output_is_nan_again_after_reset(initialized_fmu, vr) -> None:
+    """fmi2Reset forgets the table until the next initialization."""
+    initialized_fmu.setReal([vr("u")], [0.5])
+    assert initialized_fmu.getReal([vr("y")])[0] == 0.5
+
+    initialized_fmu.reset()
+    assert is_nan(initialized_fmu.getReal([vr("y")])[0])
+
+    initialize(initialized_fmu)
+    assert (
+        initialized_fmu.getReal([vr("y")])[0] == 0.0
+    )  # u is back at its start value 0
 
 
 def test_output_after_steps(initialized_fmu, vr) -> None:

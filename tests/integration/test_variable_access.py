@@ -15,6 +15,7 @@ from tests.fmu_helpers import (
     enumeration_values,
     enumeration_variables,
     initialize,
+    is_nan,
     local_variables,
     read,
     settable_before_initialization,
@@ -22,6 +23,7 @@ from tests.fmu_helpers import (
     start_value,
     states,
     variables_with,
+    without_strings,
     write,
 )
 
@@ -62,10 +64,11 @@ def test_values_set_before_initialization_survive(new_fmu, model_description) ->
     fmi2EnterInitializationMode. This is how fmpy applies start_values.
 
     A state with initial="approx" is only a guess: the initialization may
-    replace it, so it is set but not expected to survive.
+    replace it, so it is set but not expected to survive. String variables
+    are left out (see without_strings).
     """
     fmu = new_fmu()
-    settable = settable_before_initialization(model_description)
+    settable = without_strings(settable_before_initialization(model_description))
     approx = {v.name for v in approx_states(model_description)}
     expected = {}
 
@@ -81,9 +84,12 @@ def test_values_set_before_initialization_survive(new_fmu, model_description) ->
 
 
 def test_values_can_be_set_in_initialization_mode(new_fmu, model_description) -> None:
-    """Parameters, inputs and states with initial="exact" can be set during initialization mode."""
+    """Parameters, inputs and states with initial="exact" can be set during initialization mode.
+
+    String variables are left out (see without_strings).
+    """
     fmu = new_fmu()
-    settable = settable_in_initialization_mode(model_description)
+    settable = without_strings(settable_in_initialization_mode(model_description))
     expected = {}
 
     fmu.setupExperiment(startTime=0.0)
@@ -292,20 +298,27 @@ def test_variables_can_be_read_in_initialization_mode(
 
     Unless the model has states with initial="approx": their initialization
     at the end of initialization mode may move them, and the outputs with them.
+    An output that is NaN during initialization mode cannot be computed yet
+    (e.g. it needs data that the initialization reads) and is not compared.
+    String variables are left out (see without_strings).
     """
     fmu = new_fmu()
     outputs = variables_with(model_description, "output")
 
     fmu.setupExperiment(startTime=0.0)
     fmu.enterInitializationMode()
-    for variable in settable_in_initialization_mode(model_description):
+    for variable in without_strings(settable_in_initialization_mode(model_description)):
         write(fmu, variable, changed_value(variable))
     during_initialization = [read(fmu, output) for output in outputs]
     fmu.exitInitializationMode()
 
     after_initialization = [read(fmu, output) for output in outputs]
     if not approx_states(model_description):
-        assert after_initialization == during_initialization
+        for output, during, after in zip(
+            outputs, during_initialization, after_initialization
+        ):
+            if not is_nan(during):
+                assert after == during, output.name
 
 
 def test_outputs_follow_values_set_before_initialization(
@@ -314,12 +327,13 @@ def test_outputs_follow_values_set_before_initialization(
     """Outputs read in the instantiated state reflect the values set so far.
 
     Unless the model has states with initial="approx", which the
-    initialization may move (see test_variables_can_be_read_in_initialization_mode).
+    initialization may move, or the output is NaN before the initialization
+    (see test_variables_can_be_read_in_initialization_mode).
     """
     fmu = new_fmu()
     outputs = variables_with(model_description, "output")
 
-    for variable in settable_before_initialization(model_description):
+    for variable in without_strings(settable_before_initialization(model_description)):
         write(fmu, variable, changed_value(variable))
     before_initialization = [read(fmu, output) for output in outputs]
 
@@ -327,4 +341,8 @@ def test_outputs_follow_values_set_before_initialization(
 
     after_initialization = [read(fmu, output) for output in outputs]
     if not approx_states(model_description):
-        assert after_initialization == before_initialization
+        for output, before, after in zip(
+            outputs, before_initialization, after_initialization
+        ):
+            if not is_nan(before):
+                assert after == before, output.name

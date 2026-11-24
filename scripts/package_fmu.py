@@ -5,8 +5,12 @@ import sys
 import zipfile
 
 
-def package_fmu(lib_path, model_desc_path, output_dir, fmu_name):
-    """Package FMU according to FMI 2.0 standard."""
+def package_fmu(lib_path, model_desc_path, output_dir, fmu_name, resources_dir=None):
+    """Package FMU according to FMI 2.0 standard.
+
+    If resources_dir is an existing folder, its content becomes the folder
+    resources/ of the FMU. A model without such a folder gets none.
+    """
 
     # Determine architecture and platform names
     # We place the binary under both the modern (<arch>-<os>) and legacy
@@ -57,6 +61,11 @@ def package_fmu(lib_path, model_desc_path, output_dir, fmu_name):
             )
         shutil.copy2(model_desc_path, work_dir)
 
+        # Copy the model's data files (FMI 2.0, section 2.1.5: the "resources"
+        # directory of the unzipped FMU archive)
+        if resources_dir is not None and os.path.isdir(resources_dir):
+            shutil.copytree(resources_dir, os.path.join(work_dir, "resources"))
+
         # Create zip file
         zip_path = os.path.join(output_dir, f"{fmu_name}.zip")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -85,10 +94,11 @@ def package_fmu(lib_path, model_desc_path, output_dir, fmu_name):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
+    if len(sys.argv) not in (5, 6):
         print(
             "Usage: package_fmu.py <lib_path> <model_desc_path> <output_dir> <fmu_name>"
+            " [<resources_dir>]"
         )
         sys.exit(1)
 
-    sys.exit(package_fmu(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]))
+    sys.exit(package_fmu(*sys.argv[1:]))

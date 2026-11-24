@@ -24,6 +24,7 @@ csfmu_unit_test(test_modelData)  # saveModelData / restoreModelData
 csfmu_unit_test(test_initialize)  # initializeModel / computeCalculatedParameters / modelError
 csfmu_unit_test(test_enumeration)  # modelEnumerationHasValue / enumeration variables
 csfmu_unit_test(test_string)  # string parameters / modelSetString
+csfmu_unit_test(test_resources)  # modelSetResourcePath / modelOpenFile
 csfmu_unit_test(test_eulerForward)
 csfmu_unit_test(test_rungeKutta4)
 
@@ -56,6 +57,11 @@ target_include_directories(test_fmi2_enumeration PRIVATE ${CMAKE_SOURCE_DIR}/ext
 # and tunable, part of the FMU state and of fmi2Reset
 csfmu_unit_test(test_fmi2_string ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
 target_include_directories(test_fmi2_string PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
+
+# Resource folder: fmuResourceLocation (file URI) becomes model->resourcePath,
+# other locations leave the model without one, never failing the instantiation
+csfmu_unit_test(test_fmi2_resources ${CMAKE_SOURCE_DIR}/src/fmi2Functions.c)
+target_include_directories(test_fmi2_resources PRIVATE ${CMAKE_SOURCE_DIR}/external/fmi2/src)
 
 # Checks of the model definition in the modelDescription.xml generator. The
 # test includes src/fmi2ModelDescription.c to reach its static functions

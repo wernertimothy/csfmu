@@ -229,6 +229,20 @@ else()
     message(STATUS "Using system Python: ${Python3_EXECUTABLE}")
 endif()
 
+# Data files of the model (optional): src/models/<model>/resources/ becomes
+# the folder resources/ of the FMU
+set(MODEL_RESOURCES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/models/${MODEL}/resources")
+
+# The FMU is packaged after the library is linked (below). A changed, added
+# or removed resource file must repackage it too, so the files are link
+# dependencies of the library: changing one relinks it, which packages the
+# FMU again. CONFIGURE_DEPENDS repeats the search at every build.
+# (LINK_DEPENDS is honored by the Makefile and Ninja generators.)
+file(GLOB_RECURSE MODEL_RESOURCE_FILES CONFIGURE_DEPENDS "${MODEL_RESOURCES_DIR}/*")
+if(MODEL_RESOURCE_FILES)
+    set_property(TARGET ${LIB_NAME} APPEND PROPERTY LINK_DEPENDS ${MODEL_RESOURCE_FILES})
+endif()
+
 # Package FMU
 add_custom_command(
     TARGET ${LIB_NAME} POST_BUILD
@@ -238,6 +252,7 @@ add_custom_command(
         ${MODEL_DESCRIPTION_XML}
         ${FMU_OUTPUT_DIR}
         ${LIB_NAME}
+        ${MODEL_RESOURCES_DIR}
     COMMENT "Packaging FMU to ${FMU_OUTPUT_DIR}/${LIB_NAME}.fmu ..."
     VERBATIM
 )

@@ -5,6 +5,7 @@ Status codes and status kinds are not defined here, they come from fmpy.fmi2
 """
 
 import ctypes
+import math
 
 import fmpy.fmi2
 
@@ -93,6 +94,22 @@ def changed_value(variable, value=None):
     if variable.max is not None and value + step > float(variable.max):
         return value - step
     return value + step
+
+
+def without_strings(variables) -> list:
+    """The variables that are not of type String.
+
+    The tests that set every variable to changed_value() and then initialize
+    leave String variables out: which texts are valid depends on the model
+    (e.g. the name of a file that must exist), so a changed text may make the
+    initialization fail. The model's own tests cover its String variables.
+    """
+    return [v for v in variables if v.type != "String"]
+
+
+def is_nan(value) -> bool:
+    """Whether value is a Real value that is NaN (e.g. an output that cannot be computed yet)."""
+    return isinstance(value, float) and math.isnan(value)
 
 
 def variables_with(model_description, causality: str, type: str | None = None) -> list:

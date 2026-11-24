@@ -4,6 +4,8 @@ A String parameter is a char[MODEL_STRING_SIZE] field: it holds at most
 MAX_STRING_BYTES bytes of UTF-8. fmi2SetString copies the text in and
 refuses one that does not fit (never cutting it); fmi2GetString returns it.
 table_file is fixed, so it can only be set until the initialization is finished.
+The initialization reads the file it names, so the tests that initialize
+after setting it write that file first (fixture write_table).
 """
 
 import pytest
@@ -38,20 +40,20 @@ def test_holds_its_start_value_after_instantiation(new_fmu, vr) -> None:
     assert get_text(new_fmu(), vr) == "table.csv"
 
 
-def test_value_set_before_initialization_survives_it(new_fmu, vr) -> None:
+def test_value_set_before_initialization_survives_it(new_fmu, vr, write_table) -> None:
     fmu = new_fmu()
-    set_text(fmu, vr, "measured.csv")
+    set_text(fmu, vr, write_table("measured.csv"))
 
     initialize(fmu)
 
     assert get_text(fmu, vr) == "measured.csv"
 
 
-def test_can_be_set_in_initialization_mode(new_fmu, vr) -> None:
+def test_can_be_set_in_initialization_mode(new_fmu, vr, write_table) -> None:
     fmu = new_fmu()
     fmu.setupExperiment(startTime=0.0)
     fmu.enterInitializationMode()
-    set_text(fmu, vr, "init.csv")
+    set_text(fmu, vr, write_table("init.csv"))
     fmu.exitInitializationMode()
 
     assert get_text(fmu, vr) == "init.csv"
@@ -113,9 +115,9 @@ def test_null_value_is_refused(new_fmu, vr) -> None:
     assert get_text(fmu, vr) == "table.csv"
 
 
-def test_reset_restores_the_start_value(new_fmu, vr) -> None:
+def test_reset_restores_the_start_value(new_fmu, vr, write_table) -> None:
     fmu = new_fmu()
-    set_text(fmu, vr, "other.csv")
+    set_text(fmu, vr, write_table("other.csv"))
     initialize(fmu)
 
     fmu.reset()

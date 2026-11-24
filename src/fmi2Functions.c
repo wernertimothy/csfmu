@@ -25,8 +25,9 @@
 /* Largest number of sub-steps a single fmi2DoStep may take */
 #define MAX_NUMBER_OF_SUBSTEPS 1e9
 
-/* Buffer size for formatted log messages */
-#define LOG_BUFFER_SIZE 512
+/* Buffer size for formatted log messages (a message of the model, which may
+   name a file by its full path, plus a prefix) */
+#define LOG_BUFFER_SIZE (MODEL_MESSAGE_SIZE + 256)
 
 /* Marks a block of memory as an FMU state of this template ("FMUS") */
 #define SNAPSHOT_MAGIC 0x464D5553u
@@ -470,6 +471,144 @@ static fmi2Component instantiationFailed(const fmi2CallbackFunctions* functions,
 }
 
 /**
+ * Value of a hexadecimal digit, or -1 if c is none
+ */
+static int hexDigitValue(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+/**
+ * Whether text starts with prefix, ignoring the case of ASCII letters
+ */
+static fmi2Boolean startsWithIgnoringCase(const char* text, const char* prefix)
+{
+    for (; *prefix != '\0'; text++, prefix++) {
+        char t = (*text >= 'A' && *text <= 'Z') ? (char)(*text - 'A' + 'a') : *text;
+        if (t != *prefix) {
+            return fmi2False;
+        }
+    }
+    return fmi2True;
+}
+
+/**
+ * Convert the fmuResourceLocation of fmi2Instantiate to a local path
+ *
+ * FMI 2.0, section 2.1.5: "Argument fmuResourceLocation is a URI according
+ * to the IETF RFC3986 syntax to indicate the location to the resources
+ * directory of the unzipped FMU archive. The following schemes must be
+ * understood by the FMU: Mandatory: file with absolute path (either
+ * including or omitting the authority component)", with the example
+ * "file:///C:/temp/MyFMU/resources or file:/C:/temp/MyFMU/resources".
+ *
+ * Implementation notes:
+ * - The scheme is case-insensitive (RFC 3986, section 3.1)
+ * - The authority may be empty (file:///path), localhost
+ *   (file://localhost/path) or missing (file:/path). Another host, a
+ *   relative path and every other scheme are refused
+ * - Percent-encoded bytes (%20 for a space, %C3%A4 for an a-umlaut in UTF-8)
+ *   are decoded. A malformed escape or an encoded '\0' is refused
+ * - A Windows drive ("/C:/temp") loses the slash in front of it ("C:/temp").
+ *   This is done on every platform, so that it can be tested everywhere; a
+ *   POSIX path that starts with a drive letter and a colon does not occur
+ * - The decoded path is never longer than the URI, so path needs room for
+ *   strlen(uri) + 1 bytes
+ *
+ * Returns fmi2True and the path (UTF-8, without a trailing separator added)
+ * in path, or fmi2False if the URI is not a file URI with an absolute path.
+ */
+static fmi2Boolean resourcePathFromUri(const char* uri, char* path)
+{
+    if (!startsWithIgnoringCase(uri, "file:")) {
+        return fmi2False;
+    }
+    const char* rest = uri + strlen("file:");
+
+    /* Authority: empty or localhost */
+    if (rest[0] == '/' && rest[1] == '/') {
+        const char* authority = rest + 2;
+        size_t length = strcspn(authority, "/");
+        if (length != 0 && !(length == strlen("localhost") && startsWithIgnoringCase(authority, "localhost"))) {
+            return fmi2False;
+        }
+        rest = authority + length;
+    }
+
+    /* Absolute path */
+    if (rest[0] != '/') {
+        return fmi2False;
+    }
+
+    /* Percent-decoding */
+    size_t length = 0;
+    for (const char* c = rest; *c != '\0'; c++) {
+        if (*c != '%') {
+            path[length++] = *c;
+            continue;
+        }
+        int high = hexDigitValue(c[1]);
+        int low = (high >= 0) ? hexDigitValue(c[2]) : -1;
+        if (low < 0 || (high == 0 && low == 0)) {
+            return fmi2False;
+        }
+        path[length++] = (char)(high * 16 + low);
+        c += 2;
+    }
+    path[length] = '\0';
+
+    /* Windows drive: "/C:/..." -> "C:/..." */
+    fmi2Boolean isLetter = (path[1] >= 'a' && path[1] <= 'z') || (path[1] >= 'A' && path[1] <= 'Z');
+    if (isLetter && path[2] == ':' && (path[3] == '/' || path[3] == '\0')) {
+        memmove(path, path + 1, length);  /* length bytes: the rest of the path and its '\0' */
+    }
+
+    return fmi2True;
+}
+
+/**
+ * Give the model the path of its resource folder
+ *
+ * A missing (NULL) or empty fmuResourceLocation is accepted silently: the
+ * model then has no resource folder. Any other location that is no file URI
+ * with an absolute path is accepted with a warning in the log. Only a model
+ * that reads resources needs the folder, and it reports a missing one in its
+ * initialization.
+ *
+ * Returns fmi2False only if memory allocation fails.
+ */
+static fmi2Boolean setResourcePath(myFMU2* fmu, fmi2String fmuResourceLocation)
+{
+    if (!fmuResourceLocation || fmuResourceLocation[0] == '\0') {
+        return modelSetResourcePath(fmu->model, NULL) ? fmi2True : fmi2False;
+    }
+
+    char* path = malloc(strlen(fmuResourceLocation) + 1);
+    if (!path) {
+        return fmi2False;
+    }
+
+    fmi2Boolean isFileUri = resourcePathFromUri(fmuResourceLocation, path);
+    if (!isFileUri) {
+        logWarningMessage(fmu, "fmuResourceLocation '%s' is not a file URI with an absolute path. "
+                               "The model has no resource folder.", fmuResourceLocation);
+    }
+
+    fmi2Boolean result = modelSetResourcePath(fmu->model, isFileUri ? path : NULL) ? fmi2True : fmi2False;
+    free(path);
+    return result;
+}
+
+/**
  * Creates an instance of the FMU
  *
  * Implementation notes:
@@ -481,6 +620,9 @@ static fmi2Component instantiationFailed(const fmi2CallbackFunctions* functions,
  *   canNotUseMemoryManagementFunctions="true" in the modelDescription.xml
  * - Creates model instance from MODEL_DEFINITION; all variables hold
  *   their start values afterwards
+ * - Converts fmuResourceLocation to the path of the resource folder of the
+ *   model (model->resourcePath, see setResourcePath()). A location that is
+ *   no file URI does not make the instantiation fail
  * - On any failure, cleans up partial allocations via fmi2FreeInstance
  */
 fmi2Component fmi2Instantiate(
@@ -492,8 +634,7 @@ fmi2Component fmi2Instantiate(
     fmi2Boolean visible,
     fmi2Boolean loggingOn)
 {
-    /* Unused parameters */
-    (void)fmuResourceLocation;
+    /* Unused parameter */
     (void)visible;
 
     /* Without a logger nothing can be reported */
@@ -551,7 +692,17 @@ fmi2Component fmi2Instantiate(
     /* Set initial state */
     myfmu2->state = stateInstantiated;
 
-    logEventMessage(myfmu2, "FMU instantiated.");
+    /* Resource folder (after the log level, so that a warning can be logged) */
+    if (!setResourcePath(myfmu2, fmuResourceLocation)) {
+        fmi2FreeInstance((fmi2Component)myfmu2);
+        return instantiationFailed(functions, instanceName, "Memory allocation failed.");
+    }
+
+    if (myfmu2->model->resourcePath) {
+        logEventMessage(myfmu2, "FMU instantiated. Resource folder: '%s'.", myfmu2->model->resourcePath);
+    } else {
+        logEventMessage(myfmu2, "FMU instantiated. No resource folder.");
+    }
     return (fmi2Component)myfmu2;
 }
 

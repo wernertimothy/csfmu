@@ -96,7 +96,8 @@ def build(root: Path, model: str, output_dir: Path | None = None) -> int:
 
     If an output folder is given, the FMU is also copied there. It is not
     built there directly: the FMU is only packaged when the library is
-    relinked, so an up-to-date model would not be packaged again.
+    relinked (also after a change of the model's resources), so an
+    up-to-date model would not be packaged again.
     """
     require("cmake")
     if output_dir is not None and output_dir.exists() and not output_dir.is_dir():

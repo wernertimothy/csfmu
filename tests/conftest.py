@@ -16,6 +16,9 @@ MODEL = os.environ.get("FMU_MODEL", "first_order")
 # The tests of a model are in tests/models/<model>/ (csfmu new creates the folder)
 MODEL_TESTS = (Path(__file__).parent / "models").resolve()
 
+# Name of the folder the FMU is extracted to (see the fixture unzipdir)
+EXTRACTION_FOLDER = "fmu with space \u00e4"
+
 
 def model_of(path: Path) -> str | None:
     """The model whose test folder contains path, or None outside tests/models/<model>/."""
@@ -78,8 +81,14 @@ def unzipdir(path_to_fmu: Path, tmp_path_factory) -> Path:
     The FMU is extracted once per test session. Extracting it again would
     overwrite the binary, which must not happen while it is loaded: Windows
     refuses it and Linux crashes.
+
+    The folder name contains a space and a non-ASCII character, so every test
+    runs an FMU whose resource location (a file URI) is percent-encoded, and
+    whose resource folder can only be opened as UTF-8 path (see
+    tests/integration/test_resources.py).
     """
-    return Path(fmpy.extract(path_to_fmu, tmp_path_factory.mktemp("fmu")))
+    folder = tmp_path_factory.mktemp(EXTRACTION_FOLDER)
+    return Path(fmpy.extract(path_to_fmu, folder))
 
 
 @pytest.fixture(scope="session")

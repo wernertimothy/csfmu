@@ -167,7 +167,7 @@ Allocates and initializes a new FMU instance. This is the first function that mu
 | `instanceName` | `fmi2String` | Unique name for this FMU instance (for logging/debugging) |
 | `fmuType` | `fmi2Type` | Must be `fmi2CoSimulation` (Model Exchange is not supported) |
 | `fmuGUID` | `fmi2String` | GUID from modelDescription.xml - must match FMU's GUID |
-| `fmuResourceLocation` | `fmi2String` | URI to the `resources` directory (may be used for loading data files) |
+| `fmuResourceLocation` | `fmi2String` | `file:` URI of the `resources` directory of the unzipped FMU, where the model finds its data files (may be NULL or empty) |
 | `functions` | `const fmi2CallbackFunctions*` | Pointer to callback function structure. Only `logger` and `componentEnvironment` are used |
 | `visible` | `fmi2Boolean` | Whether simulation should be visible (UI-related, often ignored) |
 | `loggingOn` | `fmi2Boolean` | Whether logging should be enabled initially |
@@ -224,6 +224,9 @@ if (fmu == NULL) {
 - **Only the logger is required**: `functions` and `functions->logger` must not be NULL. `componentEnvironment` is passed back to the logger unchanged and may be NULL
 - **Memory callbacks are not used**: The FMU allocates with `calloc()` and frees with `free()`. This is announced by `canNotUseMemoryManagementFunctions="true"` in the `modelDescription.xml`, so `allocateMemory` and `freeMemory` may be NULL
 - **The instance name is copied**: The caller may free its string after the call. The name must not be NULL or empty
+- **Resource location**: The model gets the `resources` directory as a plain path (`model->resourcePath`, ending with `/`). FMI 2.0 requires a `file` URI with an absolute path, "either including or omitting the authority component" (section 2.1.5), so all of these are understood: `file:///C:/temp/MyFMU/resources`, `file:/C:/temp/MyFMU/resources`, `file:///home/me/MyFMU/resources` and `file://localhost/home/me/MyFMU/resources`. Percent-encoded characters (`%20` for a space, `%C3%A4` for `ä`) are decoded; the scheme is case-insensitive
+- **No resource location is no error**: NULL or an empty string leave the model without resource folder. So does any other location (another scheme, another host, a relative path, a malformed `%` escape), which is also reported as a warning. Only a model that reads data files needs the folder; it then fails in [`fmi2ExitInitializationMode`](#fmi2exitinitializationmode) with a message in the log
+- **The resource folder is logged**: With logging on, the instantiation reports the decoded folder (`logEvents`)
 - Internally allocates both `myFMU2` wrapper and `modelInstance` using `newModel(&MODEL_DEFINITION)`
 - **All variables hold their start values** after instantiation (parameters, inputs and states as declared in the model's variable table). Values set afterwards with `fmi2SetReal` etc. are kept through initialization
 - Returns an opaque `fmi2Component` pointer - integration tool should never access internals directly
@@ -602,6 +605,7 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 #### Notes
 - **Initial outputs**: Calls the model's output equation once, so that `fmi2GetReal` returns y(t0) = h(x0, u0) right after initialization
 - **The model initializes once**: Calculated parameters, then the model's initialize function, then the outputs. A failure is `fmi2Error` (FMI 2.0 has no way to repeat this call, so there is no `fmi2Discard`)
+- **Data files are read here**: A model reads its resources in its initialize function. A file that is missing or invalid fails this call, and the log names the file by its full path
 - **States and fixed parameters are frozen**: After this call, states and parameters declared as `VAR_FIXED` can no longer be set
 - **No parameter validation**: The FMU trusts that the integration tool has set all required values during initialization mode
 - **Finalization point**: After this call, `fmi2EnterInitializationMode` cannot be called again without calling `fmi2Reset` first

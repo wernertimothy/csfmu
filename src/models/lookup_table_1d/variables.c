@@ -5,7 +5,7 @@
 static const modelVariable VARIABLES[] = {
     /* a string parameter: the field is char[MODEL_STRING_SIZE], its start value is a text */
     { PARAM(table_file), .startString = "table.csv", .variability = VAR_FIXED,
-      .description = "Name of the table file with the columns u and y" },
+      .description = "Name of the table file (in the resources of the FMU) with the columns u and y" },
     { INPUT(u),  .start = 0.0, .unit = "1",
       .description = "Value looked up in the table" },
     /* direct feedthrough: y follows u as soon as u is set */
@@ -32,13 +32,17 @@ const modelDefinition MODEL_DEFINITION = {
     .numberOfUnits     = ARRAY_LEN(UNITS),
 
     /* system dimensions: no states, so numberOfStates stays 0 */
-    .sizeOfParams  = sizeof(Params),
-    .sizeOfInputs  = sizeof(Inputs),
-    .sizeOfOutputs = sizeof(Outputs),
+    .sizeOfParams    = sizeof(Params),
+    .sizeOfInputs    = sizeof(Inputs),
+    .sizeOfOutputs   = sizeof(Outputs),
+    .sizeOfInternals = sizeof(Internals),
 
     /* model equations */
     .getStateDerivatives = lookupTable1dSystem,
     .getOutputs          = lookupTable1dOutputs,
+
+    /* initialization: reads the table from resources/<table_file> */
+    .initialize = lookupTable1dInitialize,
 
     /* method for numerical integration (there are no states to integrate,
        the FMU only advances the time) */

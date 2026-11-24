@@ -67,6 +67,7 @@ Second, add the following files and fill them with life:
 | **variables.h** | The variables of your model as C structs, and the declarations of your equations |
 | **variables.c** | The table of published variables and the model definition (always a C file) |
 | **equations.c** or **equations.cpp** | The state and output equations, that describe your model (C or C++) |
+| **resources/** (optional) | Data files of your model, such as tables, which the FMU carries along (see [Resources](#resources)) |
 
 That is all. You do not have to touch any other file of the project: the model is picked up by `-DMODEL=lorenz_attractor`.
 
@@ -178,6 +179,7 @@ The model instance gives you access to the storage of your model:
 | `model->outputs` | `void*` | your `Outputs` struct |
 | `model->locals` | `void*` | your `Locals` struct (computed by the output equation, see [Local variables](#local-variables)) |
 | `model->internals` | `void*` | your `Internals` struct (read-only in the equations, see [Internals](#internals)) |
+| `model->resourcePath` | `char*` | the folder of your data files, ending with `/` (read it in the initialization, see [Resources](#resources)) |
 | `model->states` | `double*` | the state vector |
 | `model->stateDerivatives` | `double*` | the state derivatives, same layout as the states |
 
@@ -325,6 +327,44 @@ simStatus thermalMassInitialize(modelInstance* model)
 ```
 
 Its start value is then published as a guess (`initial="approx"`): the integration tool can set it only before the initialization starts, and must not expect it to survive. The `thermal_mass` model (`src/models/thermal_mass/`) uses all three parts.
+
+#### Resources
+
+A model can carry data files, such as a table or a map. Put them into the folder `src/models/<model>/resources/`: the build packs it into the FMU as `resources/` and repackages the FMU whenever a file in it changes. When the FMU runs, the integration tool tells it where the unzipped `resources/` folder is, and your model finds it as `model->resourcePath`, an absolute path that ends with `/`.
+
+Read your files in the initialize function (see [Initialization](#initialization)), into the [`Internals`](#internals). This is the `lookup_table_1d` model, which reads the file named by its [string parameter](#string-parameters) `table_file`:
+
+```c
+simStatus lookupTable1dInitialize(modelInstance* model)
+{
+    const Params* p = model->params;
+
+    if (!model->resourcePath) {
+        return modelError(model, "The FMU has no resource folder, so the table file '%s' cannot be read.",
+                          p->table_file);
+    }
+
+    /* model->resourcePath ends with '/': append the file name */
+    size_t size = strlen(model->resourcePath) + strlen(p->table_file) + 1;
+    char* path = malloc(size);
+    ...
+    snprintf(path, size, "%s%s", model->resourcePath, p->table_file);
+
+    FILE* file = modelOpenFile(path, "rb");
+    if (!file) {
+        return modelError(model, "Cannot open the table file '%s'.", path);
+    }
+    ...
+}
+```
+
+Things to know:
+
+1. **Open files with `modelOpenFile`.** It takes the same arguments as `fopen`, but the path is UTF-8 on every platform. On Windows `fopen` would fail as soon as the path contains a character such as `ä`, e.g. in the temporary folder of a user with such a name.
+2. **Report problems with `modelError`.** A missing or invalid file fails the initialization, and the message, which should name the file by its full path, reaches the log of the integration tool.
+3. **`model->resourcePath` can be NULL.** This happens if the integration tool does not give the folder as a `file:` URI. Check it before you use it, as above.
+4. **Before the initialization the data is not there yet.** Outputs that need it cannot be computed before; `lookup_table_1d` returns NaN for them until then.
+5. **Allocate in the initialization, not in a step.** Memory for paths or buffers may be allocated in the initialize function (free it there too); the data itself belongs into the `Internals`, so that it is part of the FMU state.
 
 #### C++ Models
 

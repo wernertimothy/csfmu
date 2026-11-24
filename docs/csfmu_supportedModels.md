@@ -20,7 +20,7 @@ where **t** is the time, **x** are the states, **u** are the inputs and **y** ar
 - `f` and `h` may depend explicitly on time. `model->time` is the time of the integrator stage inside `f` and the communication point inside `h`.
 - `h` may use the inputs directly (direct feedthrough). You declare which inputs an output depends on with `.dependsOn`, and the `modelDescription.xml` publishes it.
 - Besides the outputs, `h` may compute **local variables**: values that can be read from outside but are no outputs, such as a heat flow or an error term.
-- The initial states are the start values, or the model computes them when the initialization is finished, e.g. a steady state. Parameters that follow from other parameters (such as a time constant `R*C`) can be published as **calculated parameters**.
+- The initial states are the start values, or the model computes them when the initialization is finished, e.g. a steady state. The initialization can also read **data files** that the FMU carries along (its resources), such as a table. Parameters that follow from other parameters (such as a time constant `R*C`) can be published as **calculated parameters**.
 
 How to write the two equations is explained in [getting started](csfmu_gettingStarted.md#equationsc-or-equationscpp).
 
@@ -47,6 +47,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 - Outputs always reflect the inputs set last, also before a step and during initialization.
 - The communication step size can change from step to step.
 - The FMU state can be saved, restored and serialized, e.g. to repeat a step.
+- The FMU finds its data files wherever the integration tool unzips it, also below a path with spaces or non-ASCII characters.
 - If a state, a Real output or a Real local variable becomes NaN or infinite during a step, the FMU discards the step: it returns `fmi2Discard` and is rolled back to the start of the step, so the integration tool can go back to a saved FMU state and continue.
 
 ## Demo models
@@ -63,6 +64,6 @@ The repository ships demo models, each of which showcases a certain feature. Use
 | [`pi_controller`](../src/models/pi_controller/) | Direct feedthrough: its outputs react to an input as soon as it is set, without a simulation step (`.dependsOn`) |
 | [`fault_injection`](../src/models/fault_injection/) | A model without inputs, and a numerical failure on request: the FMU discards the step and rolls back (`fmi2Discard`) |
 | [`thermal_mass`](../src/models/thermal_mass/) | A local variable (`Q_loss`, the heat loss to the ambient) that can be read but not set; a calculated parameter (`tau = R*C`); an initialization that can start in steady state (`init_mode`, an enumeration), with a state published as `initial="approx"` |
-| [`lookup_table_1d`](../src/models/lookup_table_1d/) | A model without states: a static map that interpolates its input in a table (clamped at both ends), with direct feedthrough. The name of the table file is a String parameter (`table_file`) |
+| [`lookup_table_1d`](../src/models/lookup_table_1d/) | A model without states: a static map that interpolates its input in a table (clamped at both ends), with direct feedthrough. The table is a data file of the FMU (`resources/table.csv`), read by the initialization; its name is a String parameter (`table_file`). Before the initialization the output is NaN |
 
 When the template learns a new kind of model, this page and the list of demo models are extended.

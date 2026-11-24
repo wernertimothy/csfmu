@@ -4,6 +4,12 @@
 #include <string.h>
 #include "model.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <share.h>
+#endif
+
 /**
  * Allocates a zero-initialized block of the given size.
  *
@@ -360,6 +366,93 @@ void restoreModelData(modelInstance* model, const void* buffer)
 }
 
 /**
+ * Implementation notes for modelSetResourcePath():
+ * - The new path is copied before the old one is freed, so path may be the
+ *   current model->resourcePath
+ * - Only a trailing '/' counts as separator on POSIX, where a backslash is
+ *   an ordinary character of a file name
+ */
+bool modelSetResourcePath(modelInstance* model, const char* path)
+{
+    if (!model) {
+        return false;
+    }
+
+    char* copy = NULL;
+    if (path && path[0] != '\0') {
+        size_t length = strlen(path);
+        bool endsWithSeparator = path[length - 1] == '/';
+#ifdef _WIN32
+        endsWithSeparator = endsWithSeparator || path[length - 1] == '\\';
+#endif
+        copy = malloc(length + (endsWithSeparator ? 1 : 2));
+        if (!copy) {
+            free(model->resourcePath);
+            model->resourcePath = NULL;
+            return false;
+        }
+        memcpy(copy, path, length);
+        if (!endsWithSeparator) {
+            copy[length++] = '/';
+        }
+        copy[length] = '\0';
+    }
+
+    free(model->resourcePath);
+    model->resourcePath = copy;
+    return true;
+}
+
+#ifdef _WIN32
+/**
+ * Converts a UTF-8 text to UTF-16 for the wide-character API of Windows.
+ * Returns a buffer to free(), or NULL if the text is not valid UTF-8 or
+ * memory allocation fails.
+ */
+static wchar_t* toWide(const char* text)
+{
+    int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
+    if (length <= 0) {
+        return NULL;
+    }
+
+    wchar_t* wide = malloc((size_t)length * sizeof(wchar_t));
+    if (wide && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, wide, length) != length) {
+        free(wide);
+        wide = NULL;
+    }
+    return wide;
+}
+#endif
+
+/**
+ * Implementation notes for modelOpenFile():
+ * - POSIX file systems take the path as bytes, so fopen() opens a UTF-8
+ *   path as it is
+ * - Windows interprets the path of fopen() in the local code page, so the
+ *   path is converted to UTF-16 and opened with the wide-character API.
+ *   _wfsopen() with _SH_DENYNO shares the file like fopen() does (unlike
+ *   _wfopen_s()) and is not deprecated (unlike _wfopen())
+ */
+FILE* modelOpenFile(const char* path, const char* mode)
+{
+    if (!path || !mode) {
+        return NULL;
+    }
+
+#ifdef _WIN32
+    wchar_t* widePath = toWide(path);
+    wchar_t* wideMode = toWide(mode);
+    FILE* file = (widePath && wideMode) ? _wfsopen(widePath, wideMode, _SH_DENYNO) : NULL;
+    free(widePath);
+    free(wideMode);
+    return file;
+#else
+    return fopen(path, mode);
+#endif
+}
+
+/**
  * Implementation notes for freeModel():
  * - free(NULL) is safe, so blocks of size 0 need no special handling
  * - Order of freeing doesn't matter as there are no pointer dependencies
@@ -381,6 +474,7 @@ void freeModel(modelInstance* model)
     free(model->stateDerivatives);
     free(model->scratch);
     free(model->stepStart);
+    free(model->resourcePath);
 
     /* Free the model instance itself */
     free(model);

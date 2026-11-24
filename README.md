@@ -11,6 +11,7 @@ Key features:
 - **FMU-agnostic design**: Models can be tested and simulated independently
 - **Declare variables once**: Parameters, inputs, outputs and states are plain C struct fields (`double`, `int` or `bool`, and strings for parameters), in any order; the `modelDescription.xml` is generated
 - **Build-time model selection**: Choose your model via CMake build options
+- **Data files included**: Files in your model's `resources/` folder are packed into the FMU and can be read when the initialization finishes
 - **Extensible architecture**: It's easy to add new models and integrators or extend the fmi implementation.
 
 ## Quickstart
