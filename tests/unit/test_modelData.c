@@ -229,7 +229,7 @@ void test_modelData_handlesAModelWithOnlyInternals(void) {
 
 void test_modelData_handlesEmptyBlocks(void) {
     modelInstance* m = newModel(&ONLY_STATES);
-    double data[6];
+    void* data = malloc(modelDataSize(&ONLY_STATES));
 
     TEST_ASSERT_NULL(m->internals);
     TEST_ASSERT_NULL(m->locals);
@@ -250,6 +250,7 @@ void test_modelData_handlesEmptyBlocks(void) {
     TEST_ASSERT_EQUAL_DOUBLE(1.0, m->states[0]);
     TEST_ASSERT_EQUAL_DOUBLE(2.0, m->states[1]);
 
+    free(data);
     freeModel(m);
 }
 

@@ -6,6 +6,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "unity.h"
 #include "model.h"
@@ -142,13 +143,13 @@ void test_resetModel_keepsTheResourcePath(void)
 
 void test_resourcePath_isNotPartOfTheModelData(void)
 {
-    unsigned char buffer[2 * sizeof(double) + sizeof(Params)];
-    TEST_ASSERT_EQUAL_size_t(sizeof(buffer), modelDataSize(&DEFINITION));
+    void* buffer = malloc(modelDataSize(&DEFINITION));
 
     TEST_ASSERT_TRUE(modelSetResourcePath(model, "/saved"));
     saveModelData(model, buffer);
     TEST_ASSERT_TRUE(modelSetResourcePath(model, "/current"));
     restoreModelData(model, buffer);
+    free(buffer);
 
     TEST_ASSERT_EQUAL_STRING("/current/", model->resourcePath);
 }

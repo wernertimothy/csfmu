@@ -5,6 +5,7 @@
  * the text is part of the model data. No FMI involved.
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include "unity.h"
 #include "model.h"
@@ -224,14 +225,14 @@ void test_modelSetString_neverWritesAStringOfAnotherSize(void)
 
 void test_strings_arePartOfTheModelData(void)
 {
-    unsigned char buffer[2 * sizeof(double) + sizeof(Params)];
-    TEST_ASSERT_EQUAL_size_t(sizeof(buffer), modelDataSize(&DEFINITION));
+    void* buffer = malloc(modelDataSize(&DEFINITION));
 
     TEST_ASSERT_TRUE(modelSetString(model, FILE_VAR, "a.csv"));
     saveModelData(model, buffer);
     TEST_ASSERT_TRUE(modelSetString(model, FILE_VAR, "b.csv"));
 
     restoreModelData(model, buffer);
+    free(buffer);
 
     TEST_ASSERT_EQUAL_STRING("a.csv", p->file);
 }
