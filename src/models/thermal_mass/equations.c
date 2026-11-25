@@ -77,6 +77,10 @@ void thermalMassParameters(modelInstance* model)
  *     steady_state: T = T_amb + R*P, so that dT/dt = 0 for the initial P
  *
  * Implementation notes:
+ * - Refuses R <= 0 and C <= 0: the variable table can only give them
+ *   .min = 0, which includes 0 (FMI bounds are inclusive), but the equations
+ *   divide by both. The check also refuses NaN. R and C are fixed, so
+ *   checking them once per initialization is enough
  * - T is declared with .initial = VAR_APPROX in variables.c, because this
  *   function may replace its start value
  * - init_mode is an enumeration: the FMU refuses to set a value that is no
@@ -88,6 +92,10 @@ simStatus thermalMassInitialize(modelInstance* model)
     const Params* p  = model->params;
     const Inputs* in = model->inputs;
     States*       x  = (States*)model->states;
+
+    if (!(p->R > 0.0) || !(p->C > 0.0)) {
+        return modelError(model, "R and C must be greater than zero (R = %g K/W, C = %g J/K).", p->R, p->C);
+    }
 
     switch (p->init_mode) {
         case THERMAL_MASS_FIXED_START:

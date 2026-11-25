@@ -112,6 +112,27 @@ def test_invalid_init_mode_is_refused(new_fmu, vr) -> None:
     assert fmu.getInteger([vr("init_mode")])[0] == FIXED_START
 
 
+@pytest.mark.parametrize(
+    "zero, message",
+    [
+        ("R", "R and C must be greater than zero (R = 0 K/W, C = 1000 J/K)."),
+        ("C", "R and C must be greater than zero (R = 0.1 K/W, C = 0 J/K)."),
+    ],
+)
+def test_zero_resistance_or_capacity_fails_the_initialization(
+    new_fmu, vr, zero, message
+) -> None:
+    """The equations divide by R and C, so 0 (allowed by min = 0) is refused when the model starts."""
+    log = []
+    fmu = new_fmu(log=log)
+    fmu.setReal([vr(zero)], [0.0])
+
+    with pytest.raises(FMICallException):
+        initialize(fmu)
+
+    assert any(message in text for _, _, text in log), log
+
+
 def test_temperature_cannot_be_set_in_initialization_mode(new_fmu, vr) -> None:
     """T has initial="approx", so it can only be set before the initialization."""
     fmu = new_fmu()

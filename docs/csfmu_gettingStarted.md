@@ -308,6 +308,10 @@ simStatus thermalMassInitialize(modelInstance* model)
     const Inputs* in = model->inputs;
     States*       x  = (States*)model->states;
 
+    if (!(p->R > 0.0) || !(p->C > 0.0)) {       /* the equations divide by R and C */
+        return modelError(model, "R and C must be greater than zero (R = %g K/W, C = %g J/K).", p->R, p->C);
+    }
+
     switch (p->init_mode) {
         case THERMAL_MASS_FIXED_START:
             return SIM_OK;                       /* T keeps its start value */
@@ -321,7 +325,10 @@ simStatus thermalMassInitialize(modelInstance* model)
 }
 ```
 
-`modelError` takes a `printf`-like message; the FMU fails the initialization and logs it. A state that the initialize function may replace is declared with `.initial = VAR_APPROX`:
+`modelError` takes a `printf`-like message; the FMU fails the initialization and logs it.
+The initialize function is also the place to refuse parameter values your equations cannot run with. `min` and `max` in the variable table include their bounds, so `.min = SOME(0.0)` still allows 0; `thermal_mass` therefore refuses R = 0 and C = 0 here, before the first step would divide by them.
+
+A state that the initialize function may replace is declared with `.initial = VAR_APPROX`:
 
 ```c
 { STATE(T), .start = 293.15, .unit = "K", .initial = VAR_APPROX, .description = "Temperature of the mass" },
