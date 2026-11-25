@@ -1,8 +1,9 @@
 /**
  * Test of the initialization through the FMI wrapper: calculated parameters
  * are consistent in every FMU state, the model's initialize function runs
- * once in fmi2ExitInitializationMode, its errors are reported, and a state
- * with initial="approx" can only be set before the initialization.
+ * once in fmi2ExitInitializationMode, its errors and non-finite results are
+ * reported, and a state with initial="approx" can only be set before the
+ * initialization.
  *
  * The FMI wrapper (src/fmi2Functions.c) is linked against the model
  * definition below instead of a real model, as in
@@ -33,8 +34,8 @@ typedef struct { double y; int initializations; } Outputs;
 typedef struct { double x; } States;
 typedef struct { int initializations; } Internals;
 
-/* What initialize does besides its normal work */
-typedef enum { INIT_NORMAL, INIT_ERROR, INIT_DISCARD, INIT_NAN } initBehavior;
+/* What initialize (INIT_*) or the output equation (OUTPUT_*) does besides its normal work */
+typedef enum { INIT_NORMAL, INIT_ERROR, INIT_DISCARD, INIT_NAN, OUTPUT_NAN } initBehavior;
 static initBehavior behavior = INIT_NORMAL;
 
 static void calculateParameters(modelInstance* m)
@@ -59,6 +60,7 @@ static simStatus initialize(modelInstance* m)
             m->states[0] = NAN;
             return SIM_OK;
         case INIT_NORMAL:
+        case OUTPUT_NAN:
             break;
     }
 
@@ -77,7 +79,7 @@ static void stateEquation(modelInstance* m)
 static void outputEquation(modelInstance* m)
 {
     Outputs* out = m->outputs;
-    out->y = m->states[0];
+    out->y = (behavior == OUTPUT_NAN) ? NAN : m->states[0];
     out->initializations = ((const Internals*)m->internals)->initializations;
 }
 
@@ -340,6 +342,20 @@ void test_nonFiniteStateAfterInitialize_isAnError(void)
     TEST_ASSERT_NOT_NULL(strstr(lastMessage, "state 'x' is not finite"));
 }
 
+void test_nonFiniteOutputAfterInitialize_isAnError(void)
+{
+    /* the state is finite, only the output equation fails */
+    instantiateFmu();
+    enterInitialization();
+    behavior = OUTPUT_NAN;
+
+    TEST_ASSERT_EQUAL_INT(fmi2Error, fmi2ExitInitializationMode(fmu));
+    TEST_ASSERT_NOT_NULL(strstr(lastMessage, "Initialization failed: Output 'y' is not finite."));
+
+    /* the FMU is in the error state */
+    TEST_ASSERT_EQUAL_INT(fmi2Error, step(0));
+}
+
 void test_reset_initializesAgain(void)
 {
     instantiateFmu();
@@ -393,6 +409,7 @@ int main(void)
     RUN_TEST(test_initializeError_failsWithTheModelsMessage);
     RUN_TEST(test_initializeDiscard_isAnError);
     RUN_TEST(test_nonFiniteStateAfterInitialize_isAnError);
+    RUN_TEST(test_nonFiniteOutputAfterInitialize_isAnError);
     RUN_TEST(test_reset_initializesAgain);
     RUN_TEST(test_approxState_canBeSetWhenInstantiated);
     RUN_TEST(test_approxState_cannotBeSetInInitializationMode);

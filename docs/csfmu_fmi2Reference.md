@@ -560,7 +560,7 @@ Completes the initialization phase and transitions the FMU from initialization m
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | Successfully exited initialization mode and ready for stepping |
-| `fmi2Error` | NULL component, FMU not in initialization mode, or the model cannot start: its initialize function reported an error (the model's reason is logged, e.g. `Initialization failed: init_mode 3 is neither 1 (fixed_start) nor 2 (steady_state).`) or left a state that is not finite. The FMU enters the Error state |
+| `fmi2Error` | NULL component, FMU not in initialization mode, or the model cannot start: its initialize function reported an error (the model's reason is logged, e.g. `Initialization failed: init_mode 3 is neither 1 (fixed_start) nor 2 (steady_state).`) or left a state that is not finite, or a Real output or local variable is not finite at the start (e.g. `Initialization failed: Output 'u' is not finite.`). The FMU enters the Error state |
 
 #### FMI State Requirements
 **Can be called in**: **Initialization Mode** (after `fmi2EnterInitializationMode`)
@@ -607,7 +607,8 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 - **The model initializes once**: Calculated parameters, then the model's initialize function, then the outputs. A failure is `fmi2Error` (FMI 2.0 has no way to repeat this call, so there is no `fmi2Discard`)
 - **Data files are read here**: A model reads its resources in its initialize function. A file that is missing or invalid fails this call, and the log names the file by its full path
 - **States and fixed parameters are frozen**: After this call, states and parameters declared as `VAR_FIXED` can no longer be set
-- **No parameter validation**: The FMU trusts that the integration tool has set all required values during initialization mode
+- **Finite start**: The states, and the Real outputs and local variables, must be finite at the start; the master starts from them, and every step from a non-finite start would be discarded
+- **Parameter values are checked by the model**: A model refuses values its equations cannot run with in its initialize function, e.g. `thermal_mass` with R = 0 (the bounds `min`/`max` include their limits)
 - **Finalization point**: After this call, `fmi2EnterInitializationMode` cannot be called again without calling `fmi2Reset` first
 - **Ready for stepping**: Integration tool typically reads initial outputs immediately after this call, then begins the simulation loop
 - **Error if wrong state**: Returns `fmi2Error` if not currently in initialization mode (catches lifecycle violations)

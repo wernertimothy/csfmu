@@ -925,7 +925,10 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c)
  * - A state that is not finite after the initialization is an error as well,
  *   since every step would be discarded
  * - Computes the outputs from the initial states, inputs and parameters,
- *   so that outputs are valid at the first communication point
+ *   so that outputs are valid at the first communication point. A Real
+ *   output or local variable that is not finite is an error too: the master
+ *   starts from these values, and fmi2DoStep would discard every step (a
+ *   getter cannot report it, but fmi2ExitInitializationMode can fail)
  */
 fmi2Status fmi2ExitInitializationMode(fmi2Component c)
 {
@@ -955,6 +958,13 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
     /* Compute initial outputs */
     model->getOutputs(model);
     myfmu2->outputsAreStale = fmi2False;
+
+    size_t failedResult = firstNonFiniteResult(model);
+    if (failedResult < model->def->numberOfVariables) {
+        const modelVariable* variable = &model->def->variables[failedResult];
+        return enterErrorState(myfmu2, "Initialization failed: %s '%s' is not finite.",
+                               resultKind(variable), variable->name);
+    }
 
     /* Transition state */
     myfmu2->state = stateStepComplete;
