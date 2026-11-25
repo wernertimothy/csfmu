@@ -572,6 +572,12 @@ static fmi2Boolean startsWithIgnoringCase(const char* text, const char* prefix)
  *   relative path and every other scheme are refused
  * - Percent-encoded bytes (%20 for a space, %C3%A4 for an a-umlaut in UTF-8)
  *   are decoded. A malformed escape or an encoded '\0' is refused
+ * - Every other character is taken as it is, also a space, '?' and '#'.
+ *   RFC 3986 (section 3.3) would end the path at a '?' (query) or '#'
+ *   (fragment), but the location of a resource folder has neither, and
+ *   this way a URI built without encoding the path (e.g. for a folder named
+ *   "C#") still works. Deliberately lenient: an encoded %3F or %23 gives the
+ *   same path
  * - A Windows drive ("/C:/temp") loses the slash in front of it ("C:/temp").
  *   This is done on every platform, so that it can be tested everywhere; a
  *   POSIX path that starts with a drive letter and a colon does not occur

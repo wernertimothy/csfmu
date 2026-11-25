@@ -182,6 +182,19 @@ void test_percentEncoding_isDecoded(void)
                              pathFor("file:///tmp/fmu%20with%20space%20%C3%A4%c3%a4/resources"));
 }
 
+void test_unencodedCharacters_belongToThePath(void)
+{
+    /* a space, '#' and '?' as an integration tool may send them without
+       encoding: they stay part of the path (no query or fragment is cut off) */
+    TEST_ASSERT_EQUAL_STRING("/tmp/C# projects/a?b/", pathFor("file:///tmp/C# projects/a?b"));
+    TEST_ASSERT_EQUAL_INT(0, numberOfWarnings);
+}
+
+void test_encodedHashAndQuestionMark_giveTheSamePath(void)
+{
+    TEST_ASSERT_EQUAL_STRING("/tmp/C# projects/a?b/", pathFor("file:///tmp/C%23%20projects/a%3Fb"));
+}
+
 /***************************************************
  * Locations without resource folder
  ***************************************************/
@@ -293,6 +306,8 @@ int main(void)
     RUN_TEST(test_schemeAndLocalhost_ignoreCase);
     RUN_TEST(test_windowsDrive_losesTheLeadingSlash);
     RUN_TEST(test_percentEncoding_isDecoded);
+    RUN_TEST(test_unencodedCharacters_belongToThePath);
+    RUN_TEST(test_encodedHashAndQuestionMark_giveTheSamePath);
     RUN_TEST(test_nullLocation_givesNoResourceFolder_silently);
     RUN_TEST(test_emptyLocation_givesNoResourceFolder_silently);
     RUN_TEST(test_otherSchemes_areRefusedWithAWarning);
