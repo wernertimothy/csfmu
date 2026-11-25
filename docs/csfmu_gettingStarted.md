@@ -352,6 +352,12 @@ Read your files in the initialize function (see [Initialization](#initialization
 simStatus lookupTable1dInitialize(modelInstance* model)
 {
     const Params* p = model->params;
+    Internals* table = model->internals;
+
+    /* the table of this file was read by an earlier run (see item 6 below) */
+    if (table->numberOfPoints > 0 && strcmp(table->loadedFile, p->table_file) == 0) {
+        return SIM_OK;
+    }
 
     if (!model->resourcePath) {
         return modelError(model, "The FMU has no resource folder, so the table file '%s' cannot be read.",
@@ -379,6 +385,7 @@ Things to know:
 3. **`model->resourcePath` can be NULL.** This happens if the integration tool does not give the folder as a `file:` URI. Check it before you use it, as above.
 4. **Before initialization mode the data is not there yet.** Outputs that need it cannot be computed before; `lookup_table_1d` returns NaN for them until then. In initialization mode they are already computed, because a read initializes the model (see [Initialization](#initialization)).
 5. **Allocate in the initialization, not in a step.** Memory for paths or buffers may be allocated in the initialize function (free it there too); the data itself belongs into the `Internals`, so that it is part of the FMU state.
+6. **Read a file only once.** The initialize function may run several times in initialization mode (see [Initialization](#initialization)). `lookup_table_1d` keeps the name of the file its table came from (`loadedFile`) in its internals, next to the table, and reads the file again only for another `table_file`. `fmi2Reset` zeroes the internals, so a new simulation reads the file again.
 
 #### C++ Models
 

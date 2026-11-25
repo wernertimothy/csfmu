@@ -265,13 +265,25 @@ static simStatus readTable(modelInstance* model, const char* path)
  * - The file is opened with modelOpenFile(), which also opens a path with
  *   non-ASCII characters on Windows
  * - Memory for the path is allocated here, not during a step
+ * - The table is cached in the internals together with the name of its
+ *   file. In initialization mode the FMU initializes the model whenever a
+ *   variable is read after a set, e.g. while the integration tool iterates
+ *   u, and the file is only read again for another table_file (or after
+ *   fmi2Reset, which zeroes the internals)
+ * - loadedFile is cleared and copied as a whole field (table_file has zero
+ *   bytes behind its text), so equal model data also have equal bytes
  */
 simStatus lookupTable1dInitialize(modelInstance* model)
 {
     const Params* p = model->params;
     Internals* table = model->internals;
 
+    if (table->numberOfPoints > 0 && strcmp(table->loadedFile, p->table_file) == 0) {
+        return SIM_OK;
+    }
+
     table->numberOfPoints = 0;
+    memset(table->loadedFile, 0, sizeof(table->loadedFile));
 
     if (!model->resourcePath) {
         return modelError(model, "The FMU has no resource folder, so the table file '%s' cannot be read "
@@ -290,5 +302,8 @@ simStatus lookupTable1dInitialize(modelInstance* model)
 
     simStatus status = readTable(model, path);
     free(path);
+    if (status == SIM_OK) {
+        memcpy(table->loadedFile, p->table_file, sizeof(table->loadedFile));
+    }
     return status;
 }

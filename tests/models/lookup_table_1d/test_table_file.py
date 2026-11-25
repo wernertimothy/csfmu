@@ -11,6 +11,7 @@ import locale
 
 import pytest
 from fmpy.fmi1 import FMICallException
+from fmpy.fmi2 import fmi2Error
 
 from tests.fmu_helpers import initialize
 
@@ -216,3 +217,73 @@ def test_table_reads_the_same_in_a_comma_locale(
 
     assert y_at(fmu, vr, 0.5) == 0.25
     assert y_at(fmu, vr, 0.75) == 0.625
+
+
+# The table is cached: in initialization mode every read after a set
+# initializes the model, but the file is only read again for another name.
+
+
+def enter_initialization_mode(fmu, vr, table_file: str):
+    """Set table_file and enter initialization mode; returns the FMU."""
+    fmu.setString([vr("table_file")], [table_file])
+    fmu.setupExperiment(startTime=0.0)
+    fmu.enterInitializationMode()
+    return fmu
+
+
+def test_initialization_mode_reads_the_table_file_once(
+    new_fmu, vr, write_table, resources
+) -> None:
+    """After the first read the file is not needed any more: the table is cached."""
+    name = write_table("cached.csv", "u,y\n0,0\n1,10\n")
+    fmu = enter_initialization_mode(new_fmu(), vr, name)
+    assert y_at(fmu, vr, 0.5) == 5.0
+
+    (resources / name).unlink()
+    assert y_at(fmu, vr, 0.25) == 2.5
+
+    fmu.exitInitializationMode()
+    assert y_at(fmu, vr, 0.75) == 7.5
+
+
+def test_another_table_file_is_read_in_initialization_mode(
+    new_fmu, vr, write_table
+) -> None:
+    """The cache belongs to one file: setting another table_file reads that one."""
+    first = write_table("first.csv", "u,y\n0,0\n1,10\n")
+    second = write_table("second.csv", "u,y\n0,0\n1,100\n")
+    fmu = enter_initialization_mode(new_fmu(), vr, first)
+    assert y_at(fmu, vr, 0.5) == 5.0
+
+    fmu.setString([vr("table_file")], [second])
+    assert y_at(fmu, vr, 0.5) == 50.0
+
+
+def test_missing_table_file_fails_the_read_in_initialization_mode(new_fmu, vr) -> None:
+    """A read initializes the model, so it fails like fmi2ExitInitializationMode would."""
+    log = []
+    fmu = enter_initialization_mode(new_fmu(log=log), vr, "table.csv")
+    assert y_at(fmu, vr, 0.5) == 0.5
+
+    fmu.setString([vr("table_file")], ["missing.csv"])
+    with pytest.raises(FMICallException) as failure:
+        fmu.getReal([vr("y")])
+
+    assert failure.value.status == fmi2Error
+    assert any(
+        "Initialization failed" in message and "missing.csv" in message
+        for _, _, message in log
+    ), log
+
+
+def test_reset_forgets_the_cached_table(new_fmu, vr, write_table, resources) -> None:
+    """fmi2Reset zeroes the internals, so the next initialization reads the file again."""
+    name = write_table("forgotten.csv", "u,y\n0,0\n1,10\n")
+    fmu = start_with(new_fmu(), vr, name)
+    assert y_at(fmu, vr, 0.5) == 5.0
+
+    (resources / name).unlink()
+    fmu.reset()
+
+    with pytest.raises(FMICallException):
+        start_with(fmu, vr, name)

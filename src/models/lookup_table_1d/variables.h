@@ -28,6 +28,7 @@ typedef struct {
     int    numberOfPoints;                  /* 0 until the table is read */
     double u[LOOKUP_TABLE_1D_MAX_POINTS];   /* strictly increasing */
     double y[LOOKUP_TABLE_1D_MAX_POINTS];
+    char   loadedFile[MODEL_STRING_SIZE];   /* table_file the table was read from, "" if none */
 } Internals;
 
 #ifdef __cplusplus
