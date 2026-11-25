@@ -345,6 +345,8 @@ typedef struct {
  *   (model-specific structs)
  * - A storage block for the internals (model-specific struct, not published)
  * - State and state derivative vectors
+ * - The initial guesses of the states, which every initialization starts
+ *   from (see beginInitialization())
  * - Work memory for the integrator (content is undefined between calls; it is
  *   neither reset by resetModel() nor part of saveModelData())
  * - A buffer for rolling back a failed step (see stepStart)
@@ -371,6 +373,13 @@ struct modelInstance {
                                                   The state and output equations only read it */
     double* states;                          /**< Array of current state values [nx] */
     double* stateDerivatives;                /**< Array of computed state derivatives [nx] */
+    double* initialGuess;                    /**< The states as the initialization found them [nx]: every
+                                                  initializeModel() after the first sets the states with
+                                                  .initial = VAR_APPROX back to these guesses before it
+                                                  runs. Part of the model data */
+    bool hasInitialGuess;                    /**< true once initializeModel() has taken initialGuess; false
+                                                  after newModel(), resetModel() and beginInitialization().
+                                                  Part of the model data */
     double* scratch;                         /**< Work memory for the integrator [MODEL_SCRATCH_VECTORS * nx] */
     void* stepStart;                         /**< Model data at the start of the current step, written by
                                                   saveModelData() and used to roll back a failed step
@@ -414,7 +423,8 @@ modelInstance* newModel(const modelDefinition* def);
  * (see modelDefaultTolerance()), zeroes all storage blocks (including the
  * internals, which have no start values), writes the start value of every
  * variable in the definition's variable table, (re-)binds the function
- * pointers from the definition and clears the message. The resource path
+ * pointers from the definition, forgets the initial guesses (see
+ * beginInitialization()) and clears the message. The resource path
  * (see modelSetResourcePath()) is kept: it belongs to the instance, not to
  * a simulation. This function is NULL-safe.
  *
@@ -443,16 +453,43 @@ double modelDefaultTolerance(const modelDefinition* def);
 void computeCalculatedParameters(modelInstance* model);
 
 /**
+ * @brief Starts a new initialization of a model.
+ *
+ * The next initializeModel() takes the states as they are then as the
+ * initial guesses, which it and every later call start from. The guesses
+ * (the start values of the states with .initial = VAR_APPROX) can therefore
+ * still be set until that call. Call it when a new initialization begins
+ * (FMI: fmi2EnterInitializationMode). This function is NULL-safe.
+ *
+ * @param model Pointer to the model instance. May be NULL.
+ *
+ * @see initializeModel()
+ */
+void beginInitialization(modelInstance* model);
+
+/**
  * @brief Initializes a model for a simulation.
  *
  * Computes the calculated parameters, then calls def->initialize if the
- * model has one. Call it once per simulation, after all start values and
- * parameters are set and before the outputs are computed for the first time.
+ * model has one. Call it after the start values and parameters are set and
+ * before the outputs are computed for the first time.
+ *
+ * It may be called more than once, e.g. whenever the caller has changed a
+ * parameter or an input during the initialization: every call initializes
+ * the model for the current values. The first call after newModel(),
+ * resetModel() or beginInitialization() takes the current states as the
+ * initial guesses (model->initialGuess). Every later call first sets the
+ * states with .initial = VAR_APPROX back to these guesses, so its result does
+ * not depend on the calls before; the other states keep the values the
+ * caller set. A single call behaves exactly like an initialization without
+ * guesses.
  *
  * @param model Pointer to the model instance
  *
  * @return SIM_OK, or the status of the model's initialize function (the
- *         reason is in model->message)
+ *         reason is in model->message); SIM_ERROR if model is NULL
+ *
+ * @see beginInitialization()
  */
 simStatus initializeModel(modelInstance* model);
 
@@ -520,8 +557,9 @@ void* modelVariableAddress(modelInstance* model, size_t index);
  * @brief Returns the number of bytes needed to store the data of a model.
  *
  * The data of a model are its time, its relative tolerance, its parameter,
- * input and output blocks, its states, its state derivatives, its internals
- * and its local variables.
+ * input and output blocks, its states, its state derivatives, its internals,
+ * its local variables and the initial guesses of its states (see
+ * beginInitialization()).
  *
  * @param def Definition of the model
  *
@@ -535,7 +573,8 @@ size_t modelDataSize(const modelDefinition* def);
  *
  * Together with restoreModelData() this allows taking a snapshot of a model
  * and returning to it later. The buffer is a plain copy of the time, the
- * relative tolerance and the storage blocks (including the internals), so it
+ * relative tolerance and the storage blocks (including the internals and the
+ * initial guesses), so it
  * is only valid for the same model definition on the same platform. For the
  * same reason the internals hold plain values and fixed-size arrays only: a
  * pointer would be copied, not the memory it points to.

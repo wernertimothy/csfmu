@@ -58,6 +58,7 @@ modelInstance* newModel(const modelDefinition* def)
         !allocateBlock(&model->internals, def->sizeOfInternals) ||
         !allocateBlock((void**)&model->states, sizeOfStates) ||
         !allocateBlock((void**)&model->stateDerivatives, sizeOfStates) ||
+        !allocateBlock((void**)&model->initialGuess, sizeOfStates) ||
         !allocateBlock((void**)&model->scratch, MODEL_SCRATCH_VECTORS * sizeOfStates) ||
         !allocateBlock(&model->stepStart, modelDataSize(def))) {
         freeModel(model);
@@ -114,7 +115,11 @@ void resetModel(modelInstance* model)
     if (sizeOfStates > 0) {
         memset(model->states, 0, sizeOfStates);
         memset(model->stateDerivatives, 0, sizeOfStates);
+        memset(model->initialGuess, 0, sizeOfStates);
     }
+
+    /* The next initialization takes new guesses */
+    model->hasInitialGuess = false;
 
     /* Write the start value of every published variable */
     for (size_t k = 0; k < def->numberOfVariables; k++) {
@@ -217,15 +222,48 @@ void computeCalculatedParameters(modelInstance* model)
     }
 }
 
+void beginInitialization(modelInstance* model)
+{
+    if (model) {
+        model->hasInitialGuess = false;
+    }
+}
+
 /**
  * Implementation notes for initializeModel():
- * - The calculated parameters are computed first, so that the model's
- *   initialize function can use them
+ * - The guesses are taken by the first call, not by beginInitialization():
+ *   a caller that never calls beginInitialization() (e.g. a standalone
+ *   simulation) gets an initialization from the states it set, as before
+ * - All states are taken, but only those with .initial = VAR_APPROX are set
+ *   back: initialize may only replace these, and the others keep the values
+ *   the caller set in the meantime (FMI: states with initial="exact" can
+ *   still be set in Initialization Mode)
+ * - A call that fails keeps the guesses, so the next call starts from them
+ * - The calculated parameters are computed after the guesses are set back
+ *   and before initialize, so that the model's initialize function can use
+ *   them
  */
 simStatus initializeModel(modelInstance* model)
 {
     if (!model) {
         return SIM_ERROR;
+    }
+
+    const modelDefinition* def = model->def;
+
+    if (!model->hasInitialGuess) {
+        if (def->numberOfStates > 0) {
+            memcpy(model->initialGuess, model->states, def->numberOfStates * sizeof(double));
+        }
+        model->hasInitialGuess = true;
+    } else {
+        for (size_t k = 0; k < def->numberOfVariables; k++) {
+            const modelVariable* variable = &def->variables[k];
+            if (variable->role == VAR_STATE && variable->initial == VAR_APPROX) {
+                size_t index = variable->offset / sizeof(double);
+                model->states[index] = model->initialGuess[index];
+            }
+        }
     }
 
     computeCalculatedParameters(model);
@@ -329,7 +367,9 @@ static void copyModelData(modelInstance* model, char* buffer, bool save)
     position = copyBlock(position, model->states, sizeOfStates, save);
     position = copyBlock(position, model->stateDerivatives, sizeOfStates, save);
     position = copyBlock(position, model->internals, def->sizeOfInternals, save);
-    copyBlock(position, model->locals, def->sizeOfLocals, save);
+    position = copyBlock(position, model->locals, def->sizeOfLocals, save);
+    position = copyBlock(position, model->initialGuess, sizeOfStates, save);
+    copyBlock(position, &model->hasInitialGuess, sizeof(bool), save);
 }
 
 size_t modelDataSize(const modelDefinition* def)
@@ -338,8 +378,9 @@ size_t modelDataSize(const modelDefinition* def)
         return 0;
     }
 
+    /* states, state derivatives and initial guesses: 3 vectors of nx doubles */
     return 2 * sizeof(double) + def->sizeOfParams + def->sizeOfInputs + def->sizeOfOutputs +
-           2 * def->numberOfStates * sizeof(double) + def->sizeOfInternals + def->sizeOfLocals;
+           3 * def->numberOfStates * sizeof(double) + def->sizeOfInternals + def->sizeOfLocals + sizeof(bool);
 }
 
 /**
@@ -472,6 +513,7 @@ void freeModel(modelInstance* model)
     free(model->internals);
     free(model->states);
     free(model->stateDerivatives);
+    free(model->initialGuess);
     free(model->scratch);
     free(model->stepStart);
     free(model->resourcePath);

@@ -93,6 +93,9 @@ static void changeEverything(modelInstance* m) {
     for (size_t k = 0; k < ARRAY_LEN(internals->table); k++) {
         internals->table[k] = 88.0 - (double)k;
     }
+    m->initialGuess[0] = 85.0;
+    m->initialGuess[1] = 84.0;
+    m->hasInitialGuess = true;
 }
 
 /* The internals as changeEverything() leaves them */
@@ -108,14 +111,15 @@ static void assertInternalsChanged(const modelInstance* m) {
 }
 
 void test_modelDataSize_isTheSumOfAllBlocks(void) {
-    size_t expected = 2 * sizeof(double) + sizeof(Params) + sizeof(Inputs) + sizeof(Outputs) + 2 * sizeof(States) +
-                      sizeof(Internals) + sizeof(Locals);
+    /* time, tolerance, the blocks, states, state derivatives, initial guesses and hasInitialGuess */
+    size_t expected = 2 * sizeof(double) + sizeof(Params) + sizeof(Inputs) + sizeof(Outputs) + 3 * sizeof(States) +
+                      sizeof(Internals) + sizeof(Locals) + sizeof(bool);
     TEST_ASSERT_EQUAL_size_t(expected, modelDataSize(&DEFINITION));
 }
 
 void test_modelDataSize_handlesEmptyBlocks(void) {
-    /* time, tolerance, 2 states, 2 state derivatives */
-    TEST_ASSERT_EQUAL_size_t(6 * sizeof(double), modelDataSize(&ONLY_STATES));
+    /* time, tolerance, 2 states, 2 state derivatives, 2 initial guesses and hasInitialGuess */
+    TEST_ASSERT_EQUAL_size_t(8 * sizeof(double) + sizeof(bool), modelDataSize(&ONLY_STATES));
 }
 
 void test_modelDataSize_handlesNull(void) {
@@ -154,6 +158,9 @@ void test_restoreModelData_bringsBackEveryBlock(void) {
     TEST_ASSERT_EQUAL_DOUBLE(92.0, model->stateDerivatives[0]);
     TEST_ASSERT_EQUAL_DOUBLE(91.0, model->stateDerivatives[1]);
     assertInternalsChanged(model);
+    TEST_ASSERT_EQUAL_DOUBLE(85.0, model->initialGuess[0]);
+    TEST_ASSERT_EQUAL_DOUBLE(84.0, model->initialGuess[1]);
+    TEST_ASSERT_TRUE(model->hasInitialGuess);
 }
 
 void test_saveModelData_doesNotChangeTheModel(void) {
@@ -179,6 +186,8 @@ void test_modelData_canBeRestoredIntoAnotherInstance(void) {
     TEST_ASSERT_EQUAL_DOUBLE(93.0, other->states[1]);
     TEST_ASSERT_EQUAL_INT(86, ((const Locals*)other->locals)->level);
     assertInternalsChanged(other);
+    TEST_ASSERT_EQUAL_DOUBLE(84.0, other->initialGuess[1]);
+    TEST_ASSERT_TRUE(other->hasInitialGuess);
 
     freeModel(other);
 }
@@ -211,7 +220,8 @@ void test_modelData_handlesAModelWithOnlyInternals(void) {
     void* data = malloc(modelDataSize(&ONLY_INTERNALS));
     Internals* internals = m->internals;
 
-    TEST_ASSERT_EQUAL_size_t(2 * sizeof(double) + sizeof(Internals), modelDataSize(&ONLY_INTERNALS));
+    /* time, tolerance, the internals and hasInitialGuess */
+    TEST_ASSERT_EQUAL_size_t(2 * sizeof(double) + sizeof(Internals) + sizeof(bool), modelDataSize(&ONLY_INTERNALS));
 
     internals->counter = 7;
     internals->table[3] = 0.25;

@@ -1,6 +1,7 @@
 /**
  * Test of the initialization in the model layer: initializeModel(),
- * computeCalculatedParameters() and modelError(). No FMI involved.
+ * beginInitialization(), computeCalculatedParameters() and modelError().
+ * No FMI involved.
  */
 
 #include <string.h>
@@ -8,7 +9,7 @@
 #include "model.h"
 
 typedef struct { double gain; double twice; } Params;
-typedef struct { double x; } States;
+typedef struct { double x; double y; } States;
 typedef struct { int initializeCalls; double twiceSeenByInitialize; } Internals;
 
 /* What the test model's initialize function returns */
@@ -24,6 +25,8 @@ static void calculateParameters(modelInstance* m)
     p->twice = 2.0 * p->gain;
 }
 
+/* Moves the guess x by 1 from wherever it starts, so a call that does not
+   start from the guess moves it further; leaves y (initial = exact) alone */
 static simStatus initialize(modelInstance* m)
 {
     const Params* p = m->params;
@@ -31,6 +34,7 @@ static simStatus initialize(modelInstance* m)
 
     internals->initializeCalls++;
     internals->twiceSeenByInitialize = p->twice;
+    m->states[0] += 1.0;
 
     if (initializeResult == SIM_ERROR) {
         return modelError(m, "gain %g is not allowed", p->gain);
@@ -42,6 +46,7 @@ static const modelVariable VARIABLES[] = {
     { PARAM(gain),            .start = 1.5 },
     { CALCULATED_PARAM(twice) },
     { STATE(x),               .initial = VAR_APPROX },
+    { STATE(y) },
 };
 
 static const modelDefinition DEFINITION = {
@@ -122,6 +127,88 @@ void test_initializeModel_handlesNull(void)
     TEST_ASSERT_EQUAL_INT(SIM_ERROR, initializeModel(NULL));
 }
 
+/***************************************************
+ * Initial guesses
+ ***************************************************/
+
+void test_initializeModel_startsFromTheCurrentStates(void)
+{
+    /* a single call needs no guesses: it starts from the states as they are */
+    model->states[0] = 3.0;
+
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+
+    TEST_ASSERT_EQUAL_DOUBLE(4.0, model->states[0]);
+}
+
+void test_initializeModel_startsEveryLaterCallFromTheGuess(void)
+{
+    const Internals* internals = model->internals;
+    model->states[0] = 3.0;
+
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+
+    TEST_ASSERT_EQUAL_DOUBLE(4.0, model->states[0]);  /* not 6.0 */
+    TEST_ASSERT_EQUAL_INT(3, internals->initializeCalls);
+}
+
+void test_initializeModel_keepsTheExactStatesTheCallerSet(void)
+{
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+    model->states[1] = 7.0;  /* y has initial = exact: the caller may still set it */
+
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+
+    TEST_ASSERT_EQUAL_DOUBLE(7.0, model->states[1]);
+}
+
+void test_initializeModel_keepsTheGuessesAfterAFailure(void)
+{
+    model->states[0] = 3.0;
+    initializeResult = SIM_ERROR;
+    TEST_ASSERT_EQUAL_INT(SIM_ERROR, initializeModel(model));
+
+    initializeResult = SIM_OK;
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+
+    TEST_ASSERT_EQUAL_DOUBLE(4.0, model->states[0]);
+}
+
+void test_beginInitialization_takesNewGuesses(void)
+{
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));  /* guess x = 0 */
+
+    beginInitialization(model);
+    TEST_ASSERT_FALSE(model->hasInitialGuess);
+    model->states[0] = 10.0;
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+
+    TEST_ASSERT_EQUAL_DOUBLE(11.0, model->states[0]);
+    TEST_ASSERT_EQUAL_DOUBLE(10.0, model->initialGuess[0]);
+}
+
+void test_resetModel_forgetsTheGuesses(void)
+{
+    model->states[0] = 3.0;
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+
+    resetModel(model);
+
+    TEST_ASSERT_FALSE(model->hasInitialGuess);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, model->initialGuess[0]);
+    model->states[0] = 7.0;
+    TEST_ASSERT_EQUAL_INT(SIM_OK, initializeModel(model));
+    TEST_ASSERT_EQUAL_DOUBLE(8.0, model->states[0]);
+}
+
+void test_beginInitialization_handlesNull(void)
+{
+    beginInitialization(NULL);
+    TEST_ASSERT_TRUE(1);
+}
+
 void test_computeCalculatedParameters_followsTheParameters(void)
 {
     Params* p = model->params;
@@ -191,6 +278,13 @@ int main(void)
     RUN_TEST(test_initializeModel_passesOnTheStatusOfInitialize);
     RUN_TEST(test_initializeModel_worksWithoutHooks);
     RUN_TEST(test_initializeModel_handlesNull);
+    RUN_TEST(test_initializeModel_startsFromTheCurrentStates);
+    RUN_TEST(test_initializeModel_startsEveryLaterCallFromTheGuess);
+    RUN_TEST(test_initializeModel_keepsTheExactStatesTheCallerSet);
+    RUN_TEST(test_initializeModel_keepsTheGuessesAfterAFailure);
+    RUN_TEST(test_beginInitialization_takesNewGuesses);
+    RUN_TEST(test_resetModel_forgetsTheGuesses);
+    RUN_TEST(test_beginInitialization_handlesNull);
     RUN_TEST(test_computeCalculatedParameters_followsTheParameters);
     RUN_TEST(test_calculatedParameter_livesInTheParameterBlock);
     RUN_TEST(test_modelError_formatsTheMessage);
