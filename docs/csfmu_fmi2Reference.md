@@ -469,7 +469,7 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c);
 ```
 
 #### Description
-Moves the FMU from the instantiated state into initialization mode. The function does not change any variable: all variables received their start values in `fmi2Instantiate` (or `fmi2Reset`), and values the integration tool has set since then are kept. The integration tool can continue to set parameters, inputs and states (except states published with `initial="approx"`) by calling `fmi2SetReal`, `fmi2SetInteger`, etc. before calling `fmi2ExitInitializationMode` to finalize initialization.
+Moves the FMU from the instantiated state into initialization mode. The function does not change any variable: all variables received their start values in `fmi2Instantiate` (or `fmi2Reset`), and values the integration tool has set since then are kept. The integration tool can continue to set parameters, inputs and states (except states published with `initial="approx"`) by calling `fmi2SetReal`, `fmi2SetInteger`, etc. before calling `fmi2ExitInitializationMode` to finalize initialization. In initialization mode, reading a variable after a set initializes the model for the values set so far, so the outputs and calculated parameters read there are those the simulation starts from (FMI 2.0, section 4.2.4: in Initialization Mode "equations are active to determine all outputs").
 
 #### Parameters
 | Name | Type | Description |
@@ -492,9 +492,9 @@ Moves the FMU from the instantiated state into initialization mode. The function
 |------|-------------------------------|
 | `fmi2Instantiate` / `fmi2Reset` | Every variable is set to the start value declared in the model's variable table |
 | Instantiated state | Integration tool may set parameters, inputs and states |
-| `fmi2EnterInitializationMode` | Nothing (values are kept) |
-| Initialization mode | Integration tool may set parameters, inputs and states with `initial="exact"` |
-| `fmi2ExitInitializationMode` | The model is initialized (calculated parameters, its initialize function), then the outputs are computed from the initial values |
+| `fmi2EnterInitializationMode` | Nothing (values are kept). A new initialization begins: the states with `initial="approx"` hold the guesses that every initialization starts from |
+| Initialization mode | Integration tool may set parameters, inputs and states with `initial="exact"`. A read after a set initializes the model for the current values (calculated parameters, its initialize function, outputs) |
+| `fmi2ExitInitializationMode` | The model is initialized for the current values (unless a read already did so and nothing was set since), then the outputs are computed from the initial values |
 
 #### Usage Example
 ```c
@@ -549,7 +549,7 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c);
 ```
 
 #### Description
-Completes the initialization phase and transitions the FMU from initialization mode to initialized/step mode. First the model is initialized: its calculated parameters are computed, then its initialize function runs (if it has one), which may replace the start values of states published with `initial="approx"` (e.g. by a steady state). Then the outputs are computed from the initial states, inputs and parameters, so they are valid at the first communication point. After this function returns successfully, the FMU is ready to execute simulation steps via `fmi2DoStep`. This is the final step before beginning the simulation loop. No more initialization-time variable setting is allowed after this call.
+Completes the initialization phase and transitions the FMU from initialization mode to initialized/step mode. First the model is initialized for the current values: its calculated parameters are computed, then its initialize function runs (if it has one), which may replace the start values of states published with `initial="approx"` (e.g. by a steady state). If a read in initialization mode has already initialized the model and nothing was set since, that initialization stands. Then the outputs are computed from the initial states, inputs and parameters, so they are valid at the first communication point. After this function returns successfully, the FMU is ready to execute simulation steps via `fmi2DoStep`. This is the final step before beginning the simulation loop. No more initialization-time variable setting is allowed after this call.
 
 #### Parameters
 | Name | Type | Description |
@@ -604,8 +604,8 @@ for (double t = 0.0; t < 10.0; t += 0.01) {
 
 #### Notes
 - **Initial outputs**: Calls the model's output equation once, so that `fmi2GetReal` returns y(t0) = h(x0, u0) right after initialization
-- **The model initializes once**: Calculated parameters, then the model's initialize function, then the outputs. A failure is `fmi2Error` (FMI 2.0 has no way to repeat this call, so there is no `fmi2Discard`)
-- **Data files are read here**: A model reads its resources in its initialize function. A file that is missing or invalid fails this call, and the log names the file by its full path
+- **Initialization for the current values**: Calculated parameters, then the model's initialize function, then the outputs. A read in initialization mode does the same, so this call only initializes again if something was set since the last read. Every initialization starts from the same guesses (the states with `initial="approx"` as they were when initialization mode began), so the result does not depend on how often the integration tool read. A failure is `fmi2Error` (FMI 2.0 has no way to repeat this call, so there is no `fmi2Discard`)
+- **Data files are read in the initialization**: A model reads its resources in its initialize function. A file that is missing or invalid fails this call (or an earlier read in initialization mode), and the log names the file by its full path
 - **States and fixed parameters are frozen**: After this call, states and parameters declared as `VAR_FIXED` can no longer be set
 - **Finite start**: The states, and the Real outputs and local variables, must be finite at the start; the master starts from them, and every step from a non-finite start would be discarded
 - **Parameter values are checked by the model**: A model refuses values its equations cannot run with in its initialize function, e.g. `thermal_mass` with R = 0 (the bounds `min`/`max` include their limits)
@@ -748,7 +748,7 @@ fmi2Status fmi2GetReal(fmi2Component c,
 ```
 
 #### Description
-Reads one or more real-valued variables by their value references. Every real variable of the model can be read. Integration tools typically use this after `fmi2DoStep` to read output values.
+Reads one or more real-valued variables by their value references. Every real variable of the model can be read. Integration tools typically use this after `fmi2DoStep` to read output values. In initialization mode, the model is first initialized for the values set so far (if something was set since the last read), so the outputs read there are those the simulation starts from.
 
 #### Parameters
 | Name | Type | Description |
@@ -762,7 +762,7 @@ Reads one or more real-valued variables by their value references. Every real va
 | Status | Condition |
 |--------|-----------|
 | `fmi2OK` | All variables read successfully |
-| `fmi2Error` | NULL component, call not allowed in the current state, invalid arrays, unknown value reference, or variable is not of type Real |
+| `fmi2Error` | NULL component, call not allowed in the current state, invalid arrays, unknown value reference, or variable is not of type Real. In initialization mode also if the model cannot be initialized for the current values: the model's reason is logged, as `fmi2ExitInitializationMode` would log it (e.g. `Initialization failed: R and C must be greater than zero (R = 0 K/W, C = 1000 J/K).`) |
 
 #### FMI State Requirements
 **Can be called in**: **Instantiated**, **Initialization Mode**, **Step Complete**, **Step Failed**, **Step Canceled**, **Terminated**, **Error**

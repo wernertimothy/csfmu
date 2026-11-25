@@ -70,6 +70,33 @@ def test_steady_state_replaces_the_start_value(new_fmu, vr) -> None:
     assert real(fmu, vr, "T_out") == pytest.approx(343.15, abs=1e-12)
 
 
+def test_initial_unknowns_follow_the_values_set_in_initialization_mode(
+    new_fmu, vr
+) -> None:
+    """In initialization mode, T_out already shows the initialization for the values set so far.
+
+    Every read initializes for the current values, starting from the same
+    guess of T: switching back to fixed_start gives the start value of T
+    again, not the steady state of the read before.
+    """
+    fmu = new_fmu()
+    fmu.setupExperiment(startTime=0.0)
+    fmu.enterInitializationMode()
+    fmu.setInteger([vr("init_mode")], [STEADY_STATE])
+
+    fmu.setReal([vr("P")], [POWER])
+    assert real(fmu, vr, "T_out") == pytest.approx(343.15, abs=1e-12)
+
+    fmu.setReal([vr("P")], [250.0])
+    assert real(fmu, vr, "T_out") == pytest.approx(318.15, abs=1e-12)
+
+    fmu.setInteger([vr("init_mode")], [FIXED_START])
+    assert real(fmu, vr, "T_out") == 293.15
+
+    fmu.exitInitializationMode()
+    assert real(fmu, vr, "T_out") == 293.15
+
+
 def test_fixed_start_keeps_the_start_value(new_fmu, vr) -> None:
     """init_mode = fixed_start (the default): T starts at the value set before."""
     fmu = new_fmu()

@@ -1,9 +1,10 @@
 /**
  * Test of the initialization through the FMI wrapper: calculated parameters
  * are consistent in every FMU state, the model's initialize function runs
- * once in fmi2ExitInitializationMode, its errors and non-finite results are
- * reported, and a state with initial="approx" can only be set before the
- * initialization.
+ * for the current values whenever a variable is read in Initialization Mode
+ * after a set (and in fmi2ExitInitializationMode if needed), always from the
+ * same guesses, its errors and non-finite results are reported, and a state
+ * with initial="approx" can only be set before the initialization.
  *
  * The FMI wrapper (src/fmi2Functions.c) is linked against the model
  * definition below instead of a real model, as in
@@ -284,16 +285,60 @@ void test_settingACalculatedParameter_isAnError(void)
  * The model's initialize function
  ***************************************************/
 
-void test_initialize_runsOnceAtTheEndOfTheInitialization(void)
+void test_initialize_followsTheValuesSetInInitializationMode(void)
+{
+    instantiateFmu();
+    TEST_ASSERT_EQUAL_INT(fmi2OK, setInteger("start_mode", 1));
+    enterInitialization();
+
+    /* a read initializes the model for the values set so far: x = twice_gain */
+    TEST_ASSERT_EQUAL_INT(fmi2OK, setReal("gain", 2.0));
+    TEST_ASSERT_EQUAL_DOUBLE(4.0, getReal("y"));
+    TEST_ASSERT_EQUAL_INT(1, getInteger("initializations"));
+
+    /* another read without a set in between does not initialize again */
+    TEST_ASSERT_EQUAL_DOUBLE(4.0, getReal("x"));
+    TEST_ASSERT_EQUAL_INT(1, getInteger("initializations"));
+
+    /* a new value: the next read initializes for it */
+    TEST_ASSERT_EQUAL_INT(fmi2OK, setReal("gain", 3.0));
+    TEST_ASSERT_EQUAL_DOUBLE(6.0, getReal("y"));
+    TEST_ASSERT_EQUAL_INT(2, getInteger("initializations"));
+
+    /* nothing was set since the last read: exit keeps that initialization */
+    TEST_ASSERT_EQUAL_INT(fmi2OK, fmi2ExitInitializationMode(fmu));
+    TEST_ASSERT_EQUAL_DOUBLE(6.0, getReal("y"));
+    TEST_ASSERT_EQUAL_INT(2, getInteger("initializations"));
+
+    /* steps do not initialize again */
+    TEST_ASSERT_EQUAL_INT(fmi2OK, step(0));
+    TEST_ASSERT_EQUAL_INT(2, getInteger("initializations"));
+}
+
+void test_initialize_startsEveryRunFromTheGuess(void)
+{
+    instantiateFmu();
+    TEST_ASSERT_EQUAL_INT(fmi2OK, setReal("x", 0.25));  /* the guess */
+    enterInitialization();
+
+    /* start_mode 1: x starts at twice_gain = 1.0 */
+    TEST_ASSERT_EQUAL_INT(fmi2OK, setInteger("start_mode", 1));
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, getReal("x"));
+
+    /* back to start_mode 0: x keeps its start value, the guess, and not the 1.0 of the run before */
+    TEST_ASSERT_EQUAL_INT(fmi2OK, setInteger("start_mode", 0));
+    TEST_ASSERT_EQUAL_DOUBLE(0.25, getReal("x"));
+
+    TEST_ASSERT_EQUAL_INT(fmi2OK, fmi2ExitInitializationMode(fmu));
+    TEST_ASSERT_EQUAL_DOUBLE(0.25, getReal("x"));
+}
+
+void test_initialize_runsAtTheEndIfNothingWasRead(void)
 {
     instantiateFmu();
     TEST_ASSERT_EQUAL_INT(fmi2OK, setInteger("start_mode", 1));
     enterInitialization();
     TEST_ASSERT_EQUAL_INT(fmi2OK, setReal("gain", 2.0));
-
-    /* not yet: in initialization mode the state still has its start value */
-    TEST_ASSERT_EQUAL_DOUBLE(1.0, getReal("y"));
-    TEST_ASSERT_EQUAL_INT(0, getInteger("initializations"));
 
     TEST_ASSERT_EQUAL_INT(fmi2OK, fmi2ExitInitializationMode(fmu));
 
@@ -301,10 +346,49 @@ void test_initialize_runsOnceAtTheEndOfTheInitialization(void)
     TEST_ASSERT_EQUAL_DOUBLE(4.0, getReal("x"));
     TEST_ASSERT_EQUAL_DOUBLE(4.0, getReal("y"));
     TEST_ASSERT_EQUAL_INT(1, getInteger("initializations"));
+}
 
-    /* steps do not initialize again */
-    TEST_ASSERT_EQUAL_INT(fmi2OK, step(0));
-    TEST_ASSERT_EQUAL_INT(1, getInteger("initializations"));
+void test_initializeError_whileReadingInInitializationMode(void)
+{
+    instantiateFmu();
+    TEST_ASSERT_EQUAL_INT(fmi2OK, setInteger("start_mode", 7));
+    enterInitialization();
+    behavior = INIT_ERROR;
+
+    fmi2ValueReference r = vr("y");
+    fmi2Real value = -1.0;
+    TEST_ASSERT_EQUAL_INT(fmi2Error, fmi2GetReal(fmu, &r, 1, &value));
+    TEST_ASSERT_NOT_NULL(strstr(lastMessage, "Initialization failed: start_mode 7 is not supported"));
+
+    /* the FMU is in the error state: variables can still be read for diagnosis, */
+    TEST_ASSERT_EQUAL_INT(fmi2OK, fmi2GetReal(fmu, &r, 1, &value));
+
+    /* but the initialization cannot be finished */
+    TEST_ASSERT_EQUAL_INT(fmi2Error, fmi2ExitInitializationMode(fmu));
+}
+
+void test_initializeError_failsEveryGetter(void)
+{
+    /* nothing is read (nvr = 0), but the getter initializes the model first */
+    for (int getter = 0; getter < 4; getter++) {
+        instantiateFmu();
+        TEST_ASSERT_EQUAL_INT(fmi2OK, setInteger("start_mode", 7));
+        enterInitialization();
+        behavior = INIT_ERROR;
+
+        fmi2Status status = fmi2OK;
+        switch (getter) {
+            case 0: status = fmi2GetReal(fmu, NULL, 0, NULL); break;
+            case 1: status = fmi2GetInteger(fmu, NULL, 0, NULL); break;
+            case 2: status = fmi2GetBoolean(fmu, NULL, 0, NULL); break;
+            default: status = fmi2GetString(fmu, NULL, 0, NULL); break;
+        }
+        TEST_ASSERT_EQUAL_INT(fmi2Error, status);
+
+        fmi2FreeInstance(fmu);
+        fmu = NULL;
+        behavior = INIT_NORMAL;
+    }
 }
 
 void test_initializeError_failsWithTheModelsMessage(void)
@@ -405,7 +489,11 @@ int main(void)
     RUN_TEST(test_calculatedParameter_followsItsParameterInEveryState);
     RUN_TEST(test_calculatedParameter_reachesTheStateEquationOfTheNextStep);
     RUN_TEST(test_settingACalculatedParameter_isAnError);
-    RUN_TEST(test_initialize_runsOnceAtTheEndOfTheInitialization);
+    RUN_TEST(test_initialize_followsTheValuesSetInInitializationMode);
+    RUN_TEST(test_initialize_startsEveryRunFromTheGuess);
+    RUN_TEST(test_initialize_runsAtTheEndIfNothingWasRead);
+    RUN_TEST(test_initializeError_whileReadingInInitializationMode);
+    RUN_TEST(test_initializeError_failsEveryGetter);
     RUN_TEST(test_initializeError_failsWithTheModelsMessage);
     RUN_TEST(test_initializeDiscard_isAnError);
     RUN_TEST(test_nonFiniteStateAfterInitialize_isAnError);

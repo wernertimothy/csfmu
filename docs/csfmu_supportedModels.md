@@ -20,7 +20,7 @@ where **t** is the time, **x** are the states, **u** are the inputs and **y** ar
 - `f` and `h` may depend explicitly on time. `model->time` is the time of the integrator stage inside `f` and the communication point inside `h`.
 - `h` may use the inputs directly (direct feedthrough). You declare which inputs an output depends on with `.dependsOn`, and the `modelDescription.xml` publishes it.
 - Besides the outputs, `h` may compute **local variables**: values that can be read from outside but are no outputs, such as a heat flow or an error term.
-- The initial states are the start values, or the model computes them when the initialization is finished, e.g. a steady state. The initialization can also read **data files** that the FMU carries along (its resources), such as a table. Parameters that follow from other parameters (such as a time constant `R*C`) can be published as **calculated parameters**.
+- The initial states are the start values, or the model computes them in its initialization, e.g. a steady state. What the integration tool reads in initialization mode is already initialized, so connected FMUs can find a consistent start together. The initialization can also read **data files** that the FMU carries along (its resources), such as a table. Parameters that follow from other parameters (such as a time constant `R*C`) can be published as **calculated parameters**.
 
 How to write the two equations is explained in [getting started](csfmu_gettingStarted.md#equationsc-or-equationscpp).
 

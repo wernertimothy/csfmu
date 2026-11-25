@@ -4,7 +4,8 @@ The packaged table (resources/table.csv) holds the points (u, y) = (-1, -2),
 (0, 0), (1, 1), (2, 1.5), (3, 1.75). Between two points y is interpolated
 linearly, outside the table it is clamped to the first or last value. All
 values below are exact in binary floating point. The initialization reads
-the table, so y is NaN before.
+the table, so y is NaN before initialization mode; in initialization mode a
+read initializes the model, so y is already interpolated there.
 """
 
 import pytest
@@ -38,8 +39,12 @@ def test_output_follows_the_input_without_a_step(initialized_fmu, vr, u, y) -> N
     assert initialized_fmu.getReal([vr("y")])[0] == y
 
 
-def test_output_is_nan_before_initialization(new_fmu, vr) -> None:
-    """The initialization reads the table: before, y cannot be computed."""
+def test_output_is_nan_until_initialization_mode(new_fmu, vr) -> None:
+    """The initialization reads the table: before initialization mode, y cannot be computed.
+
+    In initialization mode a read initializes the model, so y follows u
+    there already, as a master initializing connected FMUs needs it.
+    """
     fmu = new_fmu()
     assert is_nan(fmu.getReal([vr("y")])[0])
 
@@ -48,10 +53,13 @@ def test_output_is_nan_before_initialization(new_fmu, vr) -> None:
 
     fmu.setupExperiment(startTime=0.0)
     fmu.enterInitializationMode()
-    assert is_nan(fmu.getReal([vr("y")])[0])
+    assert fmu.getReal([vr("y")])[0] == 0.5
+
+    fmu.setReal([vr("u")], [1.5])
+    assert fmu.getReal([vr("y")])[0] == 1.25
 
     fmu.exitInitializationMode()
-    assert fmu.getReal([vr("y")])[0] == 0.5
+    assert fmu.getReal([vr("y")])[0] == 1.25
 
 
 def test_output_is_nan_again_after_reset(initialized_fmu, vr) -> None:

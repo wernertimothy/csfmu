@@ -292,33 +292,34 @@ def test_variables_can_be_read_in_initialization_mode(
     new_fmu, model_description
 ) -> None:
     """
-    Every variable can be read during initialization mode. Outputs are
-    computed from the values set so far, so they already equal the outputs
-    at the first communication point.
+    Every variable can be read during initialization mode, and what is read
+    there is what the simulation starts from: a read initializes the model
+    for the values set so far (FMI 2.0, section 4.2.4: in Initialization Mode
+    "equations are active to determine all outputs").
 
-    Unless the model has states with initial="approx": their initialization
-    at the end of initialization mode may move them, and the outputs with them.
-    An output that is NaN during initialization mode cannot be computed yet
-    (e.g. it needs data that the initialization reads) and is not compared.
+    So the outputs, calculated parameters, local variables and states read in
+    initialization mode equal those after fmi2ExitInitializationMode, for
+    every model: also states with initial="approx" that the initialization
+    replaces, and outputs that need data the initialization reads.
     String variables are left out (see without_strings).
     """
     fmu = new_fmu()
-    outputs = variables_with(model_description, "output")
+    computed = without_strings(
+        variables_with(model_description, "output")
+        + calculated_parameters(model_description)
+        + local_variables(model_description)
+        + states(model_description)
+    )
 
     fmu.setupExperiment(startTime=0.0)
     fmu.enterInitializationMode()
     for variable in without_strings(settable_in_initialization_mode(model_description)):
         write(fmu, variable, changed_value(variable))
-    during_initialization = [read(fmu, output) for output in outputs]
+    during_initialization = {v.name: read(fmu, v) for v in computed}
     fmu.exitInitializationMode()
 
-    after_initialization = [read(fmu, output) for output in outputs]
-    if not approx_states(model_description):
-        for output, during, after in zip(
-            outputs, during_initialization, after_initialization
-        ):
-            if not is_nan(during):
-                assert after == during, output.name
+    after_initialization = {v.name: read(fmu, v) for v in computed}
+    assert during_initialization == after_initialization
 
 
 def test_outputs_follow_values_set_before_initialization(
@@ -326,9 +327,11 @@ def test_outputs_follow_values_set_before_initialization(
 ) -> None:
     """Outputs read in the instantiated state reflect the values set so far.
 
-    Unless the model has states with initial="approx", which the
-    initialization may move, or the output is NaN before the initialization
-    (see test_variables_can_be_read_in_initialization_mode).
+    The model is not initialized in the instantiated state (that starts with
+    initialization mode, see test_variables_can_be_read_in_initialization_mode).
+    So outputs are not compared if the model has states with initial="approx",
+    which still hold their guesses, and an output that needs data the
+    initialization reads is NaN until then.
     """
     fmu = new_fmu()
     outputs = variables_with(model_description, "output")

@@ -419,17 +419,71 @@ static const char* resultKind(const modelVariable* variable)
 }
 
 /**
+ * Initialize the model for the current values of its variables
+ *
+ * Runs initializeModel(), which starts from the same initial guesses every
+ * time (see beginInitialization()), and checks that the states are finite.
+ * If the model cannot start, the FMU enters the error state with the model's
+ * reason and returns fmi2Error. A numerical failure (SIM_DISCARD) is an
+ * error too: neither fmi2ExitInitializationMode nor a getter may return
+ * fmi2Discard in Co-Simulation (FMI 2.0, section 2.1.3). The model keeps the
+ * values the initialization left; the outputs are marked stale, so that
+ * values read in the error state match the other variables.
+ */
+static fmi2Status initializeForCurrentValues(myFMU2* fmu)
+{
+    modelInstance* model = fmu->model;
+
+    model->message[0] = '\0';
+    if (initializeModel(model) != SIM_OK) {
+        fmu->outputsAreStale = fmi2True;
+        return enterErrorState(fmu, "Initialization failed: %s",
+                               model->message[0] != '\0' ? model->message
+                                                         : "the model's initialize function reported an error.");
+    }
+
+    size_t failed = firstNonFiniteState(model);
+    if (failed < model->def->numberOfStates) {
+        fmu->outputsAreStale = fmi2True;
+        return enterErrorState(fmu, "Initialization failed: state '%s' is not finite.",
+                               stateName(model->def, failed));
+    }
+
+    return fmi2OK;
+}
+
+/**
  * Recompute the calculated parameters, the outputs and the local variables
  * if a variable was set since they were computed (the output equation
  * computes the outputs and the locals, and may use the calculated parameters)
+ *
+ * In Initialization Mode the model is initialized for the current values
+ * first, so that what the master reads there is what the simulation starts
+ * from (FMI 2.0, section 4.2.4, Initialization Mode: "In this state,
+ * equations are active to determine all outputs"). Every initialization
+ * starts from the same guesses, so it only depends on the current values,
+ * however often the master sets and reads.
+ *
+ * Returns fmi2Error if that initialization fails (the FMU is then in the
+ * error state), fmi2OK otherwise.
  */
-static void refreshOutputs(myFMU2* fmu)
+static fmi2Status refreshOutputs(myFMU2* fmu)
 {
-    if (fmu->outputsAreStale) {
-        computeCalculatedParameters(fmu->model);
-        fmu->model->getOutputs(fmu->model);
-        fmu->outputsAreStale = fmi2False;
+    if (!fmu->outputsAreStale) {
+        return fmi2OK;
     }
+
+    if (fmu->state == stateInitializationMode) {
+        if (initializeForCurrentValues(fmu) != fmi2OK) {
+            return fmi2Error;
+        }
+    } else {
+        computeCalculatedParameters(fmu->model);
+    }
+
+    fmu->model->getOutputs(fmu->model);
+    fmu->outputsAreStale = fmi2False;
+    return fmi2OK;
 }
 
 /***************************************************
@@ -893,6 +947,12 @@ fmi2Status fmi2SetDebugLogging(
  *   fmi2ExitInitializationMode, except states with initial="approx"
  * - A missing fmi2SetupExperiment is tolerated: the experiment then starts
  *   at time 0 and has no stop time
+ * - Starts a new initialization (beginInitialization()): the states as the
+ *   first initialization finds them are the guesses that every
+ *   initialization in this mode starts from. States with initial="approx"
+ *   can no longer be set from here on, so the guesses are final
+ * - Marks the outputs stale, so that the first read initializes the model
+ *   (see refreshOutputs())
  */
 fmi2Status fmi2EnterInitializationMode(fmi2Component c)
 {
@@ -900,6 +960,9 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c)
     if (!myfmu2) {
         return fmi2Error;
     }
+
+    beginInitialization(myfmu2->model);
+    myfmu2->outputsAreStale = fmi2True;
 
     /* Update state */
     myfmu2->state = stateInitializationMode;
@@ -914,14 +977,15 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c)
  * Transitions to step mode, ready for simulation.
  *
  * Implementation notes:
- * - Initializes the model (initializeModel()): computes the calculated
- *   parameters, then calls the model's initialize function, which may set
- *   the states with initial="approx" (e.g. to a steady state)
+ * - Initializes the model for the current values (see refreshOutputs() and
+ *   initializeForCurrentValues()): computes the calculated parameters, then
+ *   calls the model's initialize function, which may set the states with
+ *   initial="approx" (e.g. to a steady state). If a read in Initialization
+ *   Mode has already done so and nothing was set since, that initialization
+ *   stands: it started from the same guesses, so it would give the same result
  * - If the model cannot start, the function fails with fmi2Error and logs
- *   the model's reason. A numerical failure (SIM_DISCARD) is an error here
- *   too: FMI 2.0 has no way to repeat fmi2ExitInitializationMode. The model
- *   keeps the values the initialization left; the outputs are marked stale,
- *   so that values read in the error state match the other variables
+ *   the model's reason, also for a numerical failure (SIM_DISCARD): FMI 2.0
+ *   has no way to repeat fmi2ExitInitializationMode
  * - A state that is not finite after the initialization is an error as well,
  *   since every step would be discarded
  * - Computes the outputs from the initial states, inputs and parameters,
@@ -939,25 +1003,10 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
 
     modelInstance* model = myfmu2->model;
 
-    /* Initialize the model */
-    model->message[0] = '\0';
-    if (initializeModel(model) != SIM_OK) {
-        myfmu2->outputsAreStale = fmi2True;
-        return enterErrorState(myfmu2, "Initialization failed: %s",
-                               model->message[0] != '\0' ? model->message
-                                                         : "the model's initialize function reported an error.");
+    /* Initialize the model and compute the initial outputs */
+    if (refreshOutputs(myfmu2) != fmi2OK) {
+        return fmi2Error;
     }
-
-    size_t failed = firstNonFiniteState(model);
-    if (failed < model->def->numberOfStates) {
-        myfmu2->outputsAreStale = fmi2True;
-        return enterErrorState(myfmu2, "Initialization failed: state '%s' is not finite.",
-                               stateName(model->def, failed));
-    }
-
-    /* Compute initial outputs */
-    model->getOutputs(model);
-    myfmu2->outputsAreStale = fmi2False;
 
     size_t failedResult = firstNonFiniteResult(model);
     if (failedResult < model->def->numberOfVariables) {
@@ -984,8 +1033,9 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
  * Outputs, local variables and calculated parameters are kept consistent
  * with the other variables: every fmi2SetXXX (and fmi2SetupExperiment, which
  * moves the time) marks them as stale and every fmi2GetXXX recomputes them
- * if needed. This
- * way outputs can be read in initialization mode and a model with direct
+ * if needed. In Initialization Mode this includes the initialization of the
+ * model (see refreshOutputs()). This way the values read in Initialization
+ * Mode are those the simulation starts from, and a model with direct
  * feedthrough (y depends on u) answers with the inputs set last.
  ***************************************************/
 
@@ -1244,6 +1294,11 @@ fmi2Status fmi2SetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
  *   state) can be read
  * - Calculated parameters, outputs and local variables are recomputed first
  *   if a variable was set since the last computation
+ * - In Initialization Mode the model is initialized for the current values
+ *   first (see refreshOutputs()). If that fails, so does this call, with
+ *   fmi2Error and the model's reason: the same error that
+ *   fmi2ExitInitializationMode would report. The same holds for
+ *   fmi2GetInteger, fmi2GetBoolean and fmi2GetString
  */
 fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nvr, fmi2Real value[])
 {
@@ -1252,7 +1307,9 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
         return fmi2Error;
     }
 
-    refreshOutputs(myfmu2);
+    if (refreshOutputs(myfmu2) != fmi2OK) {
+        return fmi2Error;
+    }
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {
@@ -1277,7 +1334,9 @@ fmi2Status fmi2GetInteger(fmi2Component c, const fmi2ValueReference vr[], size_t
         return fmi2Error;
     }
 
-    refreshOutputs(myfmu2);
+    if (refreshOutputs(myfmu2) != fmi2OK) {
+        return fmi2Error;
+    }
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {
@@ -1302,7 +1361,9 @@ fmi2Status fmi2GetBoolean(fmi2Component c, const fmi2ValueReference vr[], size_t
         return fmi2Error;
     }
 
-    refreshOutputs(myfmu2);
+    if (refreshOutputs(myfmu2) != fmi2OK) {
+        return fmi2Error;
+    }
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {
@@ -1337,7 +1398,9 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
         return fmi2Error;
     }
 
-    refreshOutputs(myfmu2);
+    if (refreshOutputs(myfmu2) != fmi2OK) {
+        return fmi2Error;
+    }
 
     /* Get values */
     for (size_t k = 0; k < nvr; k++) {

@@ -299,7 +299,7 @@ void thermalMassParameters(modelInstance* model)
 
 The FMU calls it whenever a parameter may have changed: before a variable is read after a set, before the initialization, and at the start of a step after a set. So `tau` is always consistent with `R` and `C`, also while the integration tool is still setting them, and your equations can read `p->tau` like any parameter. The integration tool can read a calculated parameter, but never set it. Give it `.variability = VAR_FIXED` if it only depends on fixed parameters, otherwise leave the default `VAR_TUNABLE`.
 
-**The initialize function** runs once per simulation, when the initialization is finished (`fmi2ExitInitializationMode`): after all start values and parameters are set and the calculated parameters are computed, before the outputs of the first communication point. It can set initial states that the model computes itself, such as a steady state, and the [internals](#internals). It returns `SIM_OK`, or explains with `modelError` why the model cannot start:
+**The initialize function** computes the start of the simulation from the current parameters and inputs: it runs after the start values and parameters are set and the calculated parameters are computed, and before the outputs of the first communication point. It can set initial states that the model computes itself, such as a steady state, and the [internals](#internals). It returns `SIM_OK`, or explains with `modelError` why the model cannot start:
 
 ```c
 simStatus thermalMassInitialize(modelInstance* model)
@@ -336,6 +336,12 @@ A state that the initialize function may replace is declared with `.initial = VA
 
 Its start value is then published as a guess (`initial="approx"`): the integration tool can set it only before the initialization starts, and must not expect it to survive. The `thermal_mass` model (`src/models/thermal_mass/`) uses all three parts.
 
+**When the initialize function runs.** In initialization mode the integration tool may set parameters and inputs and read outputs in turn, e.g. to find a consistent start of several connected FMUs. So that what it reads is what the simulation starts from, the FMU initializes your model for the current values whenever a variable is read after a set, and once more at the end of initialization mode if something was set since. Your initialize function may therefore run several times, and each run must give the start for the current values only:
+
+- Every run starts from the same guesses: before each run, the FMU sets the states with `.initial = VAR_APPROX` back to the values they had when the initialization began. That is why `thermal_mass` in `fixed_start` mode can simply leave `T` alone, even after a run in `steady_state` mode.
+- The internals keep what the previous run left in them. Use them to cache expensive work, such as a file that has already been read, but not to count runs or to accumulate.
+- If your initialize function fails, the read fails too, with the same error that the end of initialization mode would report.
+
 #### Resources
 
 A model can carry data files, such as a table or a map. Put them into the folder `src/models/<model>/resources/`: the build packs it into the FMU as `resources/` and repackages the FMU whenever a file in it changes. When the FMU runs, the integration tool tells it where the unzipped `resources/` folder is, and your model finds it as `model->resourcePath`, an absolute path that ends with `/`.
@@ -371,7 +377,7 @@ Things to know:
 1. **Open files with `modelOpenFile`.** It takes the same arguments as `fopen`, but the path is UTF-8 on every platform. On Windows `fopen` would fail as soon as the path contains a character such as `ä`, e.g. in the temporary folder of a user with such a name.
 2. **Report problems with `modelError`.** A missing or invalid file fails the initialization, and the message, which should name the file by its full path, reaches the log of the integration tool.
 3. **`model->resourcePath` can be NULL.** This happens if the integration tool does not give the folder as a `file:` URI. Check it before you use it, as above.
-4. **Before the initialization the data is not there yet.** Outputs that need it cannot be computed before; `lookup_table_1d` returns NaN for them until then.
+4. **Before initialization mode the data is not there yet.** Outputs that need it cannot be computed before; `lookup_table_1d` returns NaN for them until then. In initialization mode they are already computed, because a read initializes the model (see [Initialization](#initialization)).
 5. **Allocate in the initialization, not in a step.** Memory for paths or buffers may be allocated in the initialize function (free it there too); the data itself belongs into the `Internals`, so that it is part of the FMU state.
 
 #### C++ Models
