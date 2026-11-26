@@ -685,6 +685,41 @@ static void writeTypeDefinitions(FILE* file, const modelDefinition* def)
 }
 
 /**
+ * Write the DefaultExperiment element with the settings the model suggests
+ *
+ * Every attribute of DefaultExperiment is optional (FMI 2.0, section 2.2.5,
+ * Definition of a Default Experiment), so each setting is written on its
+ * own: the time window if the stop time lies behind the start time, the
+ * tolerance and the step size if they are greater than 0. A model that
+ * suggests nothing gets no element. So a model that only suggests a
+ * tolerance still publishes it; it is also the tolerance the FMU uses when
+ * the integration tool defines none (see modelDefaultTolerance()).
+ */
+static void writeDefaultExperiment(FILE* file, const modelExperiment* experiment)
+{
+    bool hasTimeWindow = experiment->stopTime > experiment->startTime;
+    bool hasTolerance  = experiment->tolerance > 0.0;
+    bool hasStepSize   = experiment->stepSize > 0.0;
+
+    if (!hasTimeWindow && !hasTolerance && !hasStepSize) {
+        return;
+    }
+
+    fputs("    <DefaultExperiment", file);
+    if (hasTimeWindow) {
+        writeRealAttribute(file, "startTime", experiment->startTime);
+        writeRealAttribute(file, "stopTime", experiment->stopTime);
+    }
+    if (hasTolerance) {
+        writeRealAttribute(file, "tolerance", experiment->tolerance);
+    }
+    if (hasStepSize) {
+        writeRealAttribute(file, "stepSize", experiment->stepSize);
+    }
+    fputs("/>\n\n", file);
+}
+
+/**
  * Title of the group of variables with the given role
  */
 static const char* roleTitle(varRole role)
@@ -921,20 +956,8 @@ static void writeModelDescription(FILE* file, const modelDefinition* def)
           "        <Category name=\"logFmi2Call\" description=\"Successful calls of fmi2GetXXX, fmi2SetXXX and fmi2DoStep\"/>\n"
           "    </LogCategories>\n\n", file);
 
-    /* Default experiment (only if the model suggests one) */
-    const modelExperiment* experiment = &def->defaultExperiment;
-    if (experiment->stopTime > experiment->startTime) {
-        fputs("    <DefaultExperiment", file);
-        writeRealAttribute(file, "startTime", experiment->startTime);
-        writeRealAttribute(file, "stopTime", experiment->stopTime);
-        if (experiment->tolerance > 0.0) {
-            writeRealAttribute(file, "tolerance", experiment->tolerance);
-        }
-        if (experiment->stepSize > 0.0) {
-            writeRealAttribute(file, "stepSize", experiment->stepSize);
-        }
-        fputs("/>\n\n", file);
-    }
+    /* Default experiment (the settings the model suggests, if any) */
+    writeDefaultExperiment(file, &def->defaultExperiment);
 
     /* Model variables (value reference = index in the variable table).
        The variables keep the order of the table; a comment marks every

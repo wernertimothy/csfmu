@@ -1,4 +1,4 @@
-"""Tests of direct feedthrough (ROADMAP P0.4) with the pi_controller model.
+"""Tests of direct feedthrough with the pi_controller model.
 
     e = r - y_m,  dx_I/dt = e,  u = Kp*e + Ki*x_I
 

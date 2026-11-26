@@ -1,4 +1,4 @@
-"""Tests of the thermal_mass model and its local variable Q_loss (ROADMAP P1.2).
+"""Tests of the thermal_mass model and its local variable Q_loss.
 
     C*dT/dt = P - Q_loss,   Q_loss = (T - T_amb)/R,   T_out = T
 

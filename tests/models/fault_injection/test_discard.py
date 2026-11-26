@@ -1,4 +1,4 @@
-"""Tests of discarded steps (ROADMAP P0.3) with the fault_injection model.
+"""Tests of discarded steps with the fault_injection model.
 
     dx/dt = -x/tau,  y = x,  and dx/dt = NaN for t >= t_fail if fail is set
 

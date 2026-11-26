@@ -1058,7 +1058,7 @@ The communication step is divided into the smallest number of **equal** sub-step
    The small tolerance keeps rounding in the division from adding a step (`0.3 / 0.1` is `2.9999999999999996` in floating point and must give 3 steps, not 4).
 
 2. **Remember the communication point**:
-   - The model data (time, variables, states, derivatives) are copied into a buffer that was allocated with the instance (`model->stepStart`), so nothing is allocated during the step
+   - The model data (time, tolerance, variables, states, derivatives, internals, initial guesses) are copied into a buffer that was allocated with the instance (`model->stepStart`), so nothing is allocated during the step
 
 3. **Execute sub-steps**:
    - Take `numberOfSteps` steps of size `actualStepSize`
@@ -1069,7 +1069,7 @@ The communication step is divided into the smallest number of **equal** sub-step
 4. **Update time and outputs** (only if all sub-steps succeeded):
    - Set the internal clock (`model->time`) to `currentCommunicationPoint + communicationStepSize`
    - Compute outputs from final state, so they are evaluated exactly at the communication point
-   - If a Real output is NaN or infinite, the step has failed as well: the model data are restored from the buffer, the function returns `fmi2Discard` and the FMU enters **Step Failed**
+   - If a Real output or a Real local variable is NaN or infinite, the step has failed as well: the model data are restored from the buffer, the function returns `fmi2Discard` and the FMU enters **Step Failed**
 
 **Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
 
@@ -1077,7 +1077,7 @@ The communication step is divided into the smallest number of **equal** sub-step
 
 #### Discarded Steps
 
-FMI 2.0 (section 4.2.3) lets a slave report with `fmi2Discard` that it could not compute the whole communication step. This FMU does so on numerical failure only, never to stop at an event. Numerical failure means that a state becomes NaN or infinite during a sub-step, or that a Real output is NaN or infinite at the end of the step. Outputs that are computed between steps (when they are read after a set, or in `fmi2ExitInitializationMode`) are not checked; the next step then discards. The FMU always rolls back to `currentCommunicationPoint`, so the master sees:
+FMI 2.0 (section 4.2.3) lets a slave report with `fmi2Discard` that it could not compute the whole communication step. This FMU does so on numerical failure only, never to stop at an event. Numerical failure means that a state becomes NaN or infinite during a sub-step, or that a Real output or a Real local variable is NaN or infinite at the end of the step. Outputs that are computed between steps (when they are read after a set, or in `fmi2ExitInitializationMode`) are not checked; the next step then discards. The FMU always rolls back to `currentCommunicationPoint`, so the master sees:
 
 | Query | Answer after a discarded step |
 |-------|-------------------------------|
@@ -1185,7 +1185,7 @@ fmi2FreeInstance(fmu);
 - **Zero-order hold assumption**: Inputs are assumed constant during each communication step (FMI standard)
 - **Outputs computed once**: After all sub-steps complete, not after each internal step
 - **maxStepSize configurable**: Field of the model definition in the model's `variables.c`
-- **Divergence discards the step**: A step that produces NaN or infinite states or Real outputs returns `fmi2Discard` and rolls the FMU back to the communication point (see [Discarded Steps](#discarded-steps)). Continue with `fmi2SetFMUstate`, `fmi2Reset` or `fmi2Terminate`
+- **Divergence discards the step**: A step that produces NaN or infinite states, Real outputs or Real local variables returns `fmi2Discard` and rolls the FMU back to the communication point (see [Discarded Steps](#discarded-steps)). Continue with `fmi2SetFMUstate`, `fmi2Reset` or `fmi2Terminate`
 - **Never pending**: The function returns `fmi2OK`, `fmi2Warning`, `fmi2Discard` or `fmi2Error`, never `fmi2Pending`
 - **Synchronous only**: Blocks until computation completes (`noSetFMUStatePriorToCurrentPoint` ignored)
 - **No variable step size within DoStep**: Uses fixed sub-steps (adaptive methods would require more complex integrators)

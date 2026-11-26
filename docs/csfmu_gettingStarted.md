@@ -19,7 +19,7 @@ The Project is structured as follows.
   | `src/models/` | **Model implementations (this is where you will add your model)** |
   | `tests/` | Unit and integration tests |
 
-**Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. Each model also has a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
+**Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. Some models also have a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
 
 ## Core principle of csfmu
 
@@ -565,7 +565,7 @@ const modelDefinition MODEL_DEFINITION = {
 | `integrate` | Numerical integration method to use, see `include/integrator.h` |
 | `maxStepSize` | Maximum internal step size for stability |
 | `calculateParameters`, `initialize` | Optional: computes the calculated parameters, and prepares the simulation (see [Initialization](#initialization)). `calculateParameters` is required if the model has calculated parameters |
-| `defaultExperiment` | Optional suggested simulation settings. Its `.tolerance` is also the relative tolerance the FMU uses when the integration tool defines none or an invalid one (`1e-6` if not set) |
+| `defaultExperiment` | Optional suggested simulation settings. Only the settings you give are published: the time window if `.stopTime` is greater than `.startTime`, `.tolerance` and `.stepSize` if they are greater than 0. Its `.tolerance` is also the relative tolerance the FMU uses when the integration tool defines none or an invalid one (`1e-6` if not set) |
 
 **Solver step size matters**: For systems like the Lorenz attractor, choose `maxStepSize` small enough to maintain numerical stability. The FMU will automatically subdivide larger simulation steps.
 

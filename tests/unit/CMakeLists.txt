@@ -67,6 +67,10 @@ target_include_directories(test_fmi2_resources PRIVATE ${CMAKE_SOURCE_DIR}/exter
 # test includes src/fmi2ModelDescription.c to reach its static functions
 csfmu_unit_test(test_validateDefinition)
 
+# The DefaultExperiment element of the generator for experiments that suggest
+# only some settings, or none (the golden test below covers all four)
+csfmu_unit_test(test_defaultExperiment)
+
 #==============================================================================
 # 3. modelDescription.xml generator
 #==============================================================================

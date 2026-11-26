@@ -20,8 +20,13 @@ def setup_messages(log: list) -> list:
 
 
 def default_tolerance(model_description) -> float:
-    """The tolerance the FMU uses if the integration tool defines none."""
-    tolerance = model_description.defaultExperiment.tolerance
+    """The tolerance the FMU uses if the integration tool defines none.
+
+    A model that suggests no simulation settings has no DefaultExperiment
+    (FMPy gives None), one that suggests no tolerance has none in it.
+    """
+    experiment = model_description.defaultExperiment
+    tolerance = None if experiment is None else experiment.tolerance
     return 1e-6 if tolerance is None else float(tolerance)
 
 

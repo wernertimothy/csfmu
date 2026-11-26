@@ -96,11 +96,14 @@ static const modelUnit UNITS[] = {
     { .name = "N/m", .kg = 1, .s = -2 },
 };
 
-/* no version and no default experiment: both are optional */
+/* a version and a default experiment with all four settings (a start time
+ * other than 0); experiments with only some of them are tested by
+ * test_defaultExperiment.c */
 const modelDefinition MODEL_DEFINITION = {
     .name        = "generator_model",
     .guid        = "{00000000-0000-0000-0000-000000000000}",
     .description = "Fixture for the generator test",
+    .version     = "1.0.0",
 
     .variables         = VARIABLES,
     .numberOfVariables = ARRAY_LEN(VARIABLES),
@@ -120,4 +123,6 @@ const modelDefinition MODEL_DEFINITION = {
 
     .calculateParameters = calculateParameters,
     .initialize          = initialize,
+
+    .defaultExperiment = { .startTime = 0.5, .stopTime = 10.0, .tolerance = 1e-8, .stepSize = 0.01 },
 };

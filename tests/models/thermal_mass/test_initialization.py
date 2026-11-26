@@ -1,4 +1,4 @@
-"""Tests of the initialization of the thermal_mass model (ROADMAP P1.3, P1.4).
+"""Tests of the initialization of the thermal_mass model.
 
     tau = R*C                              (calculated parameter)
     init_mode = fixed_start (1):  T(0) = start value of T

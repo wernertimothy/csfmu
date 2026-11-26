@@ -1,4 +1,4 @@
-"""Tests of time in the model layer (ROADMAP P0.1) with the forced_pt1 model.
+"""Tests of time in the model layer with the forced_pt1 model.
 
     tau * dx/dt = -x + k*u + a*sin(omega*t),  y = x,  excitation = a*sin(omega*t)
 
