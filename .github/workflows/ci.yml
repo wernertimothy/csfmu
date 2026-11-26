@@ -129,6 +129,12 @@ jobs:
           uv run csfmu new scaffold_probe
           uv run csfmu test scaffold_probe
 
+      - name: Simulate the new model
+        run: |
+          printf 'time,u\n0.5,1\n' > probe_input.csv
+          uv run csfmu simulate scaffold_probe -i probe_input.csv -o probe.csv
+          head -3 probe.csv
+
       - name: Create, build and test a new C++ model
         run: |
           uv run csfmu new scaffold_probe_cpp --cpp

@@ -107,20 +107,22 @@ wheels = [
 name = "csfmu"
 version = "0.1.0"
 source = { editable = "." }
+dependencies = [
+    { name = "fmpy" },
+]
 
 [package.dev-dependencies]
 dev = [
-    { name = "fmpy" },
     { name = "matplotlib" },
     { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
+requires-dist = [{ name = "fmpy", specifier = ">=0.3.20" }]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "fmpy", specifier = ">=0.3.20" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.17.6" },

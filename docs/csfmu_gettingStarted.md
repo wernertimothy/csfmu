@@ -53,6 +53,8 @@ Or let the project manager do it, which builds in `build/first_order/` and place
 uv run csfmu build first_order
 ```
 
+To run the FMU and record its trajectory as CSV, use `uv run csfmu simulate first_order` (see [simulation](csfmu_simulation.md)).
+
 ## How to add your own Model
 
 Start by picking an apropreate **name** for you model.
@@ -797,3 +799,5 @@ Then, select it in the model definition in your model's `variables.c`:
 ```
 
 See **eulerForward** and **rungeKutta4** in `src/integrator.c` for reference implementations.
+
+To see how your integrator changes a trajectory, record the model with `csfmu simulate` before and after you switch it, and compare the two files (see [simulation](csfmu_simulation.md#comparing-two-builds)).

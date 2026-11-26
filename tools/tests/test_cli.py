@@ -3,14 +3,36 @@
 They work on a fake project in a temporary folder and run once, not per
 model: uv run pytest tools/tests. That a scaffolded model builds and passes
 its tests is checked by the CLI job of the CI.
+
+The master of csfmu simulate runs on a fake FMU that records every call, so
+these tests pin the order of the calls and the communication points: two
+builds of a model can only be compared bit for bit if the master drives them
+the same way. The master on real FMUs is tested per model in
+tests/integration/test_simulate.py.
 """
 
+import csv
+import math
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from csfmu import cli
 from csfmu.scaffold import camel_case, create_model, validate_name
+from csfmu.simulate import (
+    InputTable,
+    Result,
+    SimulationError,
+    format_value,
+    number_of_steps,
+    parse_value,
+    read_inputs,
+    recorded_variables,
+    run,
+    write_csv,
+)
+from fmpy.fmi1 import FMICallException
 
 # The root of this repository (not of the fake project)
 REPO = Path(__file__).resolve().parents[2]
@@ -84,6 +106,31 @@ def test_new_writes_the_template_unless_bare_is_given() -> None:
     args = cli.parse_args(["new", "my_model", "--bare", "--cpp"])
     assert args.bare is True
     assert args.cpp is True
+
+
+def test_simulate_takes_its_settings_from_the_fmu_by_default() -> None:
+    args = cli.parse_args(["simulate", "my_model"])
+
+    assert args.model == "my_model"
+    assert (args.input, args.output) == (None, None)
+    assert [args.start, args.stop, args.step, args.tolerance] == [None] * 4
+    assert args.start_values == []
+
+
+def test_simulate_collects_repeated_start_values() -> None:
+    args = cli.parse_args(
+        ["simulate", "my_model", "--set", "k=2", "--set", "name=a=b.csv", "--stop", "1"]
+    )
+
+    assert args.start_values == [("k", "2"), ("name", "a=b.csv")]
+    assert args.stop == 1.0
+
+
+def test_simulate_refuses_a_start_value_without_value(capsys) -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_args(["simulate", "my_model", "--set", "k"])
+
+    assert "NAME=VALUE" in capsys.readouterr().err
 
 
 # finding the project and its models
@@ -344,3 +391,348 @@ def test_references_are_found_as_whole_words(project) -> None:
     assert cli.references_to(project, "my_model", excluded=[]) == [
         project / "docs" / "uses.md"
     ]
+
+
+# simulate: a fake model and FMU for the master
+
+
+def variable(name, type="Real", causality="local", reference=0, start=None):
+    """A model variable as FMPy describes it, with the attributes the master uses."""
+    return SimpleNamespace(
+        name=name,
+        type=type,
+        causality=causality,
+        valueReference=reference,
+        start=start,
+    )
+
+
+# A model like the scaffold template: x integrates k*u, y = x
+K = variable("k", causality="parameter", reference=0)
+U = variable("u", causality="input", reference=1)
+Y = variable("y", causality="output", reference=2)
+X = variable("x", reference=3)
+N = variable("n", type="Integer", causality="output", reference=4)
+ON = variable("on", type="Boolean", causality="input", reference=5)
+NAME = variable("name", type="String", causality="parameter", reference=6)
+MODEL = SimpleNamespace(modelVariables=[K, U, Y, X, N, ON, NAME])
+
+
+class FakeFMU:
+    """Records the calls of the master and integrates dx/dt = k*u exactly.
+
+    n counts the steps. doStep fails with fmi2Discard from t = fail_at on.
+    """
+
+    def __init__(self, fail_at=None, fail_in=None):
+        self.values = {0: 1.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0, 5: 0}
+        self.calls = []
+        self.fail_at = fail_at
+        self.fail_in = fail_in
+
+    def call(self, name, *args):
+        self.calls.append((name, *args))
+        if name == self.fail_in:
+            raise FMICallException(
+                function=f"fmi2{name[0].upper()}{name[1:]}", status=3
+            )
+
+    def setupExperiment(self, tolerance=None, startTime=0.0, stopTime=None):
+        self.call("setupExperiment", tolerance, startTime, stopTime)
+
+    def enterInitializationMode(self):
+        self.call("enterInitializationMode")
+
+    def exitInitializationMode(self):
+        self.call("exitInitializationMode")
+
+    def terminate(self):
+        self.call("terminate")
+
+    def doStep(self, currentCommunicationPoint, communicationStepSize):
+        self.call("doStep", currentCommunicationPoint, communicationStepSize)
+        if self.fail_at is not None and currentCommunicationPoint >= self.fail_at:
+            raise FMICallException(function="fmi2DoStep", status=2)
+        self.values[3] += self.values[0] * self.values[1] * communicationStepSize
+        self.values[2] = self.values[3]
+        self.values[4] += 1
+
+    def _set(self, name, references, values):
+        self.call(name, list(references), list(values))
+        self.values.update(zip(references, values))
+
+    def _get(self, name, references):
+        self.call(name, list(references))
+        return [self.values[reference] for reference in references]
+
+    def setReal(self, references, values):
+        self._set("setReal", references, values)
+
+    def setInteger(self, references, values):
+        self._set("setInteger", references, values)
+
+    def setBoolean(self, references, values):
+        self._set("setBoolean", references, values)
+
+    def getReal(self, references):
+        return self._get("getReal", references)
+
+    def getInteger(self, references):
+        return self._get("getInteger", references)
+
+    def getBoolean(self, references):
+        return self._get("getBoolean", references)
+
+
+def names(calls) -> list[str]:
+    return [call[0] for call in calls]
+
+
+def write_file(path, text: str):
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+# simulate: communication points
+
+
+def test_steps_reach_the_stop_time() -> None:
+    assert number_of_steps(0.0, 10.0, 0.01) == 1000
+    assert number_of_steps(0.0, 0.3, 0.1) == 3  # 3*0.1 is 0.30000000000000004
+    assert number_of_steps(1.5, 2.0, 0.25) == 2
+
+
+@pytest.mark.parametrize(
+    "start, stop, step",
+    [
+        (0.0, 0.055, 0.01),  # not on the grid
+        (0.0, 0.0, 0.1),  # no step at all
+        (1.0, 0.0, 0.1),  # backwards
+        (0.0, 1.0, 0.0),
+        (0.0, 1.0, -0.1),
+        (0.0, math.inf, 0.1),
+        (math.nan, 1.0, 0.1),
+    ],
+)
+def test_bad_grid_is_refused(start, stop, step) -> None:
+    with pytest.raises(SimulationError):
+        number_of_steps(start, stop, step)
+
+
+# simulate: values
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        0.1 + 0.2,
+        1 / 3,
+        5e-324,
+        1.7976931348623157e308,
+        -0.0,
+        1e-5,
+        math.pi,
+        math.inf,
+        -math.inf,
+    ],
+)
+def test_real_values_are_written_exactly(value) -> None:
+    text = format_value(Y, value)
+
+    assert float(text) == value
+    assert math.copysign(1.0, float(text)) == math.copysign(1.0, value)
+
+
+def test_nan_is_written_as_nan() -> None:
+    assert math.isnan(float(format_value(Y, math.nan)))
+
+
+def test_integer_and_boolean_values_are_written_as_numbers() -> None:
+    assert format_value(N, 42) == "42"
+    assert format_value(N, -3) == "-3"
+    assert format_value(ON, True) == "1"
+    assert format_value(ON, False) == "0"
+
+
+def test_texts_are_parsed_by_type() -> None:
+    assert parse_value(Y, " 1e-3 ") == 1e-3
+    assert parse_value(N, "7") == 7
+    assert parse_value(ON, "true") is True
+    assert parse_value(ON, "FALSE") is False
+    assert parse_value(ON, "1") is True
+    assert parse_value(NAME, "table.csv") == "table.csv"
+
+
+@pytest.mark.parametrize("var, text", [(Y, "one"), (N, "1.5"), (ON, "yes"), (Y, "")])
+def test_bad_texts_are_refused(var, text) -> None:
+    with pytest.raises(SimulationError, match=var.name):
+        parse_value(var, text)
+
+
+def test_parameters_and_strings_are_not_recorded() -> None:
+    assert recorded_variables(MODEL) == [U, Y, X, N, ON]
+
+
+# simulate: input file
+
+
+def test_input_file_is_read(tmp_path) -> None:
+    path = write_file(tmp_path / "in.csv", "time, u, on\n0, 1.5, true\n\n0.25,-2,0\n")
+
+    table = read_inputs(path, MODEL)
+
+    assert table.variables == [U, ON]
+    assert table.times == [0.0, 0.25]
+    assert table.rows == [[1.5, True], [-2.0, False]]
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("", "empty"),
+        ("t,u\n0,1\n", "first column"),
+        ("time,v\n0,1\n", r"'v' .* \(inputs: u, on\)"),
+        ("time,y\n0,1\n", "'y' .* not an input"),
+        ("time,u,u\n0,1,2\n", "two columns"),
+        ("time,u\n0,1,2\n", "line 2"),
+        ("time,u\n0,1\nlater,2\n", "line 3 of the input file: 'later' is not a time"),
+        (
+            "time,u\n1,1\n0.5,2\n",
+            "line 3 of the input file: the time 0.5 is before 1.0",
+        ),
+        ("time,u\n0,high\n", "line 2 of the input file: 'high' is not a value of 'u'"),
+    ],
+)
+def test_bad_input_file_is_refused(tmp_path, text, message) -> None:
+    path = write_file(tmp_path / "in.csv", text)
+
+    with pytest.raises(SimulationError, match=message):
+        read_inputs(path, MODEL)
+
+
+def test_missing_input_file_is_refused(tmp_path) -> None:
+    with pytest.raises(SimulationError, match="cannot read"):
+        read_inputs(tmp_path / "missing.csv", MODEL)
+
+
+def test_inputs_are_held_from_their_row_on() -> None:
+    table = InputTable([U], [0.5, 1.0, 1.0, 2.0], [[1.0], [2.0], [3.0], [4.0]])
+
+    assert table.active_row(0.0, 0.0) is None  # before the first row
+    assert table.active_row(0.5, 0.0) == 0  # exactly on a row
+    assert table.active_row(0.75, 0.0) == 0  # between rows
+    assert table.active_row(1.0, 0.0) == 2  # same time twice: the last row wins
+    assert table.active_row(5.0, 0.0) == 3  # after the last row
+
+
+def test_a_row_on_a_communication_point_holds_there_despite_rounding() -> None:
+    table = InputTable([U], [0.3], [[1.0]])
+
+    assert table.active_row(3 * 0.1, 1e-10) == 0  # 0.30000000000000004
+    assert table.active_row(0.29999999999999993, 1e-10) == 0
+    assert table.active_row(0.2999, 1e-10) is None
+
+
+# simulate: master
+
+
+def test_master_calls_the_fmu_in_a_fixed_order() -> None:
+    fmu = FakeFMU()
+    inputs = InputTable([U], [0.0, 0.25], [[1.0], [2.0]])
+
+    run(fmu, [Y], 0.0, 0.1, 3, inputs=inputs, start_values=[(K, 2.0)], tolerance=1e-8)
+
+    assert fmu.calls == [
+        ("setupExperiment", 1e-8, 0.0, 0.30000000000000004),
+        ("setReal", [0], [2.0]),  # start value
+        ("setReal", [1], [1.0]),  # input of t = 0
+        ("enterInitializationMode",),
+        ("exitInitializationMode",),
+        ("getReal", [2]),
+        ("doStep", 0.0, 0.1),
+        ("getReal", [2]),
+        ("doStep", 0.1, 0.1),
+        ("getReal", [2]),
+        ("doStep", 0.2, 0.1),
+        ("setReal", [1], [2.0]),  # the row of 0.25 holds from t = 0.3 on
+        ("getReal", [2]),
+        ("terminate",),
+    ]
+
+
+def test_communication_points_are_not_accumulated() -> None:
+    fmu = FakeFMU()
+
+    result = run(fmu, [X], 0.0, 0.1, 10)
+
+    expected = [k * 0.1 for k in range(11)]
+    assert result.times == expected
+    assert [call[1] for call in fmu.calls if call[0] == "doStep"] == expected[:-1]
+    # What a master that adds up the step size would reach instead (sum()
+    # would not show it: it adds floats with compensation)
+    accumulated = 0.0
+    for _ in range(10):
+        accumulated += 0.1
+    assert result.times[-1] != accumulated
+
+
+def test_rows_hold_the_values_after_the_inputs_of_their_time() -> None:
+    fmu = FakeFMU()
+    inputs = InputTable([U], [0.2], [[1.0]])
+
+    result = run(fmu, [U, X, N, ON], 0.0, 0.1, 4, inputs=inputs)
+
+    assert result.error is None
+    assert result.rows == [
+        [0.0, 0.0, 0, False],
+        [0.0, 0.0, 1, False],
+        [1.0, 0.0, 2, False],
+        [1.0, 0.1, 3, False],
+        [1.0, 0.2, 4, False],
+    ]
+
+
+def test_failed_step_keeps_the_rows_up_to_its_start() -> None:
+    fmu = FakeFMU(fail_at=0.2)
+
+    result = run(fmu, [N], 0.0, 0.1, 5)
+
+    assert result.times == [0.0, 0.1, 0.2]
+    assert result.rows == [[0], [1], [2]]
+    assert "step from t = 0.2" in result.error
+    assert "discard" in result.error
+    assert "terminate" not in names(fmu.calls)
+
+
+def test_failed_initialization_records_nothing() -> None:
+    fmu = FakeFMU(fail_in="exitInitializationMode")
+
+    result = run(fmu, [N], 0.0, 0.1, 5)
+
+    assert result.rows == []
+    assert result.error.startswith("initialization: fmi2ExitInitializationMode failed")
+    assert "doStep" not in names(fmu.calls)
+
+
+# simulate: result file
+
+
+def test_result_file_reads_back_exactly(tmp_path) -> None:
+    result = Result(
+        [Y, N, ON],
+        [0.0, 0.1, 0.30000000000000004],
+        [[0.1 + 0.2, 1, True], [-0.0, -2, False], [math.inf, 3, True]],
+    )
+    path = tmp_path / "result.csv"
+
+    write_csv(path, result)
+
+    data = path.read_bytes()
+    assert b"\r" not in data
+    lines = list(csv.reader(data.decode("utf-8").splitlines()))
+    assert lines[0] == ["time", "y", "n", "on"]
+    assert [float(line[0]) for line in lines[1:]] == result.times
+    assert [
+        [parse_value(v, text) for v, text in zip(result.variables, line[1:])]
+        for line in lines[1:]
+    ] == result.rows

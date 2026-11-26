@@ -20,7 +20,7 @@ This is the same check the `CMakeLists.txt` performs, so every model csfmu knows
 
 The model name is the name of that folder. It is also the name of the FMU (`<model>.fmu`) and its `modelIdentifier`.
 
-`build` and `test` take the model name as an optional argument.
+`build`, `test` and `simulate` take the model name as an optional argument.
 If you omit it, or the model does not exist, csfmu lists the available models and lets you pick one:
 
 ```
@@ -210,6 +210,27 @@ uv run csfmu test my_model -- -k fmu_state -v
 
 Note that `test` does not rebuild an existing FMU. After changing a model, run `build` first, or `clean` the build folder.
 
+### `simulate [<model>] [options]`
+
+Simulates a model and writes its trajectory to a CSV file.
+
+```bash
+uv run csfmu simulate first_order
+```
+
+1. The model is built (like `build`). The build is incremental, so this is quick if nothing has changed.
+2. Its FMU is simulated with a fixed communication step, by default over the model's default experiment.
+3. The inputs, outputs, states and local variables at every communication point are written to `<model>.csv` in the current directory.
+
+The options set the output file (`-o`), an input file with the inputs over time (`-i`), the start time, stop time and step size (`--start`, `--stop`, `--step`), the tolerance (`--tolerance`) and start values of parameters, inputs or states (`--set <name>=<value>`, repeatable):
+
+```bash
+uv run csfmu simulate first_order -i step.csv --set tau=0.5 --stop 2 -o step_response.csv
+```
+
+The values are written exactly, so two trajectories are bit-identical exactly when their files are byte-identical, which `cmp` checks.
+[Simulating a model][simulation] describes the options, the input and result files, and how to compare two builds of a model.
+
 ### `list`
 
 Lists all models, one per line.
@@ -229,4 +250,5 @@ uv run csfmu clean
 ```
 
 [getting started]: csfmu_gettingStarted.md
+[simulation]: csfmu_simulation.md
 [C++ models]: csfmu_gettingStarted.md#c-models
