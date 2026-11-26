@@ -5,6 +5,8 @@ Usage:
     csfmu rm <model>
     csfmu build [<model>] [-o <dir>]
     csfmu test [<model>] [-- <pytest args>]
+    csfmu simulate [<model>] [-i <input.csv>] [-o <result.csv>] [--start <t>] [--stop <t>]
+                   [--step <h>] [--tolerance <tol>] [--set <name>=<value> ...]
     csfmu list
     csfmu clean
 """
@@ -18,6 +20,8 @@ import sys
 from pathlib import Path
 
 from .scaffold import create_model, validate_name
+from .simulate import SimulationError, write_csv
+from .simulate import simulate as simulate_fmu
 
 
 def find_root() -> Path:
@@ -155,6 +159,54 @@ def test(root: Path, model: str, pytest_args: list[str]) -> int:
 
     env = {**os.environ, "FMU_MODEL": model, "FMU_OUTPUT_DIR": str(build_dir)}
     return run([sys.executable, "-m", "pytest", *pytest_args], cwd=root, env=env)
+
+
+def simulate(root: Path, model: str, args: argparse.Namespace) -> int:
+    """Build the model, simulate its FMU and write the trajectory to a CSV file.
+
+    The model is always built first. The build is incremental, so this costs
+    little, and a result never comes from an FMU that is older than the
+    sources (which would hide a change when two results are compared).
+    """
+    # Relative to where csfmu was called from, not to the project root
+    output = (args.output or Path(f"{model}.csv")).expanduser().resolve()
+    input_file = args.input.expanduser().resolve() if args.input else None
+    if output.is_dir():
+        print(f"Error: '{output}' is a folder, not a file")
+        return 1
+    if input_file is not None and not input_file.is_file():
+        print(f"Error: input file '{input_file}' not found")
+        return 1
+
+    returncode = build(root, model)
+    if returncode != 0:
+        return returncode
+
+    try:
+        result = simulate_fmu(
+            root / "build" / f"{model}.fmu",
+            start=args.start,
+            stop=args.stop,
+            step=args.step,
+            tolerance=args.tolerance,
+            input_file=input_file,
+            start_values=dict(args.start_values),
+        )
+    except SimulationError as error:
+        print(f"Error: {error}")
+        return 1
+
+    if result.rows:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        write_csv(output, result)
+        print(
+            f"Wrote {len(result.rows)} rows (t = {result.times[0]!r} to"
+            f" {result.times[-1]!r}) to {output}"
+        )
+    if result.error is not None:
+        print(f"Error: the simulation stopped at the {result.error}")
+        return 1
+    return 0
 
 
 def new(root: Path, name: str, *, cpp: bool = False, bare: bool = False) -> int:
@@ -303,6 +355,14 @@ def clean(root: Path) -> int:
     return 0
 
 
+def assignment(text: str) -> tuple[str, str]:
+    """Split a NAME=VALUE argument into name and value."""
+    name, separator, value = text.partition("=")
+    if not separator or not name.strip():
+        raise argparse.ArgumentTypeError(f"'{text}' is not of the form NAME=VALUE")
+    return name.strip(), value
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="csfmu", description="Create, build and test csfmu FMUs."
@@ -350,6 +410,52 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     test_parser.epilog = "arguments after -- are passed to pytest"
 
+    simulate_parser = commands.add_parser(
+        "simulate",
+        help="simulate a model and write its trajectory to a CSV file (builds it first)",
+    )
+    simulate_parser.add_argument(
+        "model",
+        nargs="?",
+        help="name of a folder under src/models/ (prompted if omitted)",
+    )
+    simulate_parser.add_argument(
+        "-i",
+        "--input",
+        type=Path,
+        help="CSV file with the inputs over time: a column time, then one column per input",
+    )
+    simulate_parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="CSV file the trajectory is written to (default: <model>.csv)",
+    )
+    for option, what in (
+        ("--start", "start time"),
+        ("--stop", "stop time"),
+        ("--step", "communication step size"),
+    ):
+        simulate_parser.add_argument(
+            option,
+            type=float,
+            help=f"{what} (default: from the FMU's default experiment)",
+        )
+    simulate_parser.add_argument(
+        "--tolerance",
+        type=float,
+        help="relative tolerance for the FMU (default: the FMU's own)",
+    )
+    simulate_parser.add_argument(
+        "--set",
+        dest="start_values",
+        type=assignment,
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="set a parameter, input or state before the initialization (repeatable)",
+    )
+
     commands.add_parser("list", help="list the available models")
     commands.add_parser("clean", help="remove the build/ folder")
 
@@ -387,6 +493,8 @@ def main(argv: list[str] | None = None) -> int:
         # Relative to where csfmu was called from, not to the project root
         output_dir = args.output_dir.expanduser().resolve() if args.output_dir else None
         return build(root, model, output_dir)
+    if args.command == "simulate":
+        return simulate(root, model, args)
     return test(root, model, args.pytest_args)
 
 

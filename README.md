@@ -35,6 +35,8 @@ uv run csfmu test first_order
 
 To learn more about the cli, go [here][csfmu cli].
 
+To run a model and record its trajectory as CSV, see [simulation][].
+
 ### Build Your First FMU (manually)
 
 Alternatively, build with CMake directly.
@@ -102,6 +104,7 @@ And although most of the code was written by a real human beeing, it was heavily
 [getting started]: docs/csfmu_gettingStarted.md
 [supported models]: docs/csfmu_supportedModels.md
 [csfmu cli]: docs/csfmu_cli.md
+[simulation]: docs/csfmu_simulation.md
 [Co-Sim FMUs]: docs/csfmu_coSimFMUs.md
 [fmi2]: docs/csfmu_fmi2Reference.md
 [fmi3]: docs/csfmu_fmi3Reference.md
