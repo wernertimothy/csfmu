@@ -6,6 +6,7 @@
  */
 
 #include "model.h"
+#include "integrator.h"
 
 typedef struct {
     double gain; int mode; bool enabled; double offset; double scaled_gain; int doubled; int operation;
@@ -18,7 +19,6 @@ typedef struct { double x1; double x2; } States;
 
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
-static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
 static void calculateParameters(modelInstance* m) { (void)m; }
 static simStatus initialize(modelInstance* m) { (void)m; return SIM_OK; }
 
@@ -118,7 +118,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &EULER_FORWARD,
     .maxStepSize         = 0.01,
 
     .calculateParameters = calculateParameters,

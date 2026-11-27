@@ -20,6 +20,7 @@
 #include "unity.h"
 #include "fmi2Functions.h"
 #include "model.h"
+#include "integrator.h"
 
 #define STEP_SIZE 0.1
 
@@ -84,14 +85,6 @@ static void outputEquation(modelInstance* m)
     out->initializations = ((const Internals*)m->internals)->initializations;
 }
 
-/* Explicit Euler */
-static void integrator(modelInstance* m, double stepSize)
-{
-    double t0 = m->time;
-    m->states[0] += stepSize * m->stateDerivatives[0];
-    m->time = t0 + stepSize;
-}
-
 static const modelVariable VARIABLES[] = {
     { PARAM(gain),                 .start = 0.5, .description = "Gain (tunable)" },
     { CALCULATED_PARAM(twice_gain), .description = "Twice the gain" },
@@ -117,7 +110,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &EULER_FORWARD,
     .maxStepSize         = STEP_SIZE,  /* every step is a single sub-step */
 
     .calculateParameters = calculateParameters,

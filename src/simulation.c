@@ -33,21 +33,40 @@ static simStatus endFailed(modelInstance* model, simStatus status)
 }
 
 /**
+ * Name of an integrator for messages
+ */
+static const char* integratorName(const integratorDef* integrator)
+{
+    return (integrator->name && integrator->name[0] != '\0') ? integrator->name : "(unnamed)";
+}
+
+/**
  * Implementation notes for simulateTo():
  * - All checks that can refuse the call come before saveModelData(), so a
  *   refused call changes nothing
  * - The step size is (tEnd - t) / N, so the integrated length equals the
  *   advance of the clock exactly; the start of step k is t + k * h from the
  *   integer k, and the end is tEnd itself, so rounding does not add up
+ * - The derivatives are evaluated at the start of every step (they are valid
+ *   for this call only: the caller may change inputs or parameters between
+ *   calls, and the model cannot see writes through the block pointers)
+ * - A step that fails passes its status on: SIM_DISCARD rolls back to the
+ *   start (not to the last good step), SIM_ERROR keeps the values
  * - The integrator contract is a programming error when broken (SIM_ERROR,
  *   no rollback), a non-finite state or result a numerical one (SIM_DISCARD,
- *   rollback to the start, not to the last good step)
+ *   rollback to the start)
  */
 simStatus simulateTo(modelInstance* model, double tEnd)
 {
     const modelDefinition* def = model->def;
+    const integratorDef* integrator = model->integrator;
     double start = model->time;
     model->message[0] = '\0';
+
+    if (!integrator || !integrator->step) {
+        return modelError(model, "The model has no integrator: set .integrator in its definition, "
+                                 "e.g. .integrator = &RUNGE_KUTTA_4.");
+    }
 
     if (!(isfinite(tEnd) && tEnd >= start)) {
         return modelError(model, "Cannot simulate from t = %.16g to t = %.16g: the end must be finite and not "
@@ -80,14 +99,35 @@ simStatus simulateTo(modelInstance* model, double tEnd)
         if (status != SIM_OK) {
             return endFailed(model, status);
         }
-        model->integrate(model, stepSize);
+        double stepTaken = 0.0;
+        status = integrator->step(model, stepSize, &stepTaken);
+        if (status != SIM_OK) {
+            /* An integrator may fail without giving a reason: name it, so
+               that the caller can report something */
+            if (model->message[0] == '\0') {
+                const char* format = "The integrator '%s' could not take the step from t = %.16g.";
+                if (status == SIM_DISCARD) {
+                    modelDiscard(model, format, integratorName(integrator), subStepStart);
+                } else {
+                    modelError(model, format, integratorName(integrator), subStepStart);
+                }
+            }
+            return endFailed(model, status);
+        }
 
-        /* The integrator contract: on return model->time is t + h */
-        double expectedTime = subStepStart + stepSize;
+        /* The integrator contract: a fixed-step method takes the whole step,
+           and on return model->time is t + h */
+        if (!(stepTaken == stepSize)) {
+            return modelError(model, "The integrator '%s' took a step of %.16g instead of %.16g. See the "
+                                     "integrator contract in include/integrator.h.", integratorName(integrator),
+                              stepTaken, stepSize);
+        }
+        double expectedTime = subStepStart + stepTaken;
         if (!(fabs(model->time - expectedTime) <=
-              fmax(INTEGRATOR_TIME_FRACTION * stepSize, timeRoundingTolerance(expectedTime)))) {
-            return modelError(model, "The integrator left model->time at %.16g instead of %.16g (t + h). "
-                                     "See the integrator contract in include/model.h.", model->time, expectedTime);
+              fmax(INTEGRATOR_TIME_FRACTION * stepTaken, timeRoundingTolerance(expectedTime)))) {
+            return modelError(model, "The integrator '%s' left model->time at %.16g instead of %.16g (t + h). "
+                                     "See the integrator contract in include/integrator.h.",
+                              integratorName(integrator), model->time, expectedTime);
         }
 
         size_t failed = modelFirstNonFiniteState(model);

@@ -430,8 +430,13 @@ static int validateDefinition(const modelDefinition* def, const char* modelIdent
                         def->name, modelIdentifier);
         problems++;
     }
-    if (!def->getStateDerivatives || !def->getOutputs || !def->integrate) {
-        fprintf(stderr, "error: model definition needs getStateDerivatives, getOutputs and integrate\n");
+    if (!def->getStateDerivatives || !def->getOutputs) {
+        fprintf(stderr, "error: model definition needs getStateDerivatives and getOutputs\n");
+        problems++;
+    }
+    if (!def->integrator || !def->integrator->step) {
+        fprintf(stderr, "error: model definition needs an integrator with a step function "
+                        "(e.g. .integrator = &RUNGE_KUTTA_4, see integrator.h)\n");
         problems++;
     }
     if (!(def->maxStepSize > 0.0)) {

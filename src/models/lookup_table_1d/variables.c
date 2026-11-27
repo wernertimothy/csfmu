@@ -46,7 +46,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     /* method for numerical integration (there are no states to integrate,
        the FMU only advances the time) */
-    .integrate   = eulerForward,
+    .integrator  = &EULER_FORWARD,
     .maxStepSize = 1.0,
 
     /* suggested simulation settings */

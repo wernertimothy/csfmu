@@ -79,7 +79,7 @@ const modelDefinition MODEL_DEFINITION = {
     .initialize          = thermalMassInitialize,
 
     /* method for numerical integration (time constant R*C = 100 s) */
-    .integrate   = rungeKutta4,
+    .integrator  = &RUNGE_KUTTA_4,
     .maxStepSize = 1.0,
 
     /* suggested simulation settings */

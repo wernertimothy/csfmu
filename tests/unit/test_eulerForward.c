@@ -5,11 +5,19 @@
 
 #define TOLERANCE 1e-10
 
-/* Minimal model definitions: the integrators only need the number of states */
-static const modelDefinition ONE_STATE    = { .numberOfStates = 1 };
-static const modelDefinition THREE_STATES = { .numberOfStates = 3 };
+/* Minimal model definitions: the number of states and the integrator, which sizes the work memory */
+static const modelDefinition ONE_STATE    = { .numberOfStates = 1, .integrator = &EULER_FORWARD };
+static const modelDefinition THREE_STATES = { .numberOfStates = 3, .integrator = &EULER_FORWARD };
 
 static modelInstance* model;
+
+/* One step of EULER_FORWARD: it succeeds and takes the whole step (fixed-step contract) */
+static void takeStep(modelInstance* m, double h)
+{
+    double taken = NAN;
+    TEST_ASSERT_EQUAL_INT(SIM_OK, EULER_FORWARD.step(m, h, &taken));
+    TEST_ASSERT_EQUAL_DOUBLE(h, taken);
+}
 
 void setUp(void) {
     model = NULL;
@@ -22,21 +30,21 @@ void tearDown(void) {
 void test_eulerForward_singleStateWithConstantDerivative(void) {
     model = newModel(&ONE_STATE);
     model->stateDerivatives[0] = 2.0;
-    eulerForward(model, 0.1);
+    takeStep(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.2, model->states[0]);
 }
 
 void test_eulerForward_singleStateWithZeroDerivative(void) {
     model = newModel(&ONE_STATE);
     model->states[0] = 2.0;
-    eulerForward(model, 0.1);
+    takeStep(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 2.0, model->states[0]);
 }
 
 void test_eulerForward_singleStateWithNegativeDerivative(void) {
     model = newModel(&ONE_STATE);
     model->stateDerivatives[0] = -2.0;
-    eulerForward(model, 0.1);
+    takeStep(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, -0.2, model->states[0]);
 }
 
@@ -44,7 +52,7 @@ void test_eulerForward_zeroStepSize(void) {
     model = newModel(&ONE_STATE);
     model->states[0] = 5.0;
     model->stateDerivatives[0] = 1.0;
-    eulerForward(model, 0.0);
+    takeStep(model, 0.0);
     TEST_ASSERT_EQUAL_DOUBLE(5.0, model->states[0]);
 }
 
@@ -57,7 +65,7 @@ void test_eulerForward_multipleStates(void) {
       model->stateDerivatives[1] = 2.0;
       model->stateDerivatives[2] = 3.0;
 
-      eulerForward(model, 0.1);
+      takeStep(model, 0.1);
 
       TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 1.1, model->states[0]);
       TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 2.2, model->states[1]);
@@ -69,8 +77,8 @@ void test_eulerForward_variableStepSize(void) {
     model->states[0] = 1.0;
     model->stateDerivatives[0] = 2.0;
 
-    eulerForward(model, 0.1);
-    eulerForward(model, 0.2);
+    takeStep(model, 0.1);
+    takeStep(model, 0.2);
 
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 1.6, model->states[0]);
 }
@@ -81,15 +89,15 @@ void test_eulerForward_multipleSteps(void) {
     model->stateDerivatives[0] = 1.0;
 
     // Step 1
-    eulerForward(model, 0.1);
+    takeStep(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.1, model->states[0]);
 
     // Step 2
-    eulerForward(model, 0.1);
+    takeStep(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.2, model->states[0]);
 
     // Step 3
-    eulerForward(model, 0.1);
+    takeStep(model, 0.1);
     TEST_ASSERT_DOUBLE_WITHIN(TOLERANCE, 0.3, model->states[0]);
 }
 
@@ -108,7 +116,7 @@ void test_eulerForward_exponentialDecay(void) {
         model->stateDerivatives[0] = -k * model->states[0];
 
         // Integrate
-        eulerForward(model, dt);
+        takeStep(model, dt);
     }
 
     // Analytical solution: x(1) = 1.0 * exp(-1.0 * 1.0) ≈ 0.36788
@@ -123,9 +131,20 @@ void test_eulerForward_advancesTheTime(void) {
     model->time = 0.3;
     model->stateDerivatives[0] = 1.0;
 
-    eulerForward(model, 0.1);
+    takeStep(model, 0.1);
 
     TEST_ASSERT_EQUAL_DOUBLE(0.3 + 0.1, model->time);
+}
+
+void test_eulerForward_descriptor(void) {
+    TEST_ASSERT_EQUAL_STRING("Euler forward", EULER_FORWARD.name);
+    TEST_ASSERT_EQUAL_INT(1, EULER_FORWARD.order);
+    TEST_ASSERT_EQUAL_size_t(0, EULER_FORWARD.scratchVectors);
+
+    /* no work memory needed, so none is allocated */
+    model = newModel(&ONE_STATE);
+    TEST_ASSERT_NULL(model->scratch);
+    TEST_ASSERT_TRUE(model->integrator == &EULER_FORWARD);
 }
 
 // ============ Test Runner ============
@@ -151,6 +170,7 @@ int main(void) {
 
     // Validation
     RUN_TEST(test_eulerForward_exponentialDecay);
+    RUN_TEST(test_eulerForward_descriptor);
 
     return UNITY_END();
 }

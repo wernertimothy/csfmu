@@ -546,7 +546,7 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = lorenzAttractorOutputs,
 
     /* method for numerical integration */
-    .integrate   = eulerForward,
+    .integrator  = &EULER_FORWARD,
     .maxStepSize = 1e-4,
 
     /* suggested simulation settings */
@@ -564,7 +564,7 @@ const modelDefinition MODEL_DEFINITION = {
 | `sizeOfParams`, `sizeOfInputs`, `sizeOfOutputs`, `sizeOfLocals`, `sizeOfInternals` | `sizeof` of the respective struct. Leave out what your model does not have |
 | `numberOfStates` | Number of states, `NUMBER_OF_DOUBLES(States)` |
 | `getStateDerivatives`, `getOutputs` | Your two equations |
-| `integrate` | Numerical integration method to use, see `include/integrator.h` |
+| `integrator` | Numerical integration method: `&EULER_FORWARD` or `&RUNGE_KUTTA_4` (see `include/integrator.h`), or one of your own (see [How to add your own Integrator](#how-to-add-your-own-integrator)) |
 | `maxStepSize` | Maximum internal step size for stability |
 | `calculateParameters`, `initialize` | Optional: computes the calculated parameters, and prepares the simulation (see [Initialization](#initialization)). `calculateParameters` is required if the model has calculated parameters |
 | `defaultExperiment` | Optional suggested simulation settings. Only the settings you give are published: the time window if `.stopTime` is greater than `.startTime`, `.tolerance` and `.stepSize` if they are greater than 0. Its `.tolerance` is also the relative tolerance the FMU uses when the integration tool defines none or an invalid one (`1e-6` if not set) |
@@ -744,60 +744,76 @@ Before building your FMU, verify:
 
 ## How to add your own Integrator
 
-All integrators share the same signature defined in `include/model.h`:
+An integration method is described by an `integratorDef` (`include/model.h`): a name, a step function, the work memory it needs and its order. `EULER_FORWARD` and `RUNGE_KUTTA_4` in `src/integrator.c` are built that way, and your model can bring its own descriptor in the same form.
+
+The step function takes one step from the current time:
 ```c
-void yourIntegrator(modelInstance* model, double stepSize);
+simStatus step(modelInstance* model, double hMax, double* hTaken);
 ```
 
-The contract is:
-* On entry **model->time** is the time **t** at the start of the step, and **model->stateDerivatives** contains the derivatives at **t** and the current state (pre-computed before the call)
-* The function must update **model->states** in-place with the result of the integration step
-* If your method needs intermediate derivative evaluations (like multi-stage methods), call **model->getStateDerivatives(model)** internally after temporarily modifying **model->states** and setting **model->time** to the time of that stage. Otherwise a model that depends on time loses the order of your method
-* On return **model->time** must be **t + stepSize**. The FMU checks this after every sub-step: an integrator that leaves another time (beyond rounding) makes `fmi2DoStep` fail with `fmi2Error`
-* For intermediate results use **model->scratch**. It holds `MODEL_SCRATCH_VECTORS` (5) vectors of length nx and is allocated once per instance. Do not use variable-length arrays (`double k1[nx]`): MSVC does not support them
+The contract is (see `include/integrator.h`):
+* On entry **model->time** is the time **t** at the start of the step, and **model->stateDerivatives** holds the derivatives at **t** and the current state: the simulation has evaluated them right before the call
+* The function updates **model->states** in-place with the result of the step and writes the length of the step to **\*hTaken**. A fixed-step method takes the whole step: `*hTaken = hMax`
+* If your method needs further derivative evaluations (like multi-stage methods), set **model->states** and **model->time** to the values of that stage and call **evaluateDerivatives(model)** (`include/evaluate.h`), never the state equation directly. If it does not return `SIM_OK`, return that status at once. Setting the stage time matters: otherwise a model that depends on time loses the order of your method
+* On return **model->time** must be **t + \*hTaken**. The simulation checks this after every step: an integrator that takes another step or leaves another time (beyond rounding) makes the step fail with an error
+* Return `SIM_OK`. The content of **model->stateDerivatives** after the step does not matter: the derivatives are evaluated again at the start of the next step
+* For intermediate results use **model->scratch**. It holds as many vectors of length nx as your descriptor asks for (`scratchVectors`), allocated once per instance. Do not use variable-length arrays (`double k1[nx]`): MSVC does not support them
 
-First, add your implementation to `src/integrator.c` and its declaration to `include/integrator.h`.
-
-Here is a minimal example of the **explicit midpoint method** (2nd-order Runge-Kutta):
+Here is the **explicit midpoint method** (2nd-order Runge-Kutta). Put it into your model's `variables.c`, above the `MODEL_DEFINITION` (the build compiles a model's `variables.c` and its equations file):
 
 ```c
-void midpoint(modelInstance* model, double stepSize)
+#include <string.h>
+#include "evaluate.h"
+
+static simStatus midpointStep(modelInstance* model, double hMax, double* hTaken)
 {
     double t0 = model->time;
     size_t nx = model->def->numberOfStates;
+    *hTaken = hMax;  /* a fixed-step method takes the whole step */
     if (nx == 0) {
-        model->time = t0 + stepSize;
-        return;
+        model->time = t0 + hMax;
+        return SIM_OK;
     }
 
-    double* k1 = model->scratch;
+    double* k1 = model->scratch;  /* 2 vectors: see scratchVectors below */
     double* stateBackup = k1 + nx;
 
-    /* k1 = f(t, x) — reuse pre-computed derivatives */
+    /* k1 = f(t, x), evaluated before the call */
     memcpy(k1, model->stateDerivatives, nx * sizeof(double));
     memcpy(stateBackup, model->states, nx * sizeof(double));
 
-    /* evaluate at midpoint: f(t + h/2, x + h/2 * k1) */
-    model->time = t0 + 0.5 * stepSize;
+    /* evaluate at the midpoint: f(t + h/2, x + h/2 * k1) */
+    model->time = t0 + 0.5 * hMax;
     for (size_t i = 0; i < nx; i++) {
-        model->states[i] = stateBackup[i] + 0.5 * stepSize * k1[i];
+        model->states[i] = stateBackup[i] + 0.5 * hMax * k1[i];
     }
-    model->getStateDerivatives(model);
+    simStatus status = evaluateDerivatives(model);
+    if (status != SIM_OK) {
+        return status;
+    }
 
-    /* x(t+h) = x(t) + h * f(midpoint) */
+    /* x(t + h) = x(t) + h * f(midpoint) */
     for (size_t i = 0; i < nx; i++) {
-        model->states[i] = stateBackup[i] + stepSize * model->stateDerivatives[i];
+        model->states[i] = stateBackup[i] + hMax * model->stateDerivatives[i];
     }
-    model->time = t0 + stepSize;
+    model->time = t0 + hMax;
+    return SIM_OK;
 }
+
+static const integratorDef MIDPOINT = {
+    .name           = "explicit midpoint",
+    .step           = midpointStep,
+    .scratchVectors = 2,
+    .order          = 2,
+};
 ```
 
-Then, select it in the model definition in your model's `variables.c`:
+Then select it in the same file's model definition:
 
 ```c
-    .integrate = midpoint,
+    .integrator  = &MIDPOINT,
 ```
 
-See **eulerForward** and **rungeKutta4** in `src/integrator.c` for reference implementations.
+`src/integrator.c` holds the built-in methods as reference implementations. A method that every model should be able to use belongs there, with an `extern` declaration in `include/integrator.h`.
 
 To see how your integrator changes a trajectory, record the model with `csfmu simulate` before and after you switch it, and compare the two files (see [simulation](csfmu_simulation.md#comparing-two-builds)).

@@ -52,7 +52,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     /* method for numerical integration (exact here: with the inputs held
      * constant over a step, x_I is linear in time) */
-    .integrate   = rungeKutta4,
+    .integrator  = &RUNGE_KUTTA_4,
     .maxStepSize = 0.01,
 
     /* suggested simulation settings */

@@ -47,7 +47,7 @@ const modelDefinition MODEL_DEFINITION = {
     /* method for numerical integration: several sub-steps per communication
      * step of 0.1, so that a fault in the middle of a step shows whether the
      * FMU is rolled back to the communication point */
-    .integrate   = rungeKutta4,
+    .integrator  = &RUNGE_KUTTA_4,
     .maxStepSize = 0.01,
 
     /* suggested simulation settings */

@@ -45,7 +45,7 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = firstOrderOutputs,
 
     /* method for numerical integration */
-    .integrate   = eulerForward,
+    .integrator  = &EULER_FORWARD,
     .maxStepSize = 1e-3,
 
     /* suggested simulation settings */

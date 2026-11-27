@@ -40,15 +40,6 @@ extern "C" {
 typedef struct modelInstance modelInstance;
 
 /**
- * @brief Number of vectors of length nx an integrator may use as work memory.
- *
- * The work memory is allocated once by newModel() (see modelInstance.scratch),
- * so integrators need neither the stack nor malloc() for their intermediate
- * results.
- */
-#define MODEL_SCRATCH_VECTORS 5
-
-/**
  * @brief Relative tolerance used when a model suggests none.
  *
  * Applies if defaultExperiment.tolerance of the model definition is 0 (not
@@ -95,21 +86,27 @@ typedef enum {
 typedef void (*stateDerivativesFn)(modelInstance* model);
 
 /**
- * @brief Function pointer type for numerical integration.
+ * @brief Description of a numerical integration method.
  *
- * Advances the model state by one time step using a numerical integration
- * method (e.g., Euler forward, Runge-Kutta).
- *
- * Contract: on entry model->time is t and model->stateDerivatives holds
- * f(t, x, u). Before every further derivative evaluation the integrator sets
- * model->time to the time of that stage. On return model->time is t + stepSize.
- * simulateTo() (simulation.h) checks this after every step (up to rounding)
- * and fails with SIM_ERROR otherwise.
- *
- * @param model Pointer to the model instance to integrate
- * @param stepSize Time step for integration (dt)
+ * A model selects its method in the definition, e.g.
+ * .integrator = &RUNGE_KUTTA_4. The built-in methods and the contract of
+ * step() are in integrator.h; a model may also bring its own descriptor.
  */
-typedef void (*integrateFn)(modelInstance* model, double stepSize);
+typedef struct integratorDef {
+    const char* name;  /**< Name of the method, for messages */
+
+    /**
+     * Takes one step from model->time of at most hMax and writes its length
+     * to *hTaken (a fixed-step method takes hMax). Returns SIM_OK, or the
+     * status of a failed evaluation of the state derivatives. See integrator.h
+     * for the contract.
+     */
+    simStatus (*step)(modelInstance* model, double hMax, double* hTaken);
+
+    size_t scratchVectors;  /**< Vectors of length nx the method needs as work memory
+                                 (modelInstance.scratch), allocated once by newModel() */
+    int order;              /**< Order of accuracy of the method */
+} integratorDef;
 
 /**
  * @brief Function pointer type for computing model outputs and locals.
@@ -325,7 +322,8 @@ typedef struct {
 
     stateDerivativesFn getStateDerivatives;  /**< dx/dt = f(t,x,u) */
     outputsFn          getOutputs;           /**< y = h(t,x,u) */
-    integrateFn        integrate;            /**< Numerical integration method */
+    const integratorDef* integrator;         /**< Numerical integration method, e.g. &RUNGE_KUTTA_4
+                                                  (see integrator.h) */
     double             maxStepSize;          /**< Largest allowed integration step */
 
     calculateParametersFn calculateParameters;  /**< Calculated parameters (optional, required
@@ -347,8 +345,9 @@ typedef struct {
  * - State and state derivative vectors
  * - The initial guesses of the states, which every initialization starts
  *   from (see beginInitialization())
- * - Work memory for the integrator (content is undefined between calls; it is
- *   neither reset by resetModel() nor part of saveModelData())
+ * - Work memory for the integrator, sized for the definition's integrator
+ *   (content is undefined between calls; it is neither reset by resetModel()
+ *   nor part of saveModelData())
  * - A buffer for rolling back a failed step (see stepStart)
  * - Function pointers for model equations and integration
  * - A message buffer that explains the last error (see modelError())
@@ -382,12 +381,16 @@ struct modelInstance {
     bool hasInitialGuess;                    /**< true once initializeModel() has taken initialGuess; false
                                                   after newModel(), resetModel() and beginInitialization().
                                                   Part of the model data */
-    double* scratch;                         /**< Work memory for the integrator [MODEL_SCRATCH_VECTORS * nx] */
+    double* scratch;                         /**< Work memory for the integrator [def->integrator->scratchVectors
+                                                  * nx], NULL if it needs none. Sized by newModel() for the
+                                                  definition's integrator: don't switch model->integrator to one
+                                                  that needs more */
     void* stepStart;                         /**< Model data at the start of the current step, written by
                                                   saveModelData() and used to roll back a failed step
                                                   [modelDataSize(def) bytes]. Not part of the model data */
     stateDerivativesFn getStateDerivatives;  /**< Function to compute dx/dt = f(t,x,u) */
-    integrateFn integrate;                   /**< Function to perform time integration */
+    const integratorDef* integrator;         /**< Numerical integration method (the definition's, bound by
+                                                  resetModel()) */
     outputsFn getOutputs;                    /**< Function to compute y = h(t,x,u) */
     char message[MODEL_MESSAGE_SIZE];        /**< Reason of the last SIM_ERROR or SIM_DISCARD (see modelError(), modelDiscard()), "" if
                                                   none. Cleared by resetModel(), not part of the model data */

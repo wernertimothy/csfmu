@@ -33,9 +33,9 @@ extern "C" {
  *   integer k, so rounding does not add up. If tEnd equals t (a step so
  *   short that t + h rounds to t), no integration step is taken.
  * - Before every integration step the state derivatives are evaluated at
- *   its start (evaluateDerivatives()), then the model's integrator advances
- *   the states. After every integration step model->time must be its end, up
- *   to rounding (the integrator contract in model.h).
+ *   its start (evaluateDerivatives()), then the step() of the model's
+ *   integrator advances the states. It must take the whole step and leave
+ *   model->time at its end, up to rounding (the contract in integrator.h).
  * - At the end model->time is exactly tEnd, and the outputs and local
  *   variables are evaluated there.
  *
@@ -63,12 +63,14 @@ extern "C" {
  * @return
  * - SIM_OK: the model is at tEnd, its outputs and local variables included.
  * - SIM_DISCARD: a state, a Real output or a Real local variable became NaN
- *   or infinite. The model is restored to its start (time, states, outputs,
- *   internals, ...: all model data, bit for bit), and model->message says
- *   what failed and when. The caller may retry, e.g. with a shorter step.
+ *   or infinite, or an integration step reported a numerical failure. The
+ *   model is restored to its start (time, states, outputs, internals, ...:
+ *   all model data, bit for bit), and model->message says what failed and
+ *   when. The caller may retry, e.g. with a shorter step.
  * - SIM_ERROR: the call or the model is invalid (tEnd before the start or
- *   not finite, maxStepSize not greater than 0, too many integration steps,
- *   an integrator that breaks its contract); model->message has the reason.
+ *   not finite, no integrator, maxStepSize not greater than 0, too many
+ *   integration steps, an integrator that breaks its contract or reports an
+ *   error); model->message has the reason.
  *   The model keeps the values it has at that point, for diagnosis: it is
  *   not restored.
  */

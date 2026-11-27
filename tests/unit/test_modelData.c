@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include "unity.h"
 #include "model.h"
+#include "integrator.h"
 
 /* A test model that uses every variable type and every role */
 typedef struct { double gain; int mode; bool enabled; } Params;
@@ -12,7 +13,6 @@ typedef struct { double cache; int counter; bool flag; double table[4]; } Intern
 
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
-static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
 
 static const modelVariable VARIABLES[] = {
     { PARAM(gain),    .start = 2.5 },
@@ -41,7 +41,7 @@ static const modelDefinition DEFINITION = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &EULER_FORWARD,
 };
 
 /* A model without parameters, inputs, outputs, locals and internals */

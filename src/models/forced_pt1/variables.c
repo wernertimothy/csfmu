@@ -52,7 +52,7 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = forcedPt1Outputs,
 
     /* method for numerical integration */
-    .integrate   = rungeKutta4,
+    .integrator  = &RUNGE_KUTTA_4,
     .maxStepSize = 0.1,
 
     /* suggested simulation settings */

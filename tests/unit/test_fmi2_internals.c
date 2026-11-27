@@ -60,7 +60,7 @@ static void outputEquation(modelInstance* m)
  * integrator writes the internals because the hooks that write them in a
  * real model (initialization, discrete and event updates) do not exist yet;
  * a model's own state and output equations only read them */
-static void integrator(modelInstance* m, double stepSize)
+static simStatus integratorStep(modelInstance* m, double stepSize, double* stepTaken)
 {
     Internals* internals = m->internals;
     double t0 = m->time;
@@ -72,7 +72,15 @@ static void integrator(modelInstance* m, double stepSize)
         m->states[0] = NAN;
     }
     m->time = t0 + stepSize;
+    *stepTaken = stepSize;
+    return SIM_OK;
 }
+
+static const integratorDef TEST_INTEGRATOR = {
+    .name  = "explicit Euler that counts its steps",
+    .step  = integratorStep,
+    .order = 1,
+};
 
 static const modelVariable VARIABLES[] = {
     { OUTPUT(y),     .dependsOn = "", .description = "The state" },
@@ -94,7 +102,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &TEST_INTEGRATOR,
     .maxStepSize         = STEP_SIZE / SUBSTEPS,
 };
 

@@ -303,7 +303,7 @@ Informs the FMU about the simulation time window and numerical tolerances before
 |------|------|-------------|
 | `c` | `fmi2Component` | The FMU instance |
 | `toleranceDefined` | `fmi2Boolean` | Whether `tolerance` parameter is meaningful |
-| `tolerance` | `fmi2Real` | Relative tolerance for numerical integration, stored as `model->relTol`. Used by adaptive integrators; the fixed-step integrators (`eulerForward`, `rungeKutta4`) ignore it |
+| `tolerance` | `fmi2Real` | Relative tolerance for numerical integration, stored as `model->relTol`. Used by adaptive integrators; the fixed-step integrators (`EULER_FORWARD`, `RUNGE_KUTTA_4`) ignore it |
 | `startTime` | `fmi2Real` | Start time of the experiment in seconds |
 | `stopTimeDefined` | `fmi2Boolean` | Whether `stopTime` parameter is meaningful |
 | `stopTime` | `fmi2Real` | Stop time of the experiment in seconds |

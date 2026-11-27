@@ -1,7 +1,8 @@
 /**
- * Test of the integrator time contract (integrateFn in include/model.h):
- * on return model->time is t + stepSize. fmi2DoStep checks this after every
- * sub-step and fails with fmi2Error otherwise.
+ * Test of the integrator time contract (the step contract in
+ * include/integrator.h): on return model->time is t + stepSize.
+ * simulateTo() checks this after every sub-step, and fmi2DoStep then fails
+ * with fmi2Error.
  *
  * The FMI wrapper (src/fmi2Functions.c) is linked against the model
  * definition below instead of a real model. Its integrator can be told to
@@ -48,7 +49,7 @@ static void outputEquation(modelInstance* m)
 }
 
 /* Explicit Euler whose handling of the time is chosen by the test */
-static void integrator(modelInstance* m, double stepSize)
+static simStatus integratorStep(modelInstance* m, double stepSize, double* stepTaken)
 {
     double t0 = m->time;
     m->states[0] += stepSize * m->stateDerivatives[0];
@@ -66,7 +67,15 @@ static void integrator(modelInstance* m, double stepSize)
             }
             break;
     }
+    *stepTaken = stepSize;
+    return SIM_OK;
 }
+
+static const integratorDef TEST_INTEGRATOR = {
+    .name  = "explicit Euler with a chosen time behavior",
+    .step  = integratorStep,
+    .order = 1,
+};
 
 static const modelVariable VARIABLES[] = {
     { OUTPUT(y), .dependsOn = "", .description = "Twice the state" },
@@ -86,7 +95,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &TEST_INTEGRATOR,
     .maxStepSize         = 1.0,  /* every step of this test is a single sub-step */
 };
 

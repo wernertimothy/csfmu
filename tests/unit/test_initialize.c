@@ -7,6 +7,7 @@
 #include <string.h>
 #include "unity.h"
 #include "model.h"
+#include "integrator.h"
 
 typedef struct { double gain; double twice; } Params;
 typedef struct { double x; double y; } States;
@@ -17,7 +18,6 @@ static simStatus initializeResult = SIM_OK;
 
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
-static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
 
 static void calculateParameters(modelInstance* m)
 {
@@ -58,7 +58,7 @@ static const modelDefinition DEFINITION = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &EULER_FORWARD,
     .calculateParameters = calculateParameters,
     .initialize          = initialize,
 };
@@ -73,7 +73,7 @@ static const modelDefinition WITHOUT_HOOKS = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &EULER_FORWARD,
 };
 
 static modelInstance* model;

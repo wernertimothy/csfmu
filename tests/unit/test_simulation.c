@@ -14,6 +14,7 @@
 #include "unity.h"
 #include "model.h"
 #include "simulation.h"
+#include "integrator.h"
 
 /***************************************************
  * Test model: dx/dt = -x, y = 2*x, z = x + 1
@@ -39,6 +40,8 @@ static int nanDerivativeAtCall;  /* the state equation returns NaN at this call 
 static bool nanOutput;
 static bool nanLocal;
 static bool forgetTime;          /* the integrator does not advance the time */
+static double stepFraction;      /* the integrator reports a step of stepFraction * hMax (1: correct) */
+static simStatus stepResult;     /* status the integrator returns after advancing the state */
 
 static void stateEquation(modelInstance* m)
 {
@@ -58,20 +61,45 @@ static void outputEquation(modelInstance* m)
 }
 
 /* Explicit Euler that records its calls */
-static void integrator(modelInstance* m, double stepSize)
+static simStatus recordingStep(modelInstance* m, double hMax, double* hTaken)
 {
     if (integratorCalls < MAX_RECORDS) {
         integratorTimes[integratorCalls] = m->time;
-        integratorSteps[integratorCalls] = stepSize;
+        integratorSteps[integratorCalls] = hMax;
     }
     integratorCalls++;
 
     double t0 = m->time;
-    m->states[0] += stepSize * m->stateDerivatives[0];
+    m->states[0] += hMax * m->stateDerivatives[0];
     if (!forgetTime) {
-        m->time = t0 + stepSize;
+        m->time = t0 + hMax;
     }
+    *hTaken = stepFraction * hMax;
+    return stepResult;
 }
+
+static const integratorDef RECORDING_EULER = {
+    .name  = "recording Euler",
+    .step  = recordingStep,
+    .order = 1,
+};
+
+/* Explicit Euler that uses all of its work memory: 3 vectors of length nx */
+static simStatus scratchStep(modelInstance* m, double hMax, double* hTaken)
+{
+    size_t nx = m->def->numberOfStates;
+    for (size_t i = 0; i < 3 * nx; i++) {
+        m->scratch[i] = (double)i;
+    }
+    return EULER_FORWARD.step(m, hMax, hTaken);
+}
+
+static const integratorDef SCRATCH_3 = {
+    .name           = "Euler with work memory",
+    .step           = scratchStep,
+    .scratchVectors = 3,
+    .order          = 1,
+};
 
 static const modelVariable VARIABLES[] = {
     { OUTPUT(y), .dependsOn = "" },
@@ -90,7 +118,7 @@ static const modelDefinition DEFINITION = {
 
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &RECORDING_EULER,
     .maxStepSize         = 0.1,
 };
 
@@ -111,6 +139,8 @@ void setUp(void)
     outputTime = NAN;
     nanDerivativeAtCall = -1;
     nanOutput = nanLocal = forgetTime = false;
+    stepFraction = 1.0;
+    stepResult = SIM_OK;
 
     model = newModel(&DEFINITION);
     before = malloc(modelDataSize(&DEFINITION));
@@ -314,6 +344,62 @@ void test_brokenIntegratorContract_isAnError_withoutRollback(void)
 }
 
 /***************************************************
+ * The integrator descriptor
+ ***************************************************/
+
+void test_modelWithoutIntegrator_isRefused(void)
+{
+    saveModelData(model, before);
+    model->integrator = NULL;
+
+    TEST_ASSERT_EQUAL_INT(SIM_ERROR, simulateTo(model, 0.1));
+    TEST_ASSERT_NOT_NULL(strstr(model->message, "has no integrator"));
+    TEST_ASSERT_TRUE(modelDataUnchanged());
+}
+
+/* A fixed-step method must take the whole step it is given */
+void test_stepOfAnotherLength_isAnError(void)
+{
+    stepFraction = 0.5;
+
+    TEST_ASSERT_EQUAL_INT(SIM_ERROR, simulateTo(model, 0.1));
+    TEST_ASSERT_NOT_NULL(strstr(model->message, "The integrator 'recording Euler' took a step of 0.05 instead of 0.1"));
+}
+
+void test_stepThatDiscards_restoresAllModelData(void)
+{
+    saveModelData(model, before);
+    stepResult = SIM_DISCARD;
+
+    TEST_ASSERT_EQUAL_INT(SIM_DISCARD, simulateTo(model, 0.3));
+    TEST_ASSERT_EQUAL_INT(1, integratorCalls);  /* stops at the first failed step */
+    TEST_ASSERT_TRUE(modelDataUnchanged());
+    /* the integrator gave no reason, so simulateTo() names it */
+    TEST_ASSERT_EQUAL_STRING("The integrator 'recording Euler' could not take the step from t = 0.", model->message);
+}
+
+void test_stepThatFails_isAnError_withoutRollback(void)
+{
+    stepResult = SIM_ERROR;
+
+    TEST_ASSERT_EQUAL_INT(SIM_ERROR, simulateTo(model, 0.1));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-15, 0.9, model->states[0]);  /* kept for diagnosis */
+}
+
+void test_workMemory_isSizedForTheIntegrator(void)
+{
+    static modelDefinition withScratch;  /* static: the model keeps a pointer to it until tearDown() */
+    withScratch = DEFINITION;
+    withScratch.integrator = &SCRATCH_3;
+    freeModel(model);
+    model = newModel(&withScratch);
+
+    TEST_ASSERT_NOT_NULL(model->scratch);
+    /* the step writes all 3 * nx doubles: AddressSanitizer checks the size */
+    TEST_ASSERT_EQUAL_INT(SIM_OK, simulateTo(model, 0.1));
+}
+
+/***************************************************
  * Model-layer helpers
  ***************************************************/
 
@@ -359,6 +445,11 @@ int main(void)
     RUN_TEST(test_nonFiniteLocal_isDiscarded);
     RUN_TEST(test_successAfterAFailure_clearsTheMessage);
     RUN_TEST(test_brokenIntegratorContract_isAnError_withoutRollback);
+    RUN_TEST(test_modelWithoutIntegrator_isRefused);
+    RUN_TEST(test_stepOfAnotherLength_isAnError);
+    RUN_TEST(test_stepThatDiscards_restoresAllModelData);
+    RUN_TEST(test_stepThatFails_isAnError_withoutRollback);
+    RUN_TEST(test_workMemory_isSizedForTheIntegrator);
     RUN_TEST(test_modelDiscard_setsTheMessage);
     RUN_TEST(test_modelStateName_namesTheState);
     RUN_TEST(test_firstNonFinite_findsNothingInAFiniteModel);

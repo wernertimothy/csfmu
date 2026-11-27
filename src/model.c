@@ -50,8 +50,10 @@ modelInstance* newModel(const modelDefinition* def)
 
     model->def = def;
 
-    /* Allocate and zero-initialize all storage blocks */
+    /* Allocate and zero-initialize all storage blocks; the work memory is
+       what the definition's integrator needs */
     size_t sizeOfStates = def->numberOfStates * sizeof(double);
+    size_t scratchVectors = def->integrator ? def->integrator->scratchVectors : 0;
     if (!allocateBlock(&model->params, def->sizeOfParams) ||
         !allocateBlock(&model->inputs, def->sizeOfInputs) ||
         !allocateBlock(&model->outputs, def->sizeOfOutputs) ||
@@ -60,7 +62,7 @@ modelInstance* newModel(const modelDefinition* def)
         !allocateBlock((void**)&model->states, sizeOfStates) ||
         !allocateBlock((void**)&model->stateDerivatives, sizeOfStates) ||
         !allocateBlock((void**)&model->initialGuess, sizeOfStates) ||
-        !allocateBlock((void**)&model->scratch, MODEL_SCRATCH_VECTORS * sizeOfStates) ||
+        !allocateBlock((void**)&model->scratch, scratchVectors * sizeOfStates) ||
         !allocateBlock(&model->stepStart, modelDataSize(def))) {
         freeModel(model);
         return NULL;
@@ -145,7 +147,7 @@ void resetModel(modelInstance* model)
 
     /* Bind function pointers */
     model->getStateDerivatives = def->getStateDerivatives;
-    model->integrate = def->integrate;
+    model->integrator = def->integrator;
     model->getOutputs = def->getOutputs;
 
     /* No error so far */

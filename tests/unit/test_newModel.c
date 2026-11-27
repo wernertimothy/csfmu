@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "model.h"
+#include "integrator.h"
 
 /* A test model that uses every variable type and every role */
 typedef struct { double gain; int mode; bool enabled; double internal; } Params;
@@ -11,7 +12,6 @@ typedef struct { double cache; int counter; } Internals;
 
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
-static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
 
 /* Deliberately not grouped by role: the order of the table is free */
 static const modelVariable VARIABLES[] = {
@@ -41,7 +41,7 @@ static const modelDefinition DEFINITION = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &EULER_FORWARD,
     .defaultExperiment   = { .tolerance = 1e-4 },
 };
 
@@ -73,7 +73,9 @@ void test_newModel_allocatesMemory(void) {
     TEST_ASSERT_NOT_NULL(model->internals);
     TEST_ASSERT_NOT_NULL(model->states);
     TEST_ASSERT_NOT_NULL(model->stateDerivatives);
-    TEST_ASSERT_NOT_NULL(model->scratch);
+    /* the work memory is what the integrator needs: EULER_FORWARD needs none
+       (RUNGE_KUTTA_4 gets its 5 vectors, see test_rungeKutta4.c) */
+    TEST_ASSERT_NULL(model->scratch);
 }
 
 void test_newModel_returnsNullWithoutDefinition(void) {
@@ -87,7 +89,7 @@ void test_newModel_keepsDefinition(void) {
 void test_newModel_bindsFunctionPointers(void) {
     TEST_ASSERT_TRUE(model->getStateDerivatives == stateEquation);
     TEST_ASSERT_TRUE(model->getOutputs == outputEquation);
-    TEST_ASSERT_TRUE(model->integrate == integrator);
+    TEST_ASSERT_TRUE(model->integrator == &EULER_FORWARD);
 }
 
 void test_newModel_appliesStartValuesOfAllTypes(void) {
@@ -177,7 +179,7 @@ void test_resetModel_restoresStartValues(void) {
     locals->saturated = true;
     internals->cache = 99.0;
     internals->counter = 99;
-    model->integrate = NULL;
+    model->integrator = NULL;
 
     /* act */
     resetModel(model);
@@ -198,7 +200,7 @@ void test_resetModel_restoresStartValues(void) {
     TEST_ASSERT_FALSE(locals->saturated);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->cache);
     TEST_ASSERT_EQUAL_INT(0, internals->counter);
-    TEST_ASSERT_TRUE(model->integrate == integrator);
+    TEST_ASSERT_TRUE(model->integrator == &EULER_FORWARD);
 }
 
 void test_resetModel_handlesNull(void) {

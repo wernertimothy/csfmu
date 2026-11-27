@@ -61,7 +61,7 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = typedDemoOutputs,
 
     /* method for numerical integration */
-    .integrate   = eulerForward,
+    .integrator  = &EULER_FORWARD,
     .maxStepSize = 1e-3,
 
     /* suggested simulation settings */

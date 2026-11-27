@@ -32,10 +32,18 @@ static char seenPath[512];
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
 
-static void integrator(modelInstance* m, double stepSize)
+static simStatus integratorStep(modelInstance* m, double stepSize, double* stepTaken)
 {
     m->time += stepSize;
+    *stepTaken = stepSize;
+    return SIM_OK;
 }
+
+static const integratorDef TEST_INTEGRATOR = {
+    .name  = "clock only",
+    .step  = integratorStep,
+    .order = 1,
+};
 
 static simStatus initialize(modelInstance* m)
 {
@@ -58,7 +66,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &TEST_INTEGRATOR,
     .maxStepSize         = 0.1,
     .initialize          = initialize,
 };

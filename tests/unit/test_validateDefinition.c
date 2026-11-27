@@ -17,6 +17,7 @@
 
 #include <math.h>
 #include "unity.h"
+#include "integrator.h"
 
 #define IDENTIFIER "validation_model"
 
@@ -28,7 +29,6 @@ typedef struct { double x1; double x2; } States;
 
 static void stateEquation(modelInstance* m) { (void)m; }
 static void outputEquation(modelInstance* m) { (void)m; }
-static void integrator(modelInstance* m, double stepSize) { (void)m; (void)stepSize; }
 static void calculateParameters(modelInstance* m) { (void)m; }
 static simStatus initialize(modelInstance* m) { (void)m; return SIM_OK; }
 
@@ -78,7 +78,7 @@ const modelDefinition MODEL_DEFINITION = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrate           = integrator,
+    .integrator          = &EULER_FORWARD,
     .maxStepSize         = 1e-3,
     .calculateParameters = calculateParameters,
     .initialize          = initialize,
@@ -154,7 +154,13 @@ void test_rejectsMissingEquations(void)
     def.getOutputs = NULL;
     TEST_ASSERT_EQUAL_INT(1, problems());
     setUp();
-    def.integrate = NULL;
+    def.integrator = NULL;
+    TEST_ASSERT_EQUAL_INT(1, problems());
+
+    /* an integrator descriptor without a step function */
+    static const integratorDef NO_STEP = { .name = "no step", .scratchVectors = 0, .order = 1 };
+    setUp();
+    def.integrator = &NO_STEP;
     TEST_ASSERT_EQUAL_INT(1, problems());
 }
 

@@ -60,7 +60,7 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = massSpringDamperOutputs,
 
     /* method for numerical integration */
-    .integrate   = rungeKutta4,
+    .integrator  = &RUNGE_KUTTA_4,
     .maxStepSize = 1e-3,
 
     /* suggested simulation settings */
