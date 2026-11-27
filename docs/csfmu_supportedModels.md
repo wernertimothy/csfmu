@@ -37,7 +37,7 @@ How to write the two equations is explained in [getting started](csfmu_gettingSt
 
 ## Integration
 
-- The models are integrated with fixed-step explicit methods: `EULER_FORWARD` and `RUNGE_KUTTA_4`, selected with `.integrator` in the model definition (see `include/integrator.h`). They suit non-stiff systems. A model can also bring its own method (see [getting started](csfmu_gettingStarted.md#how-to-add-your-own-integrator)).
+- The models are integrated with fixed-step explicit methods: `FORWARD_EULER` and `RUNGE_KUTTA_4`, selected with `.integrator` in the model definition (see `include/integrator.h`). They suit non-stiff systems. A model can also bring its own method, for example a Runge-Kutta method given by its Butcher tableau (see [getting started](csfmu_gettingStarted.md#how-to-add-your-own-integrator)).
 - Every communication step is split into equal sub-steps that are not larger than the model's `maxStepSize`. You choose `maxStepSize` small enough for your model to integrate stably, and the integration tool can use any communication step size.
 - Results depend slightly on the communication step size, because each communication step is divided into its own sub-steps. If every communication step is an integer multiple of `maxStepSize`, the sub-step grid is the same however the master groups its steps (up to rounding).
 

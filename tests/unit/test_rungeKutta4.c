@@ -235,9 +235,10 @@ void test_rungeKutta4_orderOfAccuracyForTimeVaryingModel(void) {
 void test_rungeKutta4_descriptor(void) {
     TEST_ASSERT_EQUAL_STRING("Runge-Kutta 4", RUNGE_KUTTA_4.name);
     TEST_ASSERT_EQUAL_INT(4, RUNGE_KUTTA_4.order);
-    TEST_ASSERT_EQUAL_size_t(5, RUNGE_KUTTA_4.scratchVectors);
+    TEST_ASSERT_EQUAL_size_t(4, RUNGE_KUTTA_4.scratchVectors);
 
-    /* k1 ... k4 and the states at the start: allocated by newModel() */
+    /* the states at the start and k1 ... k3 (k4 stays in stateDerivatives):
+       allocated by newModel() */
     model = newModel(&TWO_STATES);
     TEST_ASSERT_NOT_NULL(model->scratch);
     TEST_ASSERT_TRUE(model->integrator == &RUNGE_KUTTA_4);

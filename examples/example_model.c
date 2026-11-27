@@ -13,7 +13,7 @@
  * dx = -1/tau*x + k/tau*u
  * y  = x
  * 
- * the integrator is an explicit euler forward. simulateTo() advances the
+ * the integrator is forward Euler (explicit). simulateTo() advances the
  * model the same way the FMU does in fmi2DoStep: in integration steps of at
  * most maxStepSize, with the outputs computed at the end
  */

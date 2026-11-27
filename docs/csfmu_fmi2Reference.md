@@ -303,7 +303,7 @@ Informs the FMU about the simulation time window and numerical tolerances before
 |------|------|-------------|
 | `c` | `fmi2Component` | The FMU instance |
 | `toleranceDefined` | `fmi2Boolean` | Whether `tolerance` parameter is meaningful |
-| `tolerance` | `fmi2Real` | Relative tolerance for numerical integration, stored as `model->relTol`. Used by adaptive integrators; the fixed-step integrators (`EULER_FORWARD`, `RUNGE_KUTTA_4`) ignore it |
+| `tolerance` | `fmi2Real` | Relative tolerance for numerical integration, stored as `model->relTol`. Used by adaptive integrators; the fixed-step integrators (`FORWARD_EULER`, `RUNGE_KUTTA_4`) ignore it |
 | `startTime` | `fmi2Real` | Start time of the experiment in seconds |
 | `stopTimeDefined` | `fmi2Boolean` | Whether `stopTime` parameter is meaningful |
 | `stopTime` | `fmi2Real` | Stop time of the experiment in seconds |
@@ -1075,7 +1075,7 @@ The step is computed by `simulateTo()` (`include/simulation.h`), the FMI-indepen
    - Compute outputs from final state, so they are evaluated exactly at the communication point
    - If a Real output or a Real local variable is NaN or infinite, the step has failed as well: the model data are restored from the buffer, the function returns `fmi2Discard` and the FMU enters **Step Failed**
 
-**Why sub-stepping?** Explicit integrators like Euler Forward have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
+**Why sub-stepping?** Explicit integrators like forward Euler have stability limits. For typical first-order systems, `maxStepSize = 1e-3` ensures stable integration even when the integration tool requests larger communication steps (e.g., 0.1 s).
 
 **Why equal sub-steps?** A full-steps-plus-remainder scheme needs a threshold below which the remainder is dropped, and the remainder step can be arbitrarily small. Equal steps need neither.
 

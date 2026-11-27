@@ -12,7 +12,7 @@
  * dx = -1/tau*x + k/tau*u
  * y  = x
  * 
- * the integrator is an explicit euler forward
+ * the integrator is forward Euler (explicit)
  */
 
  void myLogger(fmi2ComponentEnvironment componentEnvironment,

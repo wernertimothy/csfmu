@@ -41,7 +41,7 @@ static const modelDefinition DEFINITION = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrator          = &EULER_FORWARD,
+    .integrator          = &FORWARD_EULER,
     .defaultExperiment   = { .tolerance = 1e-4 },
 };
 
@@ -73,8 +73,8 @@ void test_newModel_allocatesMemory(void) {
     TEST_ASSERT_NOT_NULL(model->internals);
     TEST_ASSERT_NOT_NULL(model->states);
     TEST_ASSERT_NOT_NULL(model->stateDerivatives);
-    /* the work memory is what the integrator needs: EULER_FORWARD needs none
-       (RUNGE_KUTTA_4 gets its 5 vectors, see test_rungeKutta4.c) */
+    /* the work memory is what the integrator needs: FORWARD_EULER needs none
+       (RUNGE_KUTTA_4 gets its 4 vectors, see test_rungeKutta4.c) */
     TEST_ASSERT_NULL(model->scratch);
 }
 
@@ -89,7 +89,7 @@ void test_newModel_keepsDefinition(void) {
 void test_newModel_bindsFunctionPointers(void) {
     TEST_ASSERT_TRUE(model->getStateDerivatives == stateEquation);
     TEST_ASSERT_TRUE(model->getOutputs == outputEquation);
-    TEST_ASSERT_TRUE(model->integrator == &EULER_FORWARD);
+    TEST_ASSERT_TRUE(model->integrator == &FORWARD_EULER);
 }
 
 void test_newModel_appliesStartValuesOfAllTypes(void) {
@@ -200,7 +200,7 @@ void test_resetModel_restoresStartValues(void) {
     TEST_ASSERT_FALSE(locals->saturated);
     TEST_ASSERT_EQUAL_DOUBLE(0.0, internals->cache);
     TEST_ASSERT_EQUAL_INT(0, internals->counter);
-    TEST_ASSERT_TRUE(model->integrator == &EULER_FORWARD);
+    TEST_ASSERT_TRUE(model->integrator == &FORWARD_EULER);
 }
 
 void test_resetModel_handlesNull(void) {

@@ -546,7 +546,7 @@ const modelDefinition MODEL_DEFINITION = {
     .getOutputs          = lorenzAttractorOutputs,
 
     /* method for numerical integration */
-    .integrator  = &EULER_FORWARD,
+    .integrator  = &FORWARD_EULER,
     .maxStepSize = 1e-4,
 
     /* suggested simulation settings */
@@ -564,7 +564,7 @@ const modelDefinition MODEL_DEFINITION = {
 | `sizeOfParams`, `sizeOfInputs`, `sizeOfOutputs`, `sizeOfLocals`, `sizeOfInternals` | `sizeof` of the respective struct. Leave out what your model does not have |
 | `numberOfStates` | Number of states, `NUMBER_OF_DOUBLES(States)` |
 | `getStateDerivatives`, `getOutputs` | Your two equations |
-| `integrator` | Numerical integration method: `&EULER_FORWARD` or `&RUNGE_KUTTA_4` (see `include/integrator.h`), or one of your own (see [How to add your own Integrator](#how-to-add-your-own-integrator)) |
+| `integrator` | Numerical integration method: `&FORWARD_EULER` or `&RUNGE_KUTTA_4` (see `include/integrator.h`), or one of your own (see [How to add your own Integrator](#how-to-add-your-own-integrator)) |
 | `maxStepSize` | Maximum internal step size for stability |
 | `calculateParameters`, `initialize` | Optional: computes the calculated parameters, and prepares the simulation (see [Initialization](#initialization)). `calculateParameters` is required if the model has calculated parameters |
 | `defaultExperiment` | Optional suggested simulation settings. Only the settings you give are published: the time window if `.stopTime` is greater than `.startTime`, `.tolerance` and `.stepSize` if they are greater than 0. Its `.tolerance` is also the relative tolerance the FMU uses when the integration tool defines none or an invalid one (`1e-6` if not set) |
@@ -744,66 +744,61 @@ Before building your FMU, verify:
 
 ## How to add your own Integrator
 
-An integration method is described by an `integratorDef` (`include/model.h`): a name, a step function, the work memory it needs and its order. `EULER_FORWARD` and `RUNGE_KUTTA_4` in `src/integrator.c` are built that way, and your model can bring its own descriptor in the same form.
+An integration method is described by an `integratorDef` (`include/model.h`): a name, a step function, the work memory it needs and its order. Most methods are **Runge-Kutta methods**, and for those you only write down their coefficients, the Butcher tableau: `FORWARD_EULER` and `RUNGE_KUTTA_4` in `src/integrator.c` are built that way. Any other method gets a step function of its own (see [Any other method](#any-other-method)).
 
-The step function takes one step from the current time:
-```c
-simStatus step(modelInstance* model, double hMax, double* hTaken);
+### A Runge-Kutta method by its Butcher tableau
+
+An s-stage Runge-Kutta method evaluates the state derivatives s times per step, each time at its own point:
+
+```
+k_i      = f(t + c_i*h, x + h * (a_i1*k_1 + ... + a_is*k_s))     i = 1 ... s
+x(t + h) = x(t) + h * (b_1*k_1 + ... + b_s*k_s)
 ```
 
-The contract is (see `include/integrator.h`):
-* On entry **model->time** is the time **t** at the start of the step, and **model->stateDerivatives** holds the derivatives at **t** and the current state: the simulation has evaluated them right before the call
-* The function updates **model->states** in-place with the result of the step and writes the length of the step to **\*hTaken**. A fixed-step method takes the whole step: `*hTaken = hMax`
-* If your method needs further derivative evaluations (like multi-stage methods), set **model->states** and **model->time** to the values of that stage and call **evaluateDerivatives(model)** (`include/evaluate.h`), never the state equation directly. If it does not return `SIM_OK`, return that status at once. Setting the stage time matters: otherwise a model that depends on time loses the order of your method
-* On return **model->time** must be **t + \*hTaken**. The simulation checks this after every step: an integrator that takes another step or leaves another time (beyond rounding) makes the step fail with an error
-* Return `SIM_OK`. The content of **model->stateDerivatives** after the step does not matter: the derivatives are evaluated again at the start of the next step
-* For intermediate results use **model->scratch**. It holds as many vectors of length nx as your descriptor asks for (`scratchVectors`), allocated once per instance. Do not use variable-length arrays (`double k1[nx]`): MSVC does not support them
+The coefficients are written as a table, the **Butcher tableau**. These are the explicit midpoint method (order 2) and the classic Runge-Kutta method (`RUNGE_KUTTA_4`):
 
-Here is the **explicit midpoint method** (2nd-order Runge-Kutta). Put it into your model's `variables.c`, above the `MODEL_DEFINITION` (the build compiles a model's `variables.c` and its equations file):
+```
+  midpoint           Runge-Kutta 4
+
+  0   |                0   |
+  1/2 | 1/2            1/2 | 1/2
+  ----+---------       1/2 | 0    1/2
+      | 0    1         1   | 0    0    1
+                       ----+-------------------
+                           | 1/6  1/3  1/3  1/6
+```
+
+The left column holds the nodes `c`, the bottom row the weights `b`, and the block in between the coefficients `a`; empty cells are 0. The FMU integrates with **explicit** methods: every stage only uses the stages before it, so the coefficients on and above the diagonal are 0, and the first stage is `f(t, x)`, so `c_1 = 0`. Textbooks list many such tableaus; you can copy them as they are.
+
+Here is the explicit midpoint method. Put it into your model's `variables.c`, above the `MODEL_DEFINITION` (it includes `integrator.h` already):
 
 ```c
-#include <string.h>
-#include "evaluate.h"
+/* the coefficients a, row by row: all s*s of them, zeros included */
+static const double MIDPOINT_A[] = {
+    0.0, 0.0,
+    0.5, 0.0,
+};
+static const double MIDPOINT_B[] = { 0.0, 1.0 };  /* weights */
+static const double MIDPOINT_C[] = { 0.0, 0.5 };  /* nodes */
 
+static const butcherTableau MIDPOINT_TABLEAU = {
+    .stages = 2,
+    .a      = MIDPOINT_A,
+    .b      = MIDPOINT_B,
+    .c      = MIDPOINT_C,
+};
+
+/* one step with this tableau: explicitRungeKuttaStep() does the work */
 static simStatus midpointStep(modelInstance* model, double hMax, double* hTaken)
 {
-    double t0 = model->time;
-    size_t nx = model->def->numberOfStates;
     *hTaken = hMax;  /* a fixed-step method takes the whole step */
-    if (nx == 0) {
-        model->time = t0 + hMax;
-        return SIM_OK;
-    }
-
-    double* k1 = model->scratch;  /* 2 vectors: see scratchVectors below */
-    double* stateBackup = k1 + nx;
-
-    /* k1 = f(t, x), evaluated before the call */
-    memcpy(k1, model->stateDerivatives, nx * sizeof(double));
-    memcpy(stateBackup, model->states, nx * sizeof(double));
-
-    /* evaluate at the midpoint: f(t + h/2, x + h/2 * k1) */
-    model->time = t0 + 0.5 * hMax;
-    for (size_t i = 0; i < nx; i++) {
-        model->states[i] = stateBackup[i] + 0.5 * hMax * k1[i];
-    }
-    simStatus status = evaluateDerivatives(model);
-    if (status != SIM_OK) {
-        return status;
-    }
-
-    /* x(t + h) = x(t) + h * f(midpoint) */
-    for (size_t i = 0; i < nx; i++) {
-        model->states[i] = stateBackup[i] + hMax * model->stateDerivatives[i];
-    }
-    model->time = t0 + hMax;
-    return SIM_OK;
+    return explicitRungeKuttaStep(model, &MIDPOINT_TABLEAU, hMax);
 }
 
 static const integratorDef MIDPOINT = {
     .name           = "explicit midpoint",
     .step           = midpointStep,
-    .scratchVectors = 2,
+    .scratchVectors = EXPLICIT_RUNGE_KUTTA_SCRATCH_VECTORS(2),  /* work memory for 2 stages */
     .order          = 2,
 };
 ```
@@ -814,6 +809,28 @@ Then select it in the same file's model definition:
     .integrator  = &MIDPOINT,
 ```
 
-`src/integrator.c` holds the built-in methods as reference implementations. A method that every model should be able to use belongs there, with an `extern` declaration in `include/integrator.h`.
+Things to know:
+
+1. **The engine evaluates every stage at its own time** `t + c_i*h`, so a model that depends on time keeps the order of your method.
+2. **The work memory follows from the number of stages.** `EXPLICIT_RUNGE_KUTTA_SCRATCH_VECTORS(s)` gives what `explicitRungeKuttaStep()` needs for s stages; pass the same s as in `.stages`.
+3. **A tableau that does not fit is refused.** If it is not explicit, is incomplete or needs more work memory than the descriptor asks for, the first simulation step fails with an error that says why.
+4. **Check the coefficients.** A wrong digit in a tableau still gives a method, only of a lower order. Compare the convergence of your model against a known solution, as `tests/models/forced_pt1/test_time.py` does for `RUNGE_KUTTA_4`.
+
+### Any other method
+
+A method that is not a Runge-Kutta method gets a step function of its own, which takes one step from the current time:
+```c
+simStatus step(modelInstance* model, double hMax, double* hTaken);
+```
+
+The contract is (see `include/integrator.h`):
+* On entry **model->time** is the time **t** at the start of the step, and **model->stateDerivatives** holds the derivatives at **t** and the current state: the simulation has evaluated them right before the call
+* The function updates **model->states** in-place with the result of the step and writes the length of the step to **\*hTaken**. A fixed-step method takes the whole step: `*hTaken = hMax`
+* If your method needs further derivative evaluations, set **model->states** and **model->time** to the values of that stage and call **evaluateDerivatives(model)** (`include/evaluate.h`), never the state equation directly. If it does not return `SIM_OK`, return that status at once. Setting the stage time matters: otherwise a model that depends on time loses the order of your method
+* On return **model->time** must be **t + \*hTaken**. The simulation checks this after every step: an integrator that takes another step or leaves another time (beyond rounding) makes the step fail with an error
+* Return `SIM_OK`. The content of **model->stateDerivatives** after the step does not matter: the derivatives are evaluated again at the start of the next step
+* For intermediate results use **model->scratch**. It holds as many vectors of length nx as your descriptor asks for (`scratchVectors`), allocated once per instance. Do not use variable-length arrays (`double k1[nx]`): MSVC does not support them
+
+`explicitRungeKuttaStep()` in `src/integrator.c` follows this contract and is the reference implementation. A method that every model should be able to use belongs there too, with an `extern` declaration in `include/integrator.h`.
 
 To see how your integrator changes a trajectory, record the model with `csfmu simulate` before and after you switch it, and compare the two files (see [simulation](csfmu_simulation.md#comparing-two-builds)).

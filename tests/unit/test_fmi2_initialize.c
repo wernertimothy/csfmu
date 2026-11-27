@@ -110,7 +110,7 @@ const modelDefinition MODEL_DEFINITION = {
 
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrator          = &EULER_FORWARD,
+    .integrator          = &FORWARD_EULER,
     .maxStepSize         = STEP_SIZE,  /* every step is a single sub-step */
 
     .calculateParameters = calculateParameters,

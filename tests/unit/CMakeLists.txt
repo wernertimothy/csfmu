@@ -25,8 +25,9 @@ csfmu_unit_test(test_initialize)  # initializeModel / computeCalculatedParameter
 csfmu_unit_test(test_enumeration)  # modelEnumerationHasValue / enumeration variables
 csfmu_unit_test(test_string)  # string parameters / modelSetString
 csfmu_unit_test(test_resources)  # modelSetResourcePath / modelOpenFile
-csfmu_unit_test(test_eulerForward)
+csfmu_unit_test(test_forwardEuler)
 csfmu_unit_test(test_rungeKutta4)
+csfmu_unit_test(test_rungeKutta)  # explicitRungeKuttaStep / Butcher tableaus / order conditions
 csfmu_unit_test(test_simulation)  # simulateTo / modelDiscard / model-layer result checks
 
 # Integrator time contract, checked by fmi2DoStep. The FMI wrapper is linked

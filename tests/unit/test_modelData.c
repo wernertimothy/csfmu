@@ -41,7 +41,7 @@ static const modelDefinition DEFINITION = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrator          = &EULER_FORWARD,
+    .integrator          = &FORWARD_EULER,
 };
 
 /* A model without parameters, inputs, outputs, locals and internals */

@@ -58,7 +58,7 @@ static const modelDefinition DEFINITION = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrator          = &EULER_FORWARD,
+    .integrator          = &FORWARD_EULER,
     .calculateParameters = calculateParameters,
     .initialize          = initialize,
 };
@@ -73,7 +73,7 @@ static const modelDefinition WITHOUT_HOOKS = {
     .numberOfStates      = NUMBER_OF_DOUBLES(States),
     .getStateDerivatives = stateEquation,
     .getOutputs          = outputEquation,
-    .integrator          = &EULER_FORWARD,
+    .integrator          = &FORWARD_EULER,
 };
 
 static modelInstance* model;

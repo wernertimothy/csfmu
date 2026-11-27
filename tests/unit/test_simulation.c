@@ -91,7 +91,7 @@ static simStatus scratchStep(modelInstance* m, double hMax, double* hTaken)
     for (size_t i = 0; i < 3 * nx; i++) {
         m->scratch[i] = (double)i;
     }
-    return EULER_FORWARD.step(m, hMax, hTaken);
+    return FORWARD_EULER.step(m, hMax, hTaken);
 }
 
 static const integratorDef SCRATCH_3 = {
