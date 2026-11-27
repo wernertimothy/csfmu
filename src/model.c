@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -275,19 +276,79 @@ simStatus initializeModel(modelInstance* model)
 }
 
 /**
- * Implementation notes for modelError():
- * - vsnprintf() truncates a message that does not fit and always
- *   terminates it
+ * Formats a message into model->message, shared by modelError() and
+ * modelDiscard(). vsnprintf() truncates a message that does not fit and
+ * always terminates it.
  */
-simStatus modelError(modelInstance* model, const char* format, ...)
+static void formatMessage(modelInstance* model, const char* format, va_list args)
 {
     if (model && format) {
-        va_list args;
-        va_start(args, format);
         vsnprintf(model->message, sizeof(model->message), format, args);
-        va_end(args);
     }
+}
+
+simStatus modelError(modelInstance* model, const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    formatMessage(model, format, args);
+    va_end(args);
     return SIM_ERROR;
+}
+
+simStatus modelDiscard(modelInstance* model, const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    formatMessage(model, format, args);
+    va_end(args);
+    return SIM_DISCARD;
+}
+
+/**
+ * Implementation notes for modelStateName():
+ * - A state is identified by its offset in the state vector, which the
+ *   STATE() macros fill in from the struct field
+ */
+const char* modelStateName(const modelDefinition* def, size_t index)
+{
+    if (def) {
+        for (size_t k = 0; k < def->numberOfVariables; k++) {
+            const modelVariable* variable = &def->variables[k];
+            if (variable->role == VAR_STATE && variable->offset == index * sizeof(double)) {
+                return variable->name;
+            }
+        }
+    }
+    return "?";
+}
+
+size_t modelFirstNonFiniteState(const modelInstance* model)
+{
+    size_t k = 0;
+    while (k < model->def->numberOfStates && isfinite(model->states[k])) {
+        k++;
+    }
+    return k;
+}
+
+size_t modelFirstNonFiniteResult(modelInstance* model)
+{
+    const modelDefinition* def = model->def;
+
+    for (size_t k = 0; k < def->numberOfVariables; k++) {
+        const modelVariable* variable = &def->variables[k];
+        if ((variable->role == VAR_OUTPUT || variable->role == VAR_LOCAL) && variable->type == VAR_REAL &&
+            !isfinite(*(const double*)modelVariableAddress(model, k))) {
+            return k;
+        }
+    }
+    return def->numberOfVariables;
+}
+
+const char* modelResultKind(const modelVariable* variable)
+{
+    return (variable->role == VAR_LOCAL) ? "Local variable" : "Output";
 }
 
 /**

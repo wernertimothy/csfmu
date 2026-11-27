@@ -19,6 +19,7 @@ from fmpy.fmi2 import (
     fmi2LastSuccessfulTime,
     fmi2OK,
     fmi2Terminated,
+    fmi2Warning,
 )
 
 from tests.fmu_helpers import advance, initialize
@@ -174,3 +175,34 @@ def test_snapshot_taken_after_a_discard_keeps_the_failed_state(new_fmu, vr) -> N
 
     fmu.freeFMUstate(before)
     fmu.freeFMUstate(failed)
+
+
+def test_discard_after_a_clock_difference_rolls_back_to_the_masters_clock(
+    new_fmu, vr
+) -> None:
+    """The master defines the communication points (FMI 2.0, section 4.2.2).
+
+    The master's clock is 1e-7 ahead of the FMU's: within the time tolerance
+    (1e-6 at t = 1000), but beyond the warning threshold (1e-9 for a step of
+    1e-3). The FMU continues from the master's clock, so the discarded step
+    rolls back to it, and fmi2LastSuccessfulTime reports it as the end of the
+    last successful step in the master's time.
+    """
+    log = []
+    fmu = new_fmu(log=log)
+    fmu.setBoolean([vr("fail")], [True])
+    fmu.setReal([vr("t_fail")], [1000.0005])
+    initialize(fmu, startTime=1000.0)
+    master_clock = 1000.0 + 1e-7
+
+    with pytest.raises(FMICallException) as failure:
+        fmu.doStep(currentCommunicationPoint=master_clock, communicationStepSize=1e-3)
+    assert failure.value.status == fmi2Discard
+
+    assert fmu.getRealStatus(fmi2LastSuccessfulTime) == master_clock
+    assert fmu.getReal([vr("y")])[0] == 1.0  # rolled back to the start value
+
+    reported = [entry for entry in log if entry[0] in (fmi2Warning, fmi2Discard)]
+    assert [entry[0] for entry in reported] == [fmi2Warning, fmi2Discard], log
+    assert "differs from environment clock" in reported[0][2]
+    assert f"rolled back to {master_clock!r}" in reported[1][2]

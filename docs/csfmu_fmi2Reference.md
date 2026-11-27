@@ -1048,16 +1048,20 @@ The heart of co-simulation - advances the FMU's internal state from time `t` to 
 
 #### Algorithm: Sub-Stepping for Numerical Stability
 
-The communication step is divided into the smallest number of **equal** sub-steps that are not larger than the model's `maxStepSize`:
+The step is computed by `simulateTo()` (`include/simulation.h`), the FMI-independent part of the FMU that a standalone simulation calls directly (see `examples/example_model.c`). It integrates from `currentCommunicationPoint` to `tEnd = currentCommunicationPoint + communicationStepSize`, divided into the smallest number of **equal** sub-steps that are not larger than the model's `maxStepSize`:
 
 1. **Calculate sub-steps**:
    ```c
-   numberOfSteps  = ceil(communicationStepSize / maxStepSize - 1e-9)   // at least 1
-   actualStepSize = communicationStepSize / numberOfSteps
+   tEnd           = currentCommunicationPoint + communicationStepSize
+   numberOfSteps  = ceil((tEnd - currentCommunicationPoint) / maxStepSize - 1e-9)   // at least 1
+   actualStepSize = (tEnd - currentCommunicationPoint) / numberOfSteps
    ```
    The small tolerance keeps rounding in the division from adding a step (`0.3 / 0.1` is `2.9999999999999996` in floating point and must give 3 steps, not 4).
+   The step size comes from the interval the clock advances, which can differ from `communicationStepSize` in the last bits (`0.4 - 0.30000000000000004` is `0.09999999999999998`), so the integrated length equals the advance of the clock exactly.
+   If `tEnd` rounds to `currentCommunicationPoint` (a step far below the resolution of the time), no sub-step is taken and only the outputs are evaluated.
 
 2. **Remember the communication point**:
+   - The internal clock is set to `currentCommunicationPoint` (see [Time Validation](#time-validation))
    - The model data (time, tolerance, variables, states, derivatives, internals, initial guesses) are copied into a buffer that was allocated with the instance (`model->stepStart`), so nothing is allocated during the step
 
 3. **Execute sub-steps**:
@@ -1067,7 +1071,7 @@ The communication step is divided into the smallest number of **equal** sub-step
    - After each sub-step: if a state is NaN or infinite, the integration has failed. The model data are restored from the buffer, so the FMU is back at `currentCommunicationPoint` (not at the last good sub-step). The function returns `fmi2Discard` and the FMU enters **Step Failed**
 
 4. **Update time and outputs** (only if all sub-steps succeeded):
-   - Set the internal clock (`model->time`) to `currentCommunicationPoint + communicationStepSize`
+   - Set the internal clock (`model->time`) to `tEnd` exactly
    - Compute outputs from final state, so they are evaluated exactly at the communication point
    - If a Real output or a Real local variable is NaN or infinite, the step has failed as well: the model data are restored from the buffer, the function returns `fmi2Discard` and the FMU enters **Step Failed**
 
@@ -1077,12 +1081,12 @@ The communication step is divided into the smallest number of **equal** sub-step
 
 #### Discarded Steps
 
-FMI 2.0 (section 4.2.3) lets a slave report with `fmi2Discard` that it could not compute the whole communication step. This FMU does so on numerical failure only, never to stop at an event. Numerical failure means that a state becomes NaN or infinite during a sub-step, or that a Real output or a Real local variable is NaN or infinite at the end of the step. Outputs that are computed between steps (when they are read after a set, or in `fmi2ExitInitializationMode`) are not checked; the next step then discards. The FMU always rolls back to `currentCommunicationPoint`, so the master sees:
+FMI 2.0 (section 4.2.2) lets a slave report with `fmi2Discard` that it could not compute the whole communication step. This FMU does so on numerical failure only, never to stop at an event. Numerical failure means that a state becomes NaN or infinite during a sub-step, or that a Real output or a Real local variable is NaN or infinite at the end of the step. Outputs that are computed between steps (when they are read after a set, or in `fmi2ExitInitializationMode`) are not checked; the next step then discards. The FMU always rolls back to `currentCommunicationPoint`, so the master sees:
 
 | Query | Answer after a discarded step |
 |-------|-------------------------------|
 | `fmi2GetStatus(fmi2DoStepStatus)` | `fmi2Discard` |
-| `fmi2GetRealStatus(fmi2LastSuccessfulTime)` | `currentCommunicationPoint` of the discarded step |
+| `fmi2GetRealStatus(fmi2LastSuccessfulTime)` | `currentCommunicationPoint` of the discarded step, also if it differed from the FMU's clock: the integration tool defines the communication points |
 | `fmi2GetBooleanStatus(fmi2Terminated)` | `fmi2False`: the step may be repeated, the simulation need not end |
 | `fmi2GetReal` etc. | The values at `currentCommunicationPoint` |
 
@@ -1114,7 +1118,7 @@ Before stepping, the function validates:
   | Difference | Result |
   |------------|--------|
   | `d <= max(1e-6 * h, 8 * DBL_EPSILON * max(1, abs(time)))` (rounding, or a negligible fraction of the step) | Accepted silently |
-  | `d <= 1e-9 * max(1, abs(time))` | Accepted with `fmi2Warning` and a log message (category `logStatusWarning`). The step starts at `currentCommunicationPoint`, so the FMU continues from the integration tool's clock |
+  | `d <= 1e-9 * max(1, abs(time))` | Accepted with `fmi2Warning` and a log message (category `logStatusWarning`). The step starts at `currentCommunicationPoint`, so the FMU continues from the integration tool's clock, and a discarded step rolls back to it ("The calling environment defines the communication points", FMI 2.0, section 4.2.2) |
   | larger | `fmi2Error` |
 
   The tolerance is relative, so the check also works at large simulation times.

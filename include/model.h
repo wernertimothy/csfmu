@@ -103,8 +103,8 @@ typedef void (*stateDerivativesFn)(modelInstance* model);
  * Contract: on entry model->time is t and model->stateDerivatives holds
  * f(t, x, u). Before every further derivative evaluation the integrator sets
  * model->time to the time of that stage. On return model->time is t + stepSize.
- * fmi2DoStep checks this after every sub-step (up to rounding) and fails with
- * fmi2Error otherwise.
+ * simulateTo() (simulation.h) checks this after every step (up to rounding)
+ * and fails with SIM_ERROR otherwise.
  *
  * @param model Pointer to the model instance to integrate
  * @param stepSize Time step for integration (dt)
@@ -362,7 +362,9 @@ typedef struct {
  */
 struct modelInstance {
     const modelDefinition* def;              /**< Definition this instance was created from */
-    double time;                             /**< Current time t, owned by the model (advanced by the integrator) */
+    double time;                             /**< Current time t. simulateTo() sets it at the start of every
+                                                  integration step and to the end of the interval; the
+                                                  integrator sets the times of its stages in between */
     double relTol;                           /**< Relative tolerance for adaptive integrators (not used by fixed-step methods) */
     void* params;                            /**< Parameter block [def->sizeOfParams bytes] */
     void* inputs;                            /**< Input block [def->sizeOfInputs bytes] */
@@ -387,7 +389,7 @@ struct modelInstance {
     stateDerivativesFn getStateDerivatives;  /**< Function to compute dx/dt = f(t,x,u) */
     integrateFn integrate;                   /**< Function to perform time integration */
     outputsFn getOutputs;                    /**< Function to compute y = h(t,x,u) */
-    char message[MODEL_MESSAGE_SIZE];        /**< Reason of the last SIM_ERROR (see modelError()), "" if
+    char message[MODEL_MESSAGE_SIZE];        /**< Reason of the last SIM_ERROR or SIM_DISCARD (see modelError(), modelDiscard()), "" if
                                                   none. Cleared by resetModel(), not part of the model data */
     char* resourcePath;                      /**< Absolute path of the folder with the model's data files
                                                   (resources), UTF-8, ending with a '/'; NULL if unknown.
@@ -506,6 +508,62 @@ simStatus initializeModel(modelInstance* model);
  * @return SIM_ERROR
  */
 simStatus modelError(modelInstance* model, const char* format, ...);
+
+/**
+ * @brief Reports a numerical failure that the caller may recover from.
+ *
+ * Like modelError(), but returns SIM_DISCARD: the computation failed for
+ * numerical reasons (e.g. a state became NaN), not because the model or its
+ * setup is invalid. The caller restores the model and may try again, e.g.
+ * with a smaller step.
+ *
+ * @param model  Pointer to the model instance
+ * @param format printf-like format of the message
+ *
+ * @return SIM_DISCARD
+ */
+simStatus modelDiscard(modelInstance* model, const char* format, ...);
+
+/**
+ * @brief Returns the published name of a state, for messages.
+ *
+ * @param def   The model definition
+ * @param index Index of the state in the state vector (0 ... nx - 1)
+ *
+ * @return The name of the state's variable, or "?" if there is none
+ */
+const char* modelStateName(const modelDefinition* def, size_t index);
+
+/**
+ * @brief Finds the first state that is NaN or infinite.
+ *
+ * @param model Pointer to the model instance
+ *
+ * @return Index of that state, or numberOfStates if all states are finite
+ */
+size_t modelFirstNonFiniteState(const modelInstance* model);
+
+/**
+ * @brief Finds the first result of the output equation that is NaN or infinite.
+ *
+ * The results are the Real outputs and the Real local variables, which an
+ * importer can read.
+ *
+ * @param model Pointer to the model instance
+ *
+ * @return Index of that variable in model->def->variables, or
+ *         numberOfVariables if all of them are finite
+ */
+size_t modelFirstNonFiniteResult(modelInstance* model);
+
+/**
+ * @brief Returns what kind of result a variable is, for messages.
+ *
+ * @param variable An output or a local variable
+ *
+ * @return "Local variable" or "Output"
+ */
+const char* modelResultKind(const modelVariable* variable);
 
 /**
  * @brief Checks whether a value is the value of an item of an enumeration.

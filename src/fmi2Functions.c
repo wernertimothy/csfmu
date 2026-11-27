@@ -1,4 +1,3 @@
-#include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -7,6 +6,7 @@
 #include <string.h>
 #include "fmi2Functions.h"
 #include "model.h"
+#include "simulation.h"
 
 /* Relative tolerance for comparing points in time */
 #define TIME_TOLERANCE 1e-9
@@ -14,16 +14,6 @@
 /* A clock difference below this fraction of the communication step size is rounding
    and passes silently; a larger one (still within TIME_TOLERANCE) is reported */
 #define CLOCK_WARNING_FRACTION 1e-6
-
-/* Allowed deviation of model->time from t + h after an integrator step,
-   as a fraction of the step size h */
-#define INTEGRATOR_TIME_FRACTION 1e-6
-
-/* Tolerance on the number of sub-steps (absorbs rounding in stepSize / maxStepSize) */
-#define SUBSTEP_TOLERANCE 1e-9
-
-/* Largest number of sub-steps a single fmi2DoStep may take */
-#define MAX_NUMBER_OF_SUBSTEPS 1e9
 
 /* Buffer size for formatted log messages (a message of the model, which may
    name a file by its full path, plus a prefix) */
@@ -357,68 +347,6 @@ static fmi2Real timeTolerance(fmi2Real time)
 }
 
 /**
- * Rounding allowance for two values of the time t: a few units in the last place
- */
-static fmi2Real roundingTolerance(fmi2Real time)
-{
-    return 8.0 * DBL_EPSILON * fmax(1.0, fabs(time));
-}
-
-/**
- * Published name of the state with the given index (for log messages)
- */
-static const char* stateName(const modelDefinition* def, size_t index)
-{
-    for (size_t k = 0; k < def->numberOfVariables; k++) {
-        const modelVariable* variable = &def->variables[k];
-        if (variable->role == VAR_STATE && variable->offset == index * sizeof(double)) {
-            return variable->name;
-        }
-    }
-    return "?";
-}
-
-/**
- * Index of the first state that is NaN or infinite, or numberOfStates if
- * all states are finite
- */
-static size_t firstNonFiniteState(const modelInstance* model)
-{
-    size_t k = 0;
-    while (k < model->def->numberOfStates && isfinite(model->states[k])) {
-        k++;
-    }
-    return k;
-}
-
-/**
- * Index (in the variable table) of the first Real output or Real local
- * variable that is NaN or infinite, or numberOfVariables if all of them are
- * finite. Both are results of the output equation that the master can read.
- */
-static size_t firstNonFiniteResult(modelInstance* model)
-{
-    const modelDefinition* def = model->def;
-
-    for (size_t k = 0; k < def->numberOfVariables; k++) {
-        const modelVariable* variable = &def->variables[k];
-        if ((variable->role == VAR_OUTPUT || variable->role == VAR_LOCAL) && variable->type == VAR_REAL &&
-            !isfinite(*(const double*)modelVariableAddress(model, k))) {
-            return k;
-        }
-    }
-    return def->numberOfVariables;
-}
-
-/**
- * Kind of a result of the output equation, for log messages
- */
-static const char* resultKind(const modelVariable* variable)
-{
-    return (variable->role == VAR_LOCAL) ? "Local variable" : "Output";
-}
-
-/**
  * Initialize the model for the current values of its variables
  *
  * Runs initializeModel(), which starts from the same initial guesses every
@@ -442,11 +370,11 @@ static fmi2Status initializeForCurrentValues(myFMU2* fmu)
                                                          : "the model's initialize function reported an error.");
     }
 
-    size_t failed = firstNonFiniteState(model);
+    size_t failed = modelFirstNonFiniteState(model);
     if (failed < model->def->numberOfStates) {
         fmu->outputsAreStale = fmi2True;
         return enterErrorState(fmu, "Initialization failed: state '%s' is not finite.",
-                               stateName(model->def, failed));
+                               modelStateName(model->def, failed));
     }
 
     return fmi2OK;
@@ -1014,11 +942,11 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c)
         return fmi2Error;
     }
 
-    size_t failedResult = firstNonFiniteResult(model);
+    size_t failedResult = modelFirstNonFiniteResult(model);
     if (failedResult < model->def->numberOfVariables) {
         const modelVariable* variable = &model->def->variables[failedResult];
         return enterErrorState(myfmu2, "Initialization failed: %s '%s' is not finite.",
-                               resultKind(variable), variable->name);
+                               modelResultKind(variable), variable->name);
     }
 
     /* Transition state */
@@ -1428,56 +1356,52 @@ fmi2Status fmi2GetString(fmi2Component c, const fmi2ValueReference vr[], size_t 
 /**
  * Perform a simulation step: x(t) -> x(t + communicationStepSize)
  *
+ * The step itself is computed by simulateTo() (include/simulation.h), the
+ * FMI-agnostic orchestrator: the sub-steps, the integrator contract, the
+ * finiteness checks, the rollback and the outputs at the end of the step.
+ * This function adds what belongs to FMI: it checks the master's arguments
+ * against the FMU, maps the result to an FMI status and keeps the state
+ * machine.
+ *
  * Implementation notes:
  * - Supports variable communication step sizes (not all tools do)
  * - Validates that the internal clock matches the environment clock. A
- *   difference up to rounding (roundingTolerance()) or up to
+ *   difference up to rounding (timeRoundingTolerance()) or up to
  *   CLOCK_WARNING_FRACTION of the step size passes silently; a larger one
- *   up to timeTolerance() is accepted with fmi2Warning, and the FMU continues
- *   from currentCommunicationPoint; beyond that the call fails with fmi2Error
+ *   up to timeTolerance() is accepted with fmi2Warning; beyond that the call
+ *   fails with fmi2Error
+ * - The FMU continues from currentCommunicationPoint: "The calling
+ *   environment defines the communication points" (FMI 2.0, section 4.2.2).
+ *   The clock is set to it before simulateTo() saves the start of the step,
+ *   so a discarded step rolls back to currentCommunicationPoint, which
+ *   fmi2LastSuccessfulTime then reports: the end of the last successful step
+ *   in the master's time
  * - Refuses to step beyond the stop time of the experiment (if defined)
  * - Inputs are held constant during the step
  * - If a variable was set since the last step, the calculated parameters are
  *   recomputed first, so that the state equation sees them up to date
- * - The model owns the time: model->time is the internal clock
- * - Enforces the integrator contract (integrateFn in model.h): after every
- *   sub-step model->time must be its end, up to INTEGRATOR_TIME_FRACTION of
- *   the sub-step or rounding (roundingTolerance()). Otherwise the integrator
- *   is broken: the function fails with fmi2Error, the model keeps the values
- *   the integrator left, and the outputs are recomputed from them when read
- * - Computes outputs and local variables after integration via getOutputs()
+ * - The step ends exactly at currentCommunicationPoint + communicationStepSize,
+ *   so rounding errors do not accumulate over the steps, and the outputs are
+ *   evaluated exactly at the communication point
  *
- * Numerical failure (FMI 2.0, section 4.2.3: "fmi2Discard ... the slave
- * computed successfully only a subinterval of the communication step"):
- * - The model data are saved to model->stepStart before the first sub-step
- *   (preallocated, no allocation during the step)
- * - After every sub-step the states are checked. If one is NaN or infinite,
- *   the model is restored to currentCommunicationPoint, the function returns
- *   fmi2Discard and the FMU enters stateStepFailed
- * - After the last sub-step the Real outputs and Real local variables are
- *   checked the same way. This also lets a model without states discard a step
+ * Results of simulateTo():
+ * - SIM_OK: fmi2OK, or fmi2Warning after a clock difference
+ * - SIM_DISCARD, a numerical failure (FMI 2.0, section 4.2.2: "fmi2Discard
+ *   ... the slave computed successfully only a subinterval of the
+ *   communication step"): a state, a Real output or a Real local variable
+ *   became NaN or infinite. The model is back at currentCommunicationPoint
+ *   (not at the last good sub-step), the function returns fmi2Discard and the
+ *   FMU enters stateStepFailed. From there the master can read variables and
+ *   the status, go back with fmi2SetFMUstate, terminate or reset; fmi2DoStep
+ *   is refused. fmi2Discard is only used for numerical failure, never to stop
+ *   at an event
+ * - SIM_ERROR (too many sub-steps, or an integrator that breaks its
+ *   contract): fmi2Error with the reason. The model keeps the values it has,
+ *   and the outputs are recomputed from them when read. A clock difference is
+ *   not reported then, so a rejected call only reports its error
  * - Outputs computed outside fmi2DoStep (when read after a set, or in
  *   fmi2ExitInitializationMode) are not checked: FMI 2.0 has no fmi2Discard
  *   for these functions, and the next step discards
- * - The rollback goes to the communication point and not to the last good
- *   sub-step, so fmi2LastSuccessfulTime is currentCommunicationPoint and the
- *   outputs are those of that point
- * - From stateStepFailed the master can read variables and the status, go
- *   back with fmi2SetFMUstate, terminate or reset. fmi2DoStep is refused
- * - fmi2Discard is only used for numerical failure, never to stop at an event
- *
- * Sub-stepping algorithm:
- * - The communication step is divided into the smallest number of equal
- *   sub-steps that are not larger than the model's maxStepSize:
- *   numberOfSteps = ceil(communicationStepSize / maxStepSize)
- * - SUBSTEP_TOLERANCE keeps rounding in the division from adding a step
- *   (0.3 / 0.1 must give 3 steps, not 4)
- * - Every sub-step starts at currentCommunicationPoint + k * actualStepSize,
- *   computed from the integer k, so rounding errors do not accumulate over
- *   the sub-steps
- * - The internal clock is set to the end of the step as seen by the
- *   integration tool, so rounding errors do not accumulate over the steps
- *   either, and the outputs are evaluated exactly at the communication point
  */
 fmi2Status fmi2DoStep(
     fmi2Component c,
@@ -1514,29 +1438,12 @@ fmi2Status fmi2DoStep(
                                currentCommunicationPoint, nextCommunicationPoint, myfmu2->stopTime);
     }
 
-    /* Calculate sub-stepping scheme */
-    fmi2Real numberOfSteps = ceil(communicationStepSize / model->def->maxStepSize - SUBSTEP_TOLERANCE);
-    if (numberOfSteps < 1.0) {
-        numberOfSteps = 1.0;
-    }
-    if (numberOfSteps > MAX_NUMBER_OF_SUBSTEPS) {
-        return enterErrorState(myfmu2, "communicationStepSize %.16g needs too many integration steps.",
-                               communicationStepSize);
-    }
-    fmi2Real actualStepSize = communicationStepSize / numberOfSteps;
-
-    /* A clock difference beyond rounding is accepted, but reported: the FMU
-       continues from the environment's clock. Checked after all arguments are
-       validated, so that a rejected call only reports its error */
-    fmi2Status status = fmi2OK;
-    fmi2Real clockDifference = fabs(model->time - currentCommunicationPoint);
-    if (clockDifference > fmax(CLOCK_WARNING_FRACTION * communicationStepSize, roundingTolerance(model->time))) {
-        logWarningMessage(myfmu2, "FMU internal clock (%.16g) differs from environment clock (%.16g) by %.3g, "
-                                  "%.3g of the step size. The FMU continues from the environment clock.",
-                          model->time, currentCommunicationPoint, clockDifference,
-                          clockDifference / communicationStepSize);
-        status = fmi2Warning;
-    }
+    /* A clock difference beyond rounding is accepted, but reported once the
+       step is computed, so that a rejected call only reports its error */
+    fmi2Real internalClock = model->time;
+    fmi2Real clockDifference = fabs(internalClock - currentCommunicationPoint);
+    fmi2Boolean reportClockDifference =
+        clockDifference > fmax(CLOCK_WARNING_FRACTION * communicationStepSize, timeRoundingTolerance(internalClock));
 
     /* A parameter set since the last step may change the calculated
        parameters, which the state equation may use */
@@ -1544,64 +1451,35 @@ fmi2Status fmi2DoStep(
         computeCalculatedParameters(model);
     }
 
-    /* Remember the communication point to roll back a failed step */
-    saveModelData(model, model->stepStart);
+    /* The master defines the communication points: continue from its clock */
+    model->time = currentCommunicationPoint;
+    simStatus result = simulateTo(model, nextCommunicationPoint);
 
-    /* Perform sub-steps */
-    for (size_t k = 0; k < (size_t)numberOfSteps; k++) {
-        fmi2Real subStepStart = currentCommunicationPoint + (fmi2Real)k * actualStepSize;
-        model->time = subStepStart;
-        model->getStateDerivatives(model);
-        model->integrate(model, actualStepSize);
-
-        /* Enforce the integrator contract: on return model->time is t + h. A
-         * violation is a programming error, not a numerical failure. The model is
-         * left as the integrator left it (for diagnosis); the outputs are marked
-         * stale, so that values read in the error state match the other variables */
-        fmi2Real expectedTime = subStepStart + actualStepSize;
-        if (!(fabs(model->time - expectedTime) <=
-              fmax(INTEGRATOR_TIME_FRACTION * actualStepSize, roundingTolerance(expectedTime)))) {
-            myfmu2->outputsAreStale = fmi2True;
-            return enterErrorState(myfmu2, "The integrator left model->time at %.16g instead of %.16g "
-                                           "(t + h). See the integrator contract in include/model.h.",
-                                   model->time, expectedTime);
-        }
-
-        /* Discard the step if the integration diverged */
-        size_t failed = firstNonFiniteState(model);
-        if (failed < model->def->numberOfStates) {
-            fmi2Real failureTime = model->time;
-            restoreModelData(model, model->stepStart);
-            return discardStep(myfmu2,
-                               "State '%s' is not finite at t = %.16g. Step from %.16g to %.16g discarded, "
-                               "FMU rolled back to %.16g.",
-                               stateName(model->def, failed), failureTime, currentCommunicationPoint,
-                               nextCommunicationPoint, model->time);
-        }
+    if (result == SIM_ERROR) {
+        /* The model is left as simulateTo() left it (for diagnosis); the
+           outputs are marked stale, so that values read in the error state
+           match the other variables */
+        myfmu2->outputsAreStale = fmi2True;
+        return enterErrorState(myfmu2, "%s", model->message);
     }
 
-    /* Update internal clock */
-    model->time = nextCommunicationPoint;
-
-    /* Compute outputs and locals; discard the step if one of them cannot be
-     * evaluated. They are marked as up to date only after the check, so that
-     * a rollback leaves their blocks and the stale flag all at t_k */
-    model->getOutputs(model);
-
-    size_t failedResult = firstNonFiniteResult(model);
-    if (failedResult < model->def->numberOfVariables) {
-        const modelVariable* failed = &model->def->variables[failedResult];
-        restoreModelData(model, model->stepStart);
-        return discardStep(myfmu2,
-                           "%s '%s' is not finite at t = %.16g. Step from %.16g to %.16g discarded, "
-                           "FMU rolled back to %.16g.",
-                           resultKind(failed), failed->name, nextCommunicationPoint,
-                           currentCommunicationPoint, nextCommunicationPoint, model->time);
+    if (reportClockDifference) {
+        logWarningMessage(myfmu2, "FMU internal clock (%.16g) differs from environment clock (%.16g) by %.3g, "
+                                  "%.3g of the step size. The FMU continues from the environment clock.",
+                          internalClock, currentCommunicationPoint, clockDifference,
+                          clockDifference / communicationStepSize);
     }
+
+    if (result == SIM_DISCARD) {
+        /* The outputs and locals were rolled back with the other model data,
+           so the stale flag still describes them at currentCommunicationPoint */
+        return discardStep(myfmu2, "%s Step from %.16g to %.16g discarded, FMU rolled back to %.16g.",
+                           model->message, currentCommunicationPoint, nextCommunicationPoint, model->time);
+    }
+
     myfmu2->outputsAreStale = fmi2False;
-
     logCallMessage(myfmu2, "FMU stepped to %.16g.", nextCommunicationPoint);
-    return status;
+    return reportClockDifference ? fmi2Warning : fmi2OK;
 }
 
 /**

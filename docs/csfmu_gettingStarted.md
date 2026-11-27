@@ -19,7 +19,7 @@ The Project is structured as follows.
   | `src/models/` | **Model implementations (this is where you will add your model)** |
   | `tests/` | Unit and integration tests |
 
-**Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. Some models also have a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
+**Note on examples:** The C examples (`example_model.c`, `example_fmu.c`) are self-contained references for the `first_order` model and only build when `-DMODEL=first_order` is selected. `example_model.c` simulates the model without FMI: it calls `simulateTo()` (`include/simulation.h`), which advances the model exactly as the FMU does in `fmi2DoStep`. Some models also have a Python example script (`examples/example_<model_name>.py`) that demonstrates simulation with fmpy.
 
 ## Core principle of csfmu
 

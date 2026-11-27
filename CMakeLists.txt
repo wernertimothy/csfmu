@@ -61,6 +61,8 @@ set(FMU_SOURCES
 set(CORE_SOURCES
     src/model.c
     src/integrator.c
+    src/evaluate.c
+    src/simulation.c
 )
 
 # Selected model (FMU-agnostic)

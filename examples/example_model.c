@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "model.h"
+#include "simulation.h"
 #include "first_order/variables.h"
 
 /**
@@ -12,7 +13,9 @@
  * dx = -1/tau*x + k/tau*u
  * y  = x
  * 
- * the integrator is an explicit euler forward
+ * the integrator is an explicit euler forward. simulateTo() advances the
+ * model the same way the FMU does in fmi2DoStep: in integration steps of at
+ * most maxStepSize, with the outputs computed at the end
  */
 
 int main(void) {
@@ -56,15 +59,19 @@ int main(void) {
         /* log current state */
         printf("t = %.2f, y = %.2f\n", model->time, outputs->y);
 
-        /* set model inputs */
+        /* set model inputs (held constant during the step) */
         inputs->u = 1.0;
 
-        /* step in time (the integrator advances model->time by dt) */
-        model->getStateDerivatives(model);
-        model->integrate(model, dt);
-
-        /* write outputs */
-        model->getOutputs(model);
+        /* simulate to the next time and compute the outputs there.
+           simulateTo(model, model->time + dt) would simulate for dt as well,
+           but it adds up the step sizes, so the clock drifts from the grid by
+           rounding over many steps; (n + 1) * dt comes from the integer n and
+           lands exactly on it */
+        if (simulateTo(model, (n + 1) * dt) != SIM_OK) {
+            fprintf(stderr, "Simulation failed at t = %g: %s\n", model->time, model->message);
+            freeModel(model);
+            return 1;
+        }
     }
     /* log current state */
     printf("t = %.2f, y = %.2f\n", model->time, outputs->y);
